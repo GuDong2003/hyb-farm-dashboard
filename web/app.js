@@ -405,7 +405,7 @@
     return `
       <tr class="${row.seed.isVipOnly ? 'vip' : ''} ${best ? 'best' : ''}">
         <td>${row.seed.isVipOnly ? '<span class="vip-badge">VIP</span>' : ''}</td>
-        <td><strong>${escapeHtml(row.seed.name)}</strong><div class="crop-id">${escapeHtml(row.seed.id)}</div></td>
+        <td><div class="crop-cell"><img class="crop-icon" src="./assets/crops/${escapeHtml(row.seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'"/><div><strong>${escapeHtml(row.seed.name)}</strong><div class="crop-id">${escapeHtml(row.seed.id)}</div></div></div></td>
         <td>${formatNumber(row.stats.grossYield, 0)}/${formatNumber(row.stats.netYield, 0)}</td>
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
         <td>${formatNumber(row.stats.dailyCycles, 2)}</td>
