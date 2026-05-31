@@ -293,7 +293,7 @@
 
   function cloudReasonText(reason) {
     if (reason === 'stale_or_existing_data') return '不是更新的数据';
-    if (reason === 'same_refresh_interval') return '仍在当前刷新周期内';
+    if (reason === 'same_refresh_interval') return '当前刷新周期内且价格未变化';
     if (reason === 'too_few_prices') return '价格数量不足';
     if (reason === 'price_out_of_range') return '存在异常价格';
     if (reason === 'future_captured_at') return '时间异常';

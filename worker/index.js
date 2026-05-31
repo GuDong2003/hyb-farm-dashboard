@@ -71,9 +71,11 @@ async function submitPrices(request, env) {
 
   const current = await env.PRICE_DB.prepare('SELECT * FROM default_prices WHERE id = 1').first();
   const currentCapturedAt = current ? Number(current.captured_at) : 0;
+  const currentSignature = current ? String(current.price_signature || '') : '';
+  const samePrices = currentSignature && currentSignature === normalized.priceSignature;
   const rejectionReason = current && normalized.capturedAt <= currentCapturedAt
     ? 'stale_or_existing_data'
-    : current && normalized.capturedAt < currentCapturedAt + REFRESH_INTERVAL_MS
+    : current && samePrices && normalized.capturedAt < currentCapturedAt + REFRESH_INTERVAL_MS
       ? 'same_refresh_interval'
       : '';
   const submitterHash = await hashSubmitter(request);
