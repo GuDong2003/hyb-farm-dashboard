@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         黑白农场助手 价格同步
+// @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong.ccwu.cc/
 // @version      0.3.2
-// @description  为黑白农场助手自动导入黑与白农场实时价格。
+// @description  为 HYB Farm Dashboard 自动导入黑与白农场实时价格。
 // @match        https://hyb.gudong.ccwu.cc/*
 // @match        https://cdk.hybgzs.com/*
 // @run-at       document-idle
@@ -66,7 +66,7 @@
       document.body.appendChild(toast);
     }
     toast.style.background = isError ? '#b91c1c' : '#111827';
-    toast.textContent = `[黑白农场助手] ${message}`;
+    toast.textContent = `[HYB Farm Dashboard] ${message}`;
   }
 
   function gmRequest() {
@@ -197,7 +197,7 @@
     } catch (error) {
       const message = friendlyError(error);
       showToast(`导入失败：${message}`, true);
-      alert(`[黑白农场助手] 导入失败：${message}`);
+      alert(`[HYB Farm Dashboard] 导入失败：${message}`);
     }
   }
 
@@ -213,7 +213,7 @@
     button.id = 'hyb-dashboard-sync-button';
     button.type = 'button';
     button.textContent = '导入实时价格';
-    button.title = '获取当前交易所价格并导入黑白农场助手';
+    button.title = '获取当前交易所价格并导入 HYB Farm Dashboard';
     button.style.cssText = [
       'position:fixed',
       'right:16px',

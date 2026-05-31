@@ -1,6 +1,6 @@
 # HYB Farm Dashboard
 
-黑与白农场收益计算器：自动同步价格，快速比较作物收益与经验效率。
+HYB Farm Dashboard：自动同步价格，快速比较作物收益与经验效率。
 
 ## 社区
 
