@@ -225,7 +225,7 @@
   function installPriceBridgeListener() {
     window.addEventListener('message', (event) => {
       const data = event && event.data;
-      if (event.source !== window || !data || data.type !== BRIDGE_READY) return;
+      if (event.origin !== location.origin || !data || data.type !== BRIDGE_READY) return;
       if (appReady) requestScriptPrices(false);
     });
   }
@@ -247,7 +247,7 @@
 
     const onMessage = (event) => {
       const data = event && event.data;
-      if (event.source !== window || !data || data.type !== BRIDGE_RESPONSE || data.requestId !== requestId) return;
+      if (event.origin !== location.origin || !data || data.type !== BRIDGE_RESPONSE || data.requestId !== requestId) return;
       cleanup();
       if (!data.ok || !data.snapshot) {
         state.status = `自动获取失败：${String(data.error || '脚本未返回价格')}`;

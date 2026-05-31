@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong.ccwu.cc/
-// @version      0.2.0
+// @version      0.3.0
 // @description  为 HYB Farm Dashboard 自动导入黑与白农场实时价格。
+// @match        https://hyb-farm-dashboard.papaya-hey.workers.dev/*
 // @match        https://hyb.gudong.ccwu.cc/*
 // @match        https://cdk.hybgzs.com/*
 // @run-at       document-idle
@@ -14,8 +15,11 @@
   'use strict';
 
   const DASHBOARD_URL = 'https://hyb.gudong.ccwu.cc/';
+  const DASHBOARD_ORIGINS = new Set([
+    'https://hyb.gudong.ccwu.cc',
+    'https://hyb-farm-dashboard.papaya-hey.workers.dev'
+  ]);
   const CDK_ORIGIN = 'https://cdk.hybgzs.com';
-  const DASHBOARD_ORIGIN = new URL(DASHBOARD_URL).origin;
   const UNIT_PER_USD = 500000;
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
@@ -211,7 +215,7 @@
     button.id = 'hyb-dashboard-sync-button';
     button.type = 'button';
     button.textContent = '导入实时价格';
-    button.title = '获取当前商店价格并导入 HYB Farm Dashboard';
+    button.title = '获取当前交易所价格并导入 HYB Farm Dashboard';
     button.style.cssText = [
       'position:fixed',
       'right:16px',
@@ -232,18 +236,18 @@
   }
 
   function installDashboardBridge() {
-    if (location.origin !== DASHBOARD_ORIGIN) return;
+    if (!DASHBOARD_ORIGINS.has(location.origin)) return;
     window.addEventListener('message', async (event) => {
       const data = event && event.data;
-      if (event.source !== window || !data || data.type !== BRIDGE_REQUEST || !data.requestId) return;
+      if (event.origin !== location.origin || !data || data.type !== BRIDGE_REQUEST || !data.requestId) return;
       try {
         const snapshot = await captureShopSnapshot();
-        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: true, snapshot }, DASHBOARD_ORIGIN);
+        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: true, snapshot }, location.origin);
       } catch (error) {
-        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: false, error: friendlyError(error) }, DASHBOARD_ORIGIN);
+        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: false, error: friendlyError(error) }, location.origin);
       }
     });
-    window.postMessage({ type: BRIDGE_READY }, DASHBOARD_ORIGIN);
+    window.postMessage({ type: BRIDGE_READY }, location.origin);
   }
 
   function boot() {
