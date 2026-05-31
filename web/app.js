@@ -324,7 +324,7 @@
       const singleNet = hasPrice ? stats.saleYield * price : null;
       const hourly = hasPrice ? singleNet / stats.growthHours : null;
       const singleDaily = hasPrice ? singleNet * stats.dailyCycles : null;
-      const totalDaily = hasPrice ? totalDailyForSeed(seed, price) : null;
+      const totalDaily = hasPrice ? singleDaily * totalLands() : null;
       const expPerCrop = seed.experienceValue;
       const expPerHarvest = expPerCrop * stats.grossYield;
       const expHourly = expPerHarvest / stats.growthHours;
@@ -336,13 +336,6 @@
     return rows.sort((a, b) => compareRows(a, b, state.config.sortKey) * dir || a.seed.sortOrder - b.seed.sortOrder);
   }
 
-  function totalDailyForSeed(seed, price) {
-    return state.config.landCounts.reduce((sum, count, index) => {
-      if (!count) return sum;
-      const stats = levelStats(seed, index + 1);
-      return sum + count * stats.saleYield * price * stats.dailyCycles;
-    }, 0);
-  }
 
   function totalDailyExpForSeed(seed) {
     const stats = levelStats(seed, state.config.viewLevel);
