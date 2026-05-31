@@ -46,6 +46,15 @@ npm install
 npm run deploy
 ```
 
+For GitHub Actions auto-deploy, add these repository secrets:
+
+```text
+CLOUDFLARE_API_TOKEN
+CLOUDFLARE_ACCOUNT_ID
+```
+
+The workflow lives at `.github/workflows/deploy.yml` and runs on every push to `main`.
+
 `wrangler.toml` publishes the `web/` directory as Worker static assets.
 
 ```toml
