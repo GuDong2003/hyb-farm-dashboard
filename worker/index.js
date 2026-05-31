@@ -20,8 +20,7 @@ const SEED_IDS = [
   'weekly_lotus'
 ];
 
-const CONSENSUS_WINDOW_MS = 5 * 60 * 1000;
-const REQUIRED_CONSENSUS = 2;
+const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const MIN_MATCHED_PRICES = 15;
 const MAX_PRICE_USD = 1000000;
 const FUTURE_TOLERANCE_MS = 10 * 60 * 1000;
@@ -71,9 +70,12 @@ async function submitPrices(request, env) {
   }
 
   const current = await env.PRICE_DB.prepare('SELECT * FROM default_prices WHERE id = 1').first();
-  const staleReason = current && normalized.capturedAt <= Number(current.captured_at)
+  const currentCapturedAt = current ? Number(current.captured_at) : 0;
+  const rejectionReason = current && normalized.capturedAt <= currentCapturedAt
     ? 'stale_or_existing_data'
-    : '';
+    : current && normalized.capturedAt < currentCapturedAt + REFRESH_INTERVAL_MS
+      ? 'same_refresh_interval'
+      : '';
   const submitterHash = await hashSubmitter(request);
 
   const insertResult = await env.PRICE_DB.prepare(`
@@ -101,47 +103,23 @@ async function submitPrices(request, env) {
     normalized.priceSignature,
     normalized.pricesJson,
     submitterHash,
-    staleReason || null
+    rejectionReason || null
   ).run();
 
   const submissionId = Number(insertResult.meta && insertResult.meta.last_row_id) || 0;
 
-  if (staleReason) {
-    return jsonResponse({ ok: true, status: 'rejected', reason: staleReason, submissionId });
+  if (rejectionReason) {
+    return jsonResponse({ ok: true, status: 'rejected', reason: rejectionReason, submissionId });
   }
 
-  if (!current) {
-    await acceptConsensus(env, normalized, submissionId, now);
-    return jsonResponse({
-      ok: true,
-      status: 'accepted',
-      bootstrap: true,
-      submissionId,
-      consensusCount: 1,
-      required: 1,
-      snapshot: snapshotFromNormalized(normalized, now)
-    });
-  }
-
-  const consensus = await consensusFor(env, normalized);
-  if (consensus.distinctSubmitters < REQUIRED_CONSENSUS) {
-    return jsonResponse({
-      ok: true,
-      status: 'pending',
-      submissionId,
-      consensusCount: consensus.distinctSubmitters,
-      required: REQUIRED_CONSENSUS
-    });
-  }
-
-  await acceptConsensus(env, normalized, submissionId, now);
+  await acceptSubmission(env, normalized, submissionId, now);
 
   return jsonResponse({
     ok: true,
     status: 'accepted',
+    mode: current ? 'new_refresh_interval' : 'bootstrap',
     submissionId,
-    consensusCount: consensus.distinctSubmitters,
-    required: REQUIRED_CONSENSUS,
+    refreshIntervalMs: REFRESH_INTERVAL_MS,
     snapshot: snapshotFromNormalized(normalized, now)
   });
 }
@@ -176,7 +154,7 @@ function normalizeSubmission(body, now) {
   return {
     ok: true,
     capturedAt,
-    capturedBucket: Math.floor(capturedAt / CONSENSUS_WINDOW_MS),
+    capturedBucket: Math.floor(capturedAt / REFRESH_INTERVAL_MS),
     source: String(snapshot.source || 'dashboard-upload').slice(0, 64),
     matchedCount,
     totalCount: SEED_IDS.length,
@@ -186,44 +164,15 @@ function normalizeSubmission(body, now) {
   };
 }
 
-async function consensusFor(env, normalized) {
-  const row = await env.PRICE_DB.prepare(`
-    SELECT
-      COUNT(*) AS submissions,
-      COUNT(DISTINCT submitter_hash) AS distinct_submitters
-    FROM price_submissions
-    WHERE rejection_reason IS NULL
-      AND captured_bucket = ?
-      AND price_signature = ?
-      AND captured_at BETWEEN ? AND ?
-  `).bind(
-    normalized.capturedBucket,
-    normalized.priceSignature,
-    normalized.capturedAt - CONSENSUS_WINDOW_MS,
-    normalized.capturedAt + CONSENSUS_WINDOW_MS
-  ).first();
-
-  return {
-    submissions: Number(row && row.submissions) || 0,
-    distinctSubmitters: Number(row && row.distinct_submitters) || 0
-  };
-}
-
-async function acceptConsensus(env, normalized, submissionId, now) {
+async function acceptSubmission(env, normalized, submissionId, now) {
   await env.PRICE_DB.batch([
     env.PRICE_DB.prepare(`
       UPDATE price_submissions
       SET accepted = 1, accepted_at = ?
-      WHERE rejection_reason IS NULL
-        AND captured_bucket = ?
-        AND price_signature = ?
-        AND captured_at BETWEEN ? AND ?
+      WHERE id = ?
     `).bind(
       now,
-      normalized.capturedBucket,
-      normalized.priceSignature,
-      normalized.capturedAt - CONSENSUS_WINDOW_MS,
-      normalized.capturedAt + CONSENSUS_WINDOW_MS
+      submissionId
     ),
     env.PRICE_DB.prepare(`
       INSERT INTO default_prices (

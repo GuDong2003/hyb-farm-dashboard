@@ -78,6 +78,7 @@
       prices: { shop: defaultPrices() },
       previousPrices: { shop: {} },
       lastImportedAt: 0,
+      cloudDefaultAt: 0,
       historyCount: 0,
       error: ''
     };
@@ -216,16 +217,17 @@
   }
 
   async function loadCloudDefaultPrices() {
-    if (hasShopPrices()) return;
     try {
       const response = await fetch(CLOUD_DEFAULT_ENDPOINT, { headers: { accept: 'application/json' }, cache: 'no-store' });
       if (!response.ok) return;
       const data = await response.json();
       const snapshot = data && data.snapshot;
       const prices = snapshot && snapshot.prices && snapshot.prices.shop;
+      const cloudCapturedAt = Number(snapshot && snapshot.capturedAt) || 0;
+      if (cloudCapturedAt) state.cloudDefaultAt = cloudCapturedAt;
       if (!prices || hasShopPrices()) return;
       state.prices.shop = cleanPriceMap(prices);
-      state.lastImportedAt = Number(snapshot.capturedAt) || state.lastImportedAt;
+      state.lastImportedAt = cloudCapturedAt || state.lastImportedAt;
       state.config.source = 'shop';
       state.status = `使用云端默认价格：${formatTime(state.lastImportedAt)}。`;
       saveState();
@@ -255,6 +257,7 @@
 
   function queueCloudSubmission(snapshot) {
     submitSnapshotToCloud(snapshot).then((result) => {
+      rememberCloudDefault(result);
       const text = cloudSubmissionStatusText(result);
       if (!text) return;
       state.status = `${state.status.replace(/。$/, '')}；${text}`;
@@ -275,14 +278,22 @@
 
   function cloudSubmissionStatusText(result) {
     if (!result || !result.ok) return '';
-    if (result.status === 'accepted') return '云端默认价格已更新。';
-    if (result.status === 'pending') return `云端待对比 ${result.consensusCount || 1}/${result.required || 2}。`;
+    if (result.status === 'accepted') {
+      const capturedAt = Number(result.snapshot && result.snapshot.capturedAt) || 0;
+      return capturedAt ? `云端默认价格已更新：${formatTime(capturedAt)}。` : '云端默认价格已更新。';
+    }
     if (result.status === 'rejected') return `云端未采用：${cloudReasonText(result.reason)}。`;
     return '';
   }
 
+  function rememberCloudDefault(result) {
+    const capturedAt = Number(result && result.snapshot && result.snapshot.capturedAt) || 0;
+    if (capturedAt) state.cloudDefaultAt = capturedAt;
+  }
+
   function cloudReasonText(reason) {
     if (reason === 'stale_or_existing_data') return '不是更新的数据';
+    if (reason === 'same_refresh_interval') return '仍在当前刷新周期内';
     if (reason === 'too_few_prices') return '价格数量不足';
     if (reason === 'price_out_of_range') return '存在异常价格';
     if (reason === 'future_captured_at') return '时间异常';
@@ -528,6 +539,7 @@
         <span><strong>状态</strong> ${escapeHtml(state.status)}</span>
         <span>来源：${sourceLabel()}</span>
         <span>最后导入：${state.lastImportedAt ? formatTime(state.lastImportedAt) : '暂无'}</span>
+        ${state.cloudDefaultAt ? `<span>云端默认：${formatTime(state.cloudDefaultAt)}</span>` : ''}
         ${state.error ? `<span class="bad">${escapeHtml(state.error)}</span>` : ''}
       </section>
       <section class="formula-bar">
@@ -737,6 +749,7 @@
       render();
       try {
         const result = await submitSnapshotToCloud(snapshot);
+        rememberCloudDefault(result);
         state.status = cloudSubmissionStatusText(result) || '云端已收到价格数据。';
       } catch (error) {
         state.status = `云端上传失败：${String(error && error.message || error)}`;
