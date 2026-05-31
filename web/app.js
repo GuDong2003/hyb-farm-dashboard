@@ -60,6 +60,7 @@
         source: 'shop',
         viewLevel: 1,
         cycleMode: 'active',
+        seedMode: 'reserve',
         activeHours: DEFAULT_ACTIVE_HOURS,
         landCounts: [13, 0, 0, 0, 0, 0, 0],
         sortKey: 'totalDaily',
@@ -230,7 +231,8 @@
     const netYield = Math.max(0, grossYield - 1);
     const growthHours = Math.max(0.01, seed.growthHours * Math.max(0.05, 1 - (lv - 1) / 15));
     const dailyCycles = dailyCycleCount(growthHours);
-    return { grossYield, netYield, growthHours, dailyCycles, roi: grossYield ? netYield / grossYield * 100 : 0 };
+    const saleYield = state.config.seedMode === 'enough' ? grossYield : netYield;
+    return { grossYield, netYield, saleYield, growthHours, dailyCycles, roi: grossYield ? saleYield / grossYield * 100 : 0 };
   }
 
   function dailyCycleCount(growthHours) {
@@ -245,7 +247,7 @@
       const price = Number(prices[seed.id]);
       const hasPrice = Number.isFinite(price);
       const stats = levelStats(seed, state.config.viewLevel);
-      const singleNet = hasPrice ? stats.netYield * price : null;
+      const singleNet = hasPrice ? stats.saleYield * price : null;
       const hourly = hasPrice ? singleNet / stats.growthHours : null;
       const singleDaily = hasPrice ? singleNet * stats.dailyCycles : null;
       const totalDaily = hasPrice ? totalDailyForSeed(seed, price) : null;
@@ -264,7 +266,7 @@
     return state.config.landCounts.reduce((sum, count, index) => {
       if (!count) return sum;
       const stats = levelStats(seed, index + 1);
-      return sum + count * stats.netYield * price * stats.dailyCycles;
+      return sum + count * stats.saleYield * price * stats.dailyCycles;
     }, 0);
   }
 
@@ -348,6 +350,10 @@
           <option value="active" ${state.config.cycleMode === 'active' ? 'selected' : ''}>${state.config.activeHours}h 活跃估算</option>
           <option value="full24" ${state.config.cycleMode === 'full24' ? 'selected' : ''}>24h 理论轮转</option>
         </select>
+        <select class="field" id="seedMode">
+          <option value="reserve" ${state.config.seedMode === 'reserve' ? 'selected' : ''}>留种扣 1</option>
+          <option value="enough" ${state.config.seedMode === 'enough' ? 'selected' : ''}>种子充足不扣</option>
+        </select>
       </section>
       <section class="landbar">
         <div class="land-title">我的农场：</div>
@@ -360,6 +366,7 @@
         <span><strong>状态</strong> ${escapeHtml(state.status)}</span>
         <span>来源：${sourceLabel()}</span>
         <span>最后导入：${state.lastImportedAt ? formatTime(state.lastImportedAt) : '暂无'}</span>
+        <span>收益口径：${state.config.seedMode === 'enough' ? '种子充足，不扣留种' : '留种扣 1'}</span>
         <span>经验口径：单个作物经验 × 毛产量 × 总地块数 × 当前等级每天次数</span>
         ${state.error ? `<span class="bad">${escapeHtml(state.error)}</span>` : ''}
       </section>
@@ -382,11 +389,11 @@
           <tr>
             <th>VIP</th>
             <th><button data-sort="name">作物${sortMark('name')}</button></th>
-            <th>产量 毛/净</th>
+            <th>产量 毛/计</th>
             <th><button data-sort="growth">生长(h)${sortMark('growth')}</button></th>
             <th>每天次数</th>
             <th><button data-sort="price">当前售价($)${sortMark('price')}</button></th>
-            <th><button data-sort="singleNet">单次净收益${sortMark('singleNet')}</button></th>
+            <th><button data-sort="singleNet">单次收益${sortMark('singleNet')}</button></th>
             <th><button data-sort="hourly">每小时收益${sortMark('hourly')}</button></th>
             <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
             <th><button data-sort="totalDaily">每天收益(全地)${sortMark('totalDaily')}</button></th>
@@ -409,7 +416,7 @@
       <tr class="${row.seed.isVipOnly ? 'vip' : ''} ${best ? 'best' : ''}">
         <td>${row.seed.isVipOnly ? '<span class="vip-badge">VIP</span>' : ''}</td>
         <td><div class="crop-cell"><img class="crop-icon" src="./assets/crops/${escapeHtml(row.seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'"/><div><strong>${escapeHtml(row.seed.name)}</strong><div class="crop-id">${escapeHtml(row.seed.id)}</div></div></div></td>
-        <td>${formatNumber(row.stats.grossYield, 0)}/${formatNumber(row.stats.netYield, 0)}</td>
+        <td title="毛产量 / 当前收益口径计入产量">${formatNumber(row.stats.grossYield, 0)}/${formatNumber(row.stats.saleYield, 0)}</td>
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
         <td>${formatNumber(row.stats.dailyCycles, 2)}</td>
         <td><input class="price-input" data-price="${escapeHtml(row.seed.id)}" type="number" min="0" step="0.00001" value="${row.price == null ? '' : formatNumber(row.price, 5)}" /></td>
@@ -476,6 +483,8 @@
     });
     const cycle = document.getElementById('cycleMode');
     if (cycle) cycle.addEventListener('change', () => { state.config.cycleMode = cycle.value; saveState(); render(); });
+    const seedMode = document.getElementById('seedMode');
+    if (seedMode) seedMode.addEventListener('change', () => { state.config.seedMode = seedMode.value === 'enough' ? 'enough' : 'reserve'; saveState(); render(); });
     const viewLevel = document.getElementById('viewLevel');
     if (viewLevel) viewLevel.addEventListener('change', () => { state.config.viewLevel = clampInt(viewLevel.value, 1, 7, 1); saveState(); render(); });
     document.querySelectorAll('.land-input').forEach((input) => {
