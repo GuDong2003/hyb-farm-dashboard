@@ -266,7 +266,7 @@
     const timer = window.setTimeout(() => {
       cleanup();
       state.status = hasShopPrices()
-        ? `已使用 ${formatTime(state.lastImportedAt)} 的价格；未检测到脚本自动响应。`
+        ? (state.lastImportedAt ? `使用上次导入价格：${formatTime(state.lastImportedAt)}。` : '使用当前已保存价格。')
         : '未检测到自动导入脚本；安装脚本后会在打开页面时自动获取实时价格。';
       render();
     }, 18000);
