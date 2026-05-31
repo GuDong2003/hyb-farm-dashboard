@@ -55,7 +55,7 @@
   function loadState() {
     const base = {
       view: 'table',
-      status: '等待商店收购价；安装油猴脚本后可抓实时回收价格。',
+      status: '等待商店收购价；安装脚本后可抓实时回收价格。',
       config: {
         source: 'shop',
         viewLevel: 1,
@@ -434,13 +434,13 @@
     return `
       <div class="settings">
         <section class="settings-section">
-          <h2>安装油猴脚本</h2>
+          <h2>安装脚本</h2>
           <div class="settings-body">
             <div class="settings-row">
-              <div class="settings-label">Tampermonkey</div>
+              <div class="settings-label">用户脚本管理器</div>
               <div>
-                <a class="bookmarklet primary" href="./userscripts/hyb-farm-dashboard-capture.user.js">点击安装油猴脚本</a>
-                <p class="settings-copy">安装后打开 cdk.hybgzs.com，页面右下角会出现“同步收购价”按钮。点击后会抓取商店收购价并导入本 Dashboard。</p>
+                <a class="bookmarklet primary" href="./userscripts/hyb-farm-dashboard-capture.user.js">点击安装脚本</a>
+                <p class="settings-copy">安装后打开 <a href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">cdk.hybgzs.com</a>，页面右下角会出现“同步收购价”按钮。点击后会抓取商店收购价并导入本 Dashboard。</p>
               </div>
             </div>
             <div class="settings-row">
