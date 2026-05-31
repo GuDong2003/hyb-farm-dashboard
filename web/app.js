@@ -268,11 +268,8 @@
   }
 
   function totalDailyExpForSeed(seed) {
-    return state.config.landCounts.reduce((sum, count, index) => {
-      if (!count) return sum;
-      const stats = levelStats(seed, index + 1);
-      return sum + count * seed.experienceValue * stats.dailyCycles;
-    }, 0);
+    const stats = levelStats(seed, state.config.viewLevel);
+    return seed.experienceValue * totalLands() * stats.dailyCycles;
   }
 
   function compareRows(a, b, key) {
@@ -361,7 +358,7 @@
         <span><strong>状态</strong> ${escapeHtml(state.status)}</span>
         <span>来源：${sourceLabel()}</span>
         <span>最后导入：${state.lastImportedAt ? formatTime(state.lastImportedAt) : '暂无'}</span>
-        <span>经验口径：每块地每次收获固定经验，不乘产量</span>
+        <span>经验口径：单次经验 × 总地块数 × 当前等级每天次数</span>
         ${state.error ? `<span class="bad">${escapeHtml(state.error)}</span>` : ''}
       </section>
       <section class="table-wrap">
