@@ -69,7 +69,7 @@
       config: {
         source: 'shop',
         viewLevel: 1,
-        cycleMode: 'active',
+        cycleMode: 'full24',
         activeHours: DEFAULT_ACTIVE_HOURS,
         autoRefreshPrices: true,
         autoUploadPrices: false,
@@ -521,6 +521,10 @@
     return state.config.cycleMode === 'full24' ? 24 : Math.max(1, state.config.activeHours);
   }
 
+  function dailyCycleLabel() {
+    return state.config.cycleMode === 'full24' ? '24h理论' : `${state.config.activeHours}h活跃`;
+  }
+
   function compareRows(a, b, key) {
     if (key === 'name') return a.seed.name.localeCompare(b.seed.name, 'zh-CN');
     if (key === 'price') return nullableCompare(a.price, b.price);
@@ -620,9 +624,9 @@
       </section>
       <section class="formula-bar">
         <span class="formula-title">公式</span>
-        <span>收益：Σ(地块数 × (毛产量 - 1) × 售价 × 每天次数)</span>
+        <span>收益：Σ(地块数 × (毛产量 - 1) × 售价 × 每天次数（${dailyCycleLabel()}）)</span>
         <span>单块收获经验：单作物经验 × 作物收获数量</span>
-        <span>每天经验：Σ(地块数 × 单块收获经验 × 每天次数)</span>
+        <span>每天经验：Σ(地块数 × 单块收获经验 × 每天次数（${dailyCycleLabel()}）)</span>
         <span>每小时经验：每天经验 ÷ ${state.config.cycleMode === 'full24' ? '24h' : `${state.config.activeHours}h`}</span>
         <span>等级：收益产量每级 +1/3；生长时间每级 -1/15；经验收获数量固定</span>
       </section>
@@ -647,7 +651,7 @@
             <th><button data-sort="name">作物${sortMark('name')}</button></th>
             <th>产量 毛/卖</th>
             <th><button data-sort="growth">生长(h)${sortMark('growth')}</button></th>
-            <th>每天次数</th>
+            <th>每天次数（${dailyCycleLabel()}）</th>
             <th><button data-sort="price">当前售价($)${sortMark('price')}</button></th>
             <th><button data-sort="priceDelta">价格差${sortMark('priceDelta')}</button></th>
             <th><button data-sort="singleNet">单次收益${sortMark('singleNet')}</button></th>
