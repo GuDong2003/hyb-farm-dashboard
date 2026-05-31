@@ -49,20 +49,15 @@
   }
 
   function defaultPrices() {
-    const prices = {};
-    SEEDS.forEach((seed) => {
-      prices[seed.id] = seed.harvestValueUsd;
-    });
-    return prices;
+    return {};
   }
 
   function loadState() {
     const base = {
       view: 'table',
-      status: '当前使用图鉴基准价；安装 bookmarklet 后可抓实时价格。',
+      status: '等待商店收购价；安装 bookmarklet 后可抓实时回收价格。',
       config: {
-        source: 'baseline',
-        marketMetric: 'min',
+        source: 'shop',
         viewLevel: 1,
         cycleMode: 'active',
         activeHours: DEFAULT_ACTIVE_HOURS,
@@ -70,9 +65,8 @@
         sortKey: 'totalDaily',
         sortDir: 'desc'
       },
-      prices: { baseline: defaultPrices(), shop: {}, market: {} },
-      previousPrices: { shop: {}, market: {} },
-      marketStats: {},
+      prices: { shop: defaultPrices() },
+      previousPrices: { shop: {} },
       lastImportedAt: 0,
       historyCount: 0,
       error: ''
@@ -83,10 +77,9 @@
       const merged = Object.assign({}, base, stored);
       merged.config = Object.assign({}, base.config, stored.config || {});
       merged.config.landCounts = normalizeLandCounts(merged.config.landCounts);
-      merged.prices = Object.assign({}, base.prices, stored.prices || {});
-      merged.prices.baseline = defaultPrices();
-      merged.previousPrices = Object.assign({}, base.previousPrices, stored.previousPrices || {});
-      merged.marketStats = stored.marketStats || {};
+      merged.config.source = 'shop';
+      merged.prices = { shop: cleanPriceMap((stored.prices && stored.prices.shop) || {}) };
+      merged.previousPrices = { shop: cleanPriceMap((stored.previousPrices && stored.previousPrices.shop) || {}) };
       return merged;
     } catch (_) {
       return base;
@@ -98,7 +91,6 @@
       config: state.config,
       prices: state.prices,
       previousPrices: state.previousPrices,
-      marketStats: state.marketStats,
       lastImportedAt: state.lastImportedAt
     }));
   }
@@ -202,14 +194,8 @@
       state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
       state.prices.shop = cleanPriceMap(prices.shop);
     }
-    if (prices.market) {
-      state.previousPrices.market = Object.assign({}, state.prices.market || {});
-      state.prices.market = cleanPriceMap(prices.market);
-      state.marketStats = snapshot.marketStats || state.marketStats || {};
-    }
     state.lastImportedAt = capturedAt;
-    if (prices.market) state.config.source = 'market';
-    else if (prices.shop) state.config.source = 'shop';
+    state.config.source = 'shop';
     snapshot.id = snapshot.id || `snapshot:${capturedAt}`;
     snapshot.capturedAt = capturedAt;
     await putSnapshot(snapshot);
@@ -235,17 +221,7 @@
   }
 
   function priceMap() {
-    if (state.config.source === 'market' && Object.keys(state.marketStats || {}).length) {
-      const metric = state.config.marketMetric;
-      const prices = {};
-      Object.keys(state.marketStats).forEach((seedId) => {
-        const stat = state.marketStats[seedId] || {};
-        const value = Number(stat[metric] != null ? stat[metric] : stat.min);
-        if (Number.isFinite(value)) prices[seedId] = value;
-      });
-      if (Object.keys(prices).length) return prices;
-    }
-    return state.prices[state.config.source] || {};
+    return state.prices.shop || {};
   }
 
   function levelStats(seed, level) {
@@ -368,16 +344,7 @@
         <button class="btn" data-action="export">导出历史</button>
         <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
         <button class="btn warn" data-action="clear-current">清空实时价</button>
-        <select class="field" id="source">
-          <option value="baseline" ${state.config.source === 'baseline' ? 'selected' : ''}>图鉴基准价</option>
-          <option value="shop" ${state.config.source === 'shop' ? 'selected' : ''}>商店收购价</option>
-          <option value="market" ${state.config.source === 'market' ? 'selected' : ''}>市场最低价</option>
-        </select>
-        <select class="field" id="marketMetric" ${state.config.source === 'market' ? '' : 'disabled'}>
-          <option value="min" ${state.config.marketMetric === 'min' ? 'selected' : ''}>最低价</option>
-          <option value="low3Avg" ${state.config.marketMetric === 'low3Avg' ? 'selected' : ''}>低 3 均价</option>
-          <option value="low5Avg" ${state.config.marketMetric === 'low5Avg' ? 'selected' : ''}>低 5 均价</option>
-        </select>
+        <span class="field" style="display:inline-flex;align-items:center;border:0;background:transparent;padding:0;color:#475569;">价格来源：商店收购价</span>
         <select class="field" id="cycleMode">
           <option value="active" ${state.config.cycleMode === 'active' ? 'selected' : ''}>${state.config.activeHours}h 活跃估算</option>
           <option value="full24" ${state.config.cycleMode === 'full24' ? 'selected' : ''}>24h 理论轮转</option>
@@ -467,8 +434,8 @@
             <div class="settings-row">
               <div class="settings-label">Bookmarklet</div>
               <div>
-                <a class="bookmarklet primary" href="${escapeHtml(bookmarklet)}">一键抓取商店+市场</a>
-                <p class="settings-copy">把这个按钮拖到浏览器收藏夹。之后先登录 cdk.hybgzs.com，再点收藏夹里的“一键抓取商店+市场”。</p>
+                <a class="bookmarklet primary" href="${escapeHtml(bookmarklet)}">一键抓取商店收购价</a>
+                <p class="settings-copy">把这个按钮拖到浏览器收藏夹。之后先登录 cdk.hybgzs.com，再点收藏夹里的“一键抓取商店收购价”。</p>
               </div>
             </div>
             <div class="settings-row">
@@ -491,7 +458,7 @@
   function buildBookmarklet() {
     const appUrl = new URL('.', location.href).href;
     const crops = SEEDS.map((seed) => ({ id: seed.id, name: seed.name }));
-    const code = `(async function(){var DEPLOY=${JSON.stringify(appUrl)};var CROPS=${JSON.stringify(crops)};var FACTOR=${UNIT_PER_USD};var box;function say(msg,err){try{if(!box){box=document.createElement('div');box.style.cssText='position:fixed;right:16px;top:16px;z-index:2147483647;max-width:420px;padding:12px 16px;border-radius:8px;background:#111827;color:#fff;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:pre-wrap';document.body.appendChild(box)}box.style.background=err?'#b91c1c':'#111827';box.textContent='[HYB Farm Dashboard] '+msg}catch(_){}}async function fetchJson(url,timeout){var ctrl=new AbortController();var timer=setTimeout(function(){ctrl.abort()},timeout||20000);try{var r=await fetch(url,{credentials:'same-origin',cache:'no-store',headers:{accept:'application/json'},signal:ctrl.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}finally{clearTimeout(timer)}}function b64(json){return btoa(unescape(encodeURIComponent(json))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')}function avg(list){return list.length?list.reduce(function(a,b){return a+b},0)/list.length:null}try{if(!/hybgzs\\.com$/.test(location.hostname)){say('请在 cdk.hybgzs.com 已登录页面运行',true);alert('请在 cdk.hybgzs.com 已登录页面运行');return}var bySeed={};CROPS.forEach(function(c){bySeed[c.id]=true});say('开始抓取商店价...');var shopJson=await fetchJson('/api/farm/recycle/prices',15000);var shop={};(shopJson.data||[]).forEach(function(item){if(!item||!item.seedId||!bySeed[item.seedId])return;var p=Number(item.recyclePrice);if(Number.isFinite(p))shop[item.seedId]=p/FACTOR});say('商店完成，开始扫描市场...');async function page(n){return fetchJson('/api/farm/market?page='+n+'&limit=20',20000)}var first=await page(1);var total=Number(first.pagination&&first.pagination.totalPages)||1;var max=Math.min(total,300);var listings=(first.data||[]).slice();var next=2,done=1;async function worker(){while(next<=max){var pg=next++;var j=await page(pg);if(j.data)listings.push.apply(listings,j.data);done++;say('市场 '+done+'/'+total+' 页，'+listings.length+' 条挂单...')}}var workers=[];for(var i=0;i<Math.min(4,Math.max(0,max-1));i++)workers.push(worker());await Promise.all(workers);var grouped={};listings.forEach(function(item){if(!item||!item.seedId||!bySeed[item.seedId])return;var p=Number(item.pricePerUnit);if(!Number.isFinite(p))return;var v=p/FACTOR;(grouped[item.seedId]||(grouped[item.seedId]=[])).push(v)});var market={},stats={};Object.keys(grouped).forEach(function(seedId){var prices=grouped[seedId].sort(function(a,b){return a-b});stats[seedId]={min:prices[0],low3Avg:avg(prices.slice(0,3)),low5Avg:avg(prices.slice(0,5)),count:prices.length};market[seedId]=prices[0]});var payload={version:1,capturedAt:Date.now(),prices:{shop:shop,market:market},marketStats:stats};say('完成，正在打开 Dashboard...');setTimeout(function(){location.href=DEPLOY+'#snapshot='+b64(JSON.stringify(payload))},600)}catch(e){var msg=e&&e.name==='AbortError'?'请求超时':(e&&e.message||e);say('异常：'+msg,true);alert('抓取失败：'+msg)}})();`;
+    const code = `(async function(){var DEPLOY=${JSON.stringify(appUrl)};var CROPS=${JSON.stringify(crops)};var FACTOR=${UNIT_PER_USD};var box;function say(msg,err){try{if(!box){box=document.createElement('div');box.style.cssText='position:fixed;right:16px;top:16px;z-index:2147483647;max-width:420px;padding:12px 16px;border-radius:8px;background:#111827;color:#fff;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:pre-wrap';document.body.appendChild(box)}box.style.background=err?'#b91c1c':'#111827';box.textContent='[HYB Farm Dashboard] '+msg}catch(_){}}async function fetchJson(url,timeout){var ctrl=new AbortController();var timer=setTimeout(function(){ctrl.abort()},timeout||15000);try{var r=await fetch(url,{credentials:'same-origin',cache:'no-store',headers:{accept:'application/json'},signal:ctrl.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}finally{clearTimeout(timer)}}function b64(json){return btoa(unescape(encodeURIComponent(json))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')}try{if(!/hybgzs\\.com$/.test(location.hostname)){say('请在 cdk.hybgzs.com 已登录页面运行',true);alert('请在 cdk.hybgzs.com 已登录页面运行');return}var bySeed={};CROPS.forEach(function(c){bySeed[c.id]=true});say('开始抓取商店收购价...');var shopJson=await fetchJson('/api/farm/recycle/prices',15000);var shop={};(shopJson.data||[]).forEach(function(item){if(!item||!item.seedId||!bySeed[item.seedId])return;var p=Number(item.recyclePrice);if(Number.isFinite(p))shop[item.seedId]=p/FACTOR});var payload={version:1,capturedAt:Date.now(),prices:{shop:shop}};say('商店收购价完成，正在打开 Dashboard...');setTimeout(function(){location.href=DEPLOY+'#snapshot='+b64(JSON.stringify(payload))},500)}catch(e){var msg=e&&e.name==='AbortError'?'请求超时':(e&&e.message||e);say('异常：'+msg,true);alert('抓取失败：'+msg)}})();`;
     return 'javascript:' + code;
   }
 
@@ -505,10 +472,6 @@
     document.querySelectorAll('[data-action]').forEach((button) => {
       button.addEventListener('click', handleAction);
     });
-    const source = document.getElementById('source');
-    if (source) source.addEventListener('change', () => { state.config.source = source.value; saveState(); render(); });
-    const metric = document.getElementById('marketMetric');
-    if (metric) metric.addEventListener('change', () => { state.config.marketMetric = metric.value; saveState(); render(); });
     const cycle = document.getElementById('cycleMode');
     if (cycle) cycle.addEventListener('change', () => { state.config.cycleMode = cycle.value; saveState(); render(); });
     const viewLevel = document.getElementById('viewLevel');
@@ -536,7 +499,7 @@
     });
     document.querySelectorAll('[data-price]').forEach((input) => {
       input.addEventListener('change', () => {
-        const map = state.prices[state.config.source] || (state.prices[state.config.source] = {});
+        const map = state.prices.shop || (state.prices.shop = {});
         const value = Number(input.value);
         if (Number.isFinite(value) && value >= 0) map[input.dataset.price] = value;
         else delete map[input.dataset.price];
@@ -553,8 +516,8 @@
     const action = event.currentTarget.dataset.action;
     if (action === 'settings') { state.view = 'settings'; render(); return; }
     if (action === 'clear-current') {
-      if (state.config.source !== 'baseline') state.prices[state.config.source] = {};
-      state.status = '已清空当前实时价格。';
+      state.prices.shop = {};
+      state.status = '已清空商店收购价。';
       saveState(); render(); return;
     }
     if (action === 'clear-history') {
@@ -568,7 +531,7 @@
 
   async function exportJson() {
     const snapshots = await allSnapshots();
-    const payload = { app: 'HYB Farm Dashboard', exportedAt: new Date().toISOString(), state: { config: state.config, prices: state.prices, marketStats: state.marketStats, lastImportedAt: state.lastImportedAt }, snapshots };
+    const payload = { app: 'HYB Farm Dashboard', exportedAt: new Date().toISOString(), state: { config: state.config, prices: state.prices, lastImportedAt: state.lastImportedAt }, snapshots };
     const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -591,7 +554,6 @@
       if (json.state) {
         state.config = Object.assign(state.config, json.state.config || {});
         state.prices = Object.assign(state.prices, json.state.prices || {});
-        state.marketStats = json.state.marketStats || state.marketStats;
         state.lastImportedAt = Number(json.state.lastImportedAt) || state.lastImportedAt;
       } else if (json.prices) {
         await applySnapshot(json);
@@ -612,9 +574,7 @@
   }
 
   function sourceLabel() {
-    if (state.config.source === 'shop') return '商店收购价';
-    if (state.config.source === 'market') return `市场${state.config.marketMetric === 'low3Avg' ? '低 3 均价' : state.config.marketMetric === 'low5Avg' ? '低 5 均价' : '最低价'}`;
-    return '图鉴基准价';
+    return '商店收购价';
   }
 
   function clampInt(value, min, max, fallback) {
