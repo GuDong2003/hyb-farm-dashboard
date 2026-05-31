@@ -426,6 +426,7 @@
     return `
       <section class="toolbar">
         <button class="btn primary" data-action="settings">导入</button>
+        <button class="btn" data-action="refresh-prices" title="通过用户脚本立即获取交易所价格">↻ 立即刷新</button>
         <button class="btn" data-action="export">导出历史</button>
         <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
         <button class="btn warn" data-action="clear-current">清空实时价</button>
@@ -623,6 +624,13 @@
   async function handleAction(event) {
     const action = event.currentTarget.dataset.action;
     if (action === 'settings') { state.view = 'settings'; render(); return; }
+    if (action === 'refresh-prices') {
+      if (!requestScriptPrices(true)) {
+        state.status = priceBridgeRequest ? '正在刷新实时价格，请稍候。' : '无法刷新实时价格。';
+        render();
+      }
+      return;
+    }
     if (action === 'clear-current') {
       state.prices.shop = {};
       state.status = '已清空交易所价格。';
