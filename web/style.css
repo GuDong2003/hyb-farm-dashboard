@@ -49,6 +49,18 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .nav button.active { color: var(--blue); background: var(--blue-soft); font-weight: 750; }
 .status { margin-left: auto; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.github-link {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  color: #334155;
+  text-decoration: none;
+}
+.github-link:hover { color: #0f172a; background: #e2e8f0; }
+.github-link svg { width: 20px; height: 20px; fill: currentColor; }
 
 .main { padding: 14px 18px 22px; }
 .toolbar, .landbar, .notice, .formula-bar, .settings-section {
