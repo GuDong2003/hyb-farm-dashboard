@@ -1,6 +1,6 @@
-# HYB Farm Dashboard
+# 黑白农场助手
 
-黑与白农场收益计算器：自动同步价格，快速比较作物收益与经验效率。
+自动同步价格，快速比较作物收益与经验效率。
 
 This project is planned as a Cloudflare Workers static web app with small API endpoints for shared price defaults. It helps users analyze crop market prices, profit, experience efficiency, and farm rankings without uploading private farm data to the server.
 

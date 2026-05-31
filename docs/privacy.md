@@ -1,6 +1,6 @@
 # Privacy Architecture
 
-HYB Farm Dashboard is designed to avoid uploading private farm/account data.
+黑白农场助手用于在不上传私有农场/账号数据的前提下分析作物价格、收益和经验效率。
 
 ## Local Browser Flow
 

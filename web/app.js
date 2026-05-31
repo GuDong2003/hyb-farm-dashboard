@@ -568,7 +568,7 @@
     app.innerHTML = `
       <div class="app">
         <header class="topbar">
-          <div class="brand">HYB Farm Dashboard</div>
+          <div class="brand">黑白农场助手</div>
           <nav class="nav">
             <button data-view="table" class="${state.view === 'table' ? 'active' : ''}">收益表</button>
             <button data-view="settings" class="${state.view === 'settings' ? 'active' : ''}">设置</button>
@@ -906,7 +906,7 @@
 
   async function exportJson() {
     const snapshots = await allSnapshots();
-    const payload = { app: 'HYB Farm Dashboard', exportedAt: new Date().toISOString(), state: { config: state.config, prices: state.prices, lastImportedAt: state.lastImportedAt }, snapshots };
+    const payload = { app: '黑白农场助手', exportedAt: new Date().toISOString(), state: { config: state.config, prices: state.prices, lastImportedAt: state.lastImportedAt }, snapshots };
     const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
