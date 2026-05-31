@@ -86,6 +86,7 @@
       merged.config.landCounts = normalizeLandCounts(merged.config.landCounts);
       merged.config.source = 'shop';
       delete merged.config.seedMode;
+      if (merged.config.sortKey === 'expPerCrop') merged.config.sortKey = 'expPerHarvest';
       merged.prices = { shop: cleanPriceMap((stored.prices && stored.prices.shop) || {}) };
       merged.previousPrices = { shop: cleanPriceMap((stored.previousPrices && stored.previousPrices.shop) || {}) };
       return merged;
@@ -323,6 +324,7 @@
       const hasPrice = Number.isFinite(price);
       const hasPreviousPrice = Number.isFinite(previousPrice);
       const priceDelta = hasPrice && hasPreviousPrice ? price - previousPrice : null;
+      const priceDeltaRate = priceDelta != null && previousPrice > 0 ? (priceDelta / previousPrice) * 100 : null;
       const stats = levelStats(seed, state.config.viewLevel);
       const singleNet = hasPrice ? stats.saleYield * price : null;
       const hourly = hasPrice ? singleNet / stats.growthHours : null;
@@ -333,7 +335,7 @@
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
       const expHourly = expTotalDaily / dailyHourBasis();
-      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, stats, singleNet, hourly, singleDaily, totalDaily, expPerCrop, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
+      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, priceDeltaRate, stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
     });
     const dir = state.config.sortDir === 'asc' ? 1 : -1;
     return rows.sort((a, b) => compareRows(a, b, state.config.sortKey) * dir || a.seed.sortOrder - b.seed.sortOrder);
@@ -367,7 +369,6 @@
     if (key === 'singleNet') return nullableCompare(a.singleNet, b.singleNet);
     if (key === 'hourly') return nullableCompare(a.hourly, b.hourly);
     if (key === 'singleDaily') return nullableCompare(a.singleDaily, b.singleDaily);
-    if (key === 'expPerCrop') return nullableCompare(a.expPerCrop, b.expPerCrop);
     if (key === 'expPerHarvest') return nullableCompare(a.expPerHarvest, b.expPerHarvest);
     if (key === 'expHourly') return nullableCompare(a.expHourly, b.expHourly);
     if (key === 'expTotalDaily') return nullableCompare(a.expTotalDaily, b.expTotalDaily);
@@ -476,16 +477,15 @@
           <tr>
             <th>类型</th>
             <th><button data-sort="name">作物${sortMark('name')}</button></th>
-            <th>产量 毛/计</th>
+            <th>产量 毛/卖</th>
             <th><button data-sort="growth">生长(h)${sortMark('growth')}</button></th>
             <th>每天次数</th>
             <th><button data-sort="price">当前售价($)${sortMark('price')}</button></th>
             <th><button data-sort="priceDelta">价格差${sortMark('priceDelta')}</button></th>
             <th><button data-sort="singleNet">单次收益${sortMark('singleNet')}</button></th>
-            <th><button data-sort="hourly">每小时收益${sortMark('hourly')}</button></th>
+            <th><button data-sort="hourly">每小时收益(单地)${sortMark('hourly')}</button></th>
             <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
-            <th><button data-sort="totalDaily">每天收益(全地)${sortMark('totalDaily')}</button></th>
-            <th><button data-sort="expPerCrop">单个作物经验${sortMark('expPerCrop')}</button></th>
+            <th><button data-sort="totalDaily">每天收益(全地混合)${sortMark('totalDaily')}</button></th>
             <th><button data-sort="expPerHarvest">单块收获经验${sortMark('expPerHarvest')}</button></th>
             <th><button data-sort="expHourly">每小时经验(全地)${sortMark('expHourly')}</button></th>
             <th><button data-sort="expTotalDaily">每天经验(全地)${sortMark('expTotalDaily')}</button></th>
@@ -498,13 +498,22 @@
     `;
   }
 
-  function renderPriceDelta(delta) {
+  function renderPriceDelta(delta, rate) {
     const value = Number(delta);
-    if (!Number.isFinite(value)) return '<span class="price-delta flat"><span class="price-delta-value">-</span><span class="price-delta-arrow"></span></span>';
-    if (Math.abs(value) < 0.000005) return '<span class="price-delta flat"><span class="price-delta-value">$0</span><span class="price-delta-arrow">→</span></span>';
+    const percent = Number(rate);
+    const percentText = Number.isFinite(percent) ? `${formatNumber(Math.abs(percent), 1)}%` : '';
+    if (!Number.isFinite(value)) return '<span class="price-delta flat"><span class="price-delta-value">-</span><span class="price-delta-arrow"></span><span class="price-delta-percent"></span></span>';
+    if (Math.abs(value) < 0.000005) return `<span class="price-delta flat"><span class="price-delta-value">$0</span><span class="price-delta-arrow">→</span><span class="price-delta-percent">${percentText || '0%'}</span></span>`;
     const direction = value > 0 ? 'up' : 'down';
     const arrow = value > 0 ? '↑' : '↓';
-    return `<span class="price-delta ${direction}"><span class="price-delta-value">${formatUsd(Math.abs(value))}</span><span class="price-delta-arrow">${arrow}</span></span>`;
+    return `<span class="price-delta ${direction}"><span class="price-delta-value">${formatUsd(Math.abs(value))}</span><span class="price-delta-arrow">${arrow}</span><span class="price-delta-percent">${percentText}</span></span>`;
+  }
+
+  function priceDeltaTitle(row) {
+    if (!Number.isFinite(Number(row.priceDelta))) return '没有上次价格可比较';
+    const rate = Number(row.priceDeltaRate);
+    const rateText = Number.isFinite(rate) ? `，涨跌幅：${formatSignedPercent(rate)}` : '';
+    return `上次价格：${formatUsd(row.previousPrice)}，当前价格：${formatUsd(row.price)}，差值：${formatSignedUsd(row.priceDelta)}${rateText}`;
   }
 
   function renderRow(row, best) {
@@ -512,16 +521,15 @@
       <tr class="${row.seed.isVipOnly ? 'vip' : ''} ${best ? 'best' : ''}">
         <td><span class="seed-vip-badge ${row.seed.isVipOnly ? 'vip' : 'normal'}">${row.seed.isVipOnly ? 'VIP' : '普通'}</span></td>
         <td title="${escapeHtml(row.seed.id)}"><div class="crop-cell"><img class="crop-icon" src="./assets/crops/${escapeHtml(row.seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'"/><strong class="crop-name">${escapeHtml(row.seed.name)}</strong></div></td>
-        <td title="毛产量 / 当前收益口径计入产量">${formatNumber(row.stats.grossYield, 0)}/${formatNumber(row.stats.saleYield, 0)}</td>
+        <td title="毛产量 / 卖出产量（扣 1 留种）">${formatNumber(row.stats.grossYield, 0)}/${formatNumber(row.stats.saleYield, 0)}</td>
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
         <td>${formatNumber(row.stats.dailyCycles, 2)}</td>
         <td><input class="price-input" data-price="${escapeHtml(row.seed.id)}" type="number" min="0" step="0.00001" value="${row.price == null ? '' : formatNumber(row.price, 5)}" /></td>
-        <td>${renderPriceDelta(row.priceDelta)}</td>
+        <td title="${escapeHtml(priceDeltaTitle(row))}">${renderPriceDelta(row.priceDelta, row.priceDeltaRate)}</td>
         <td>${formatUsd(row.singleNet)}</td>
         <td>${formatUsd(row.hourly)}</td>
         <td>${formatUsd(row.singleDaily)}</td>
         <td class="blue">${formatUsd(row.totalDaily)}</td>
-        <td>${formatNumber(row.expPerCrop, 0)}</td>
         <td>${formatNumber(row.expPerHarvest, 0)}</td>
         <td class="green">${formatNumber(row.expHourly, 2)}</td>
         <td class="green">${formatNumber(row.expTotalDaily, 2)}</td>
@@ -703,6 +711,20 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return '-';
     return `$${formatNumber(number, 2)}`;
+  }
+
+  function formatSignedUsd(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '-';
+    const sign = number > 0 ? '+' : number < 0 ? '-' : '';
+    return `${sign}$${formatNumber(Math.abs(number), 2)}`;
+  }
+
+  function formatSignedPercent(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '-';
+    const sign = number > 0 ? '+' : number < 0 ? '-' : '';
+    return `${sign}${formatNumber(Math.abs(number), 2)}%`;
   }
 
   function formatNumber(value, digits) {
