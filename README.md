@@ -15,7 +15,7 @@ Private farm data stays local by default:
 5. The dashboard imports that snapshot into the user's local IndexedDB.
 6. The dashboard can submit crop price snapshots to the Cloudflare Worker for public default-price validation when the user clicks upload or enables auto-upload after import.
 
-The D1 database stores crop prices, capture timestamps, submission metadata, and accepted default snapshots. A valid upload becomes the default when there is no current default, when its capture time belongs to a newer refresh interval than the current default, or when the prices differ from the current default. Users without the userscript can still receive cloud default price refreshes; local script or manual prices remain higher priority. It does not store private farm layout or account data. URL fragments are not sent in HTTP requests, so `#snapshot=...` still stays inside the user's browser unless the dashboard explicitly submits the crop prices for validation.
+The D1 database stores crop prices, capture timestamps, submission metadata, and accepted default snapshots. A valid upload becomes the default when there is no current default, when its capture time belongs to a newer refresh interval than the current default, or when the prices differ from the current default. Users without the userscript can still receive cloud default price refreshes. The dashboard compares local and cloud capture times and uses the newer price snapshot. It does not store private farm layout or account data. URL fragments are not sent in HTTP requests, so `#snapshot=...` still stays inside the user's browser unless the dashboard explicitly submits the crop prices for validation.
 
 ## Planned Features
 

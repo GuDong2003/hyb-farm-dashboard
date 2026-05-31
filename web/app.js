@@ -234,9 +234,8 @@
         state.cloudDefaultAt = cloudCapturedAt;
         changed = true;
       }
-      const canUseCloud = !hasShopPrices() || state.priceOrigin === 'cloud';
       const isNewerCloud = cloudCapturedAt && cloudCapturedAt > (Number(state.lastImportedAt) || 0);
-      if (prices && canUseCloud && isNewerCloud) {
+      if (prices && (!hasShopPrices() || isNewerCloud)) {
         state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
         state.prices.shop = cleanPriceMap(prices);
         state.lastImportedAt = cloudCapturedAt;
@@ -686,7 +685,7 @@
           </div>
           <div class="toggle-list">
             <label class="toggle-row">
-              <span class="toggle-text"><strong>每小时自动刷新</strong><small>优先脚本实时价；无脚本时刷新云端默认价</small></span>
+              <span class="toggle-text"><strong>每小时自动刷新</strong><small>对比本地与云端时间，自动采用较新的价格</small></span>
               <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
             <label class="toggle-row">
@@ -764,6 +763,7 @@
         const value = Number(input.value);
         if (Number.isFinite(value) && value >= 0) map[input.dataset.price] = value;
         else delete map[input.dataset.price];
+        state.lastImportedAt = Date.now();
         state.priceOrigin = 'manual';
         state.status = '已手动更新当前价格。';
         saveState();
