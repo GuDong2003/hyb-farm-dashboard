@@ -110,6 +110,19 @@ async function submitPrices(request, env) {
     return jsonResponse({ ok: true, status: 'rejected', reason: staleReason, submissionId });
   }
 
+  if (!current) {
+    await acceptConsensus(env, normalized, submissionId, now);
+    return jsonResponse({
+      ok: true,
+      status: 'accepted',
+      bootstrap: true,
+      submissionId,
+      consensusCount: 1,
+      required: 1,
+      snapshot: snapshotFromNormalized(normalized, now)
+    });
+  }
+
   const consensus = await consensusFor(env, normalized);
   if (consensus.distinctSubmitters < REQUIRED_CONSENSUS) {
     return jsonResponse({
