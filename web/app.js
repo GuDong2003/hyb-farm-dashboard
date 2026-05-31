@@ -632,35 +632,59 @@
   function renderSettings() {
     return `
       <div class="settings">
-        <section class="settings-section">
-          <h2>安装脚本</h2>
-          <div class="settings-body">
-            <div class="settings-row">
-              <div class="settings-label">用户脚本管理器</div>
-              <div>
-                <a class="bookmarklet primary" href="./userscripts/hyb-farm-dashboard-capture.user.js">点击安装脚本</a>
-                <p class="settings-copy">安装后打开本 Dashboard 会自动获取实时价格；打开 <a href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">cdk.hybgzs.com</a> 时，页面右下角也会出现“导入实时价格”按钮。</p>
-              </div>
+        <section class="settings-panel settings-wide">
+          <div class="settings-head">
+            <div>
+              <h2>价格导入</h2>
+              <p>安装用户脚本后，可从 CDK 获取交易所实时价格。</p>
             </div>
-            <div class="settings-row">
-              <div class="settings-label">自动刷新</div>
-              <label class="settings-copy"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /> 每小时自动获取实时价格</label>
-            </div>
-            <div class="settings-row">
-              <div class="settings-label">云端上传</div>
-              <label class="settings-copy"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /> 导入后自动上传云端校验</label>
-            </div>
-            <div class="settings-row">
-              <div class="settings-label">隐私</div>
-              <div class="settings-copy">价格数据通过脚本消息或 <span class="code">#snapshot</span> 带回本页，fragment 不会发送给 Cloudflare。只有点击“上传云端”或开启自动上传时，价格和时间才会提交到云端校验池。</div>
+            <div class="settings-actions">
+              <a class="bookmarklet primary" href="./userscripts/hyb-farm-dashboard-capture.user.js">安装脚本</a>
+              <a class="bookmarklet" href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">打开 CDK</a>
             </div>
           </div>
         </section>
-        <section class="settings-section">
-          <h2>数据管理</h2>
-          <div class="settings-body">
-            <div class="settings-row"><div class="settings-label">历史记录</div><div>${state.historyCount} 条</div></div>
-            <div class="settings-row"><div class="settings-label">操作</div><div><button class="btn" data-action="export">导出历史</button> <button class="btn warn" data-action="clear-history">清空历史</button></div></div>
+
+        <section class="settings-panel">
+          <div class="settings-head compact">
+            <div>
+              <h2>自动化</h2>
+              <p>控制刷新和云端提交。</p>
+            </div>
+          </div>
+          <div class="toggle-list">
+            <label class="toggle-row">
+              <span class="toggle-text"><strong>每小时自动刷新</strong><small>通过用户脚本获取交易所价格</small></span>
+              <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
+            </label>
+            <label class="toggle-row">
+              <span class="toggle-text"><strong>导入后自动上传</strong><small>关闭时只有手动上传才进入云端校验</small></span>
+              <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-panel">
+          <div class="settings-head compact">
+            <div>
+              <h2>隐私与云端</h2>
+              <p>本地优先，云端只保存价格快照。</p>
+            </div>
+          </div>
+          <div class="settings-copy">价格数据通过脚本消息或 <span class="code">#snapshot</span> 带回本页。只有点击“上传云端”或开启自动上传时，价格和时间才会提交到云端校验池。</div>
+        </section>
+
+        <section class="settings-panel settings-wide settings-manage">
+          <div class="settings-head compact">
+            <div>
+              <h2>数据管理</h2>
+              <p>管理本地历史与备份。</p>
+            </div>
+            <div class="history-stat"><span>历史</span><strong>${state.historyCount}</strong><span>条</span></div>
+          </div>
+          <div class="settings-actions">
+            <button class="btn" data-action="export">导出历史</button>
+            <button class="btn warn" data-action="clear-history">清空历史</button>
           </div>
         </section>
       </div>
