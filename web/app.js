@@ -70,6 +70,7 @@
         cycleMode: 'active',
         activeHours: DEFAULT_ACTIVE_HOURS,
         autoRefreshPrices: true,
+        autoUploadPrices: false,
         landCounts: [13, 0, 0, 0, 0, 0, 0],
         sortKey: 'totalDaily',
         sortDir: 'desc'
@@ -211,7 +212,7 @@
     snapshot.capturedAt = capturedAt;
     await putSnapshot(snapshot);
     saveState();
-    queueCloudSubmission(snapshot);
+    if (state.config.autoUploadPrices) queueCloudSubmission(snapshot);
   }
 
   async function loadCloudDefaultPrices() {
@@ -634,8 +635,12 @@
               <label class="settings-copy"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /> 每小时自动获取实时价格</label>
             </div>
             <div class="settings-row">
+              <div class="settings-label">云端上传</div>
+              <label class="settings-copy"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /> 导入后自动上传云端校验</label>
+            </div>
+            <div class="settings-row">
               <div class="settings-label">隐私</div>
-              <div class="settings-copy">价格数据通过脚本消息或 <span class="code">#snapshot</span> 带回本页，fragment 不会发送给 Cloudflare。导入后会保存到你当前浏览器的 IndexedDB。</div>
+              <div class="settings-copy">价格数据通过脚本消息或 <span class="code">#snapshot</span> 带回本页，fragment 不会发送给 Cloudflare。只有点击“上传云端”或开启自动上传时，价格和时间才会提交到云端校验池。</div>
             </div>
           </div>
         </section>
@@ -703,6 +708,13 @@
       saveState();
       render();
       if (state.config.autoRefreshPrices) window.setTimeout(() => requestScriptPrices(false), 0);
+    });
+    const autoUploadPrices = document.getElementById('autoUploadPrices');
+    if (autoUploadPrices) autoUploadPrices.addEventListener('change', () => {
+      state.config.autoUploadPrices = autoUploadPrices.checked;
+      state.status = state.config.autoUploadPrices ? '已开启导入后自动上传云端。' : '已关闭导入后自动上传云端。';
+      saveState();
+      render();
     });
     const importFile = document.getElementById('importFile');
     if (importFile) importFile.addEventListener('change', importJsonFile);

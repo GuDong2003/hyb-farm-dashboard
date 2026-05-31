@@ -13,7 +13,7 @@ Private farm data stays local by default:
 3. The userscript reads same-origin farm APIs in the user's browser.
 4. The userscript redirects back to this dashboard with a `#snapshot=...` URL fragment or responds through the in-page bridge.
 5. The dashboard imports that snapshot into the user's local IndexedDB.
-6. The dashboard may submit crop price snapshots to the Cloudflare Worker for public default-price validation.
+6. The dashboard can submit crop price snapshots to the Cloudflare Worker for public default-price validation when the user clicks upload or enables auto-upload after import.
 
 The D1 database stores crop prices, capture timestamps, submission metadata, and accepted default snapshots. It does not store private farm layout or account data. URL fragments are not sent in HTTP requests, so `#snapshot=...` still stays inside the user's browser unless the dashboard explicitly submits the crop prices for validation.
 
