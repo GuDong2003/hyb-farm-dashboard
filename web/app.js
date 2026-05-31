@@ -530,6 +530,7 @@
     if (key === 'price') return nullableCompare(a.price, b.price);
     if (key === 'priceDelta') return nullableCompare(a.priceDelta, b.priceDelta);
     if (key === 'growth') return nullableCompare(a.stats.growthHours, b.stats.growthHours);
+    if (key === 'dailyCycles') return nullableCompare(a.stats.dailyCycles, b.stats.dailyCycles);
     if (key === 'singleNet') return nullableCompare(a.singleNet, b.singleNet);
     if (key === 'hourly') return nullableCompare(a.hourly, b.hourly);
     if (key === 'singleDaily') return nullableCompare(a.singleDaily, b.singleDaily);
@@ -651,7 +652,7 @@
             <th><button data-sort="name">作物${sortMark('name')}</button></th>
             <th>产量 毛/卖</th>
             <th><button data-sort="growth">生长(h)${sortMark('growth')}</button></th>
-            <th>每天次数（${dailyCycleLabel()}）</th>
+            <th><button data-sort="dailyCycles">每天次数 ${dailyCycleLabel()}${sortMark('dailyCycles')}</button></th>
             <th><button data-sort="price">当前售价($)${sortMark('price')}</button></th>
             <th><button data-sort="priceDelta">价格差${sortMark('priceDelta')}</button></th>
             <th><button data-sort="singleNet">单次收益${sortMark('singleNet')}</button></th>
