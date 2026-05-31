@@ -232,7 +232,7 @@
     const growthHours = Math.max(0.01, seed.growthHours * Math.max(0.05, 1 - (lv - 1) / 15));
     const dailyCycles = dailyCycleCount(growthHours);
     const saleYield = state.config.seedMode === 'enough' ? grossYield : netYield;
-    return { grossYield, netYield, saleYield, growthHours, dailyCycles, roi: grossYield ? saleYield / grossYield * 100 : 0 };
+    return { grossYield, netYield, saleYield, growthHours, dailyCycles };
   }
 
   function dailyCycleCount(growthHours) {
@@ -286,7 +286,6 @@
     if (key === 'expPerHarvest') return nullableCompare(a.expPerHarvest, b.expPerHarvest);
     if (key === 'expHourly') return nullableCompare(a.expHourly, b.expHourly);
     if (key === 'expTotalDaily') return nullableCompare(a.expTotalDaily, b.expTotalDaily);
-    if (key === 'roi') return nullableCompare(a.stats.roi, b.stats.roi);
     return nullableCompare(a.totalDaily, b.totalDaily);
   }
 
@@ -401,7 +400,6 @@
             <th><button data-sort="expPerHarvest">单次收获经验${sortMark('expPerHarvest')}</button></th>
             <th><button data-sort="expHourly">每小时经验${sortMark('expHourly')}</button></th>
             <th><button data-sort="expTotalDaily">每天经验(全地)${sortMark('expTotalDaily')}</button></th>
-            <th><button data-sort="roi">ROI${sortMark('roi')}</button></th>
           </tr>
         </thead>
         <tbody>
@@ -428,7 +426,6 @@
         <td>${formatNumber(row.expPerHarvest, 0)}</td>
         <td class="green">${formatNumber(row.expHourly, 2)}</td>
         <td class="green">${formatNumber(row.expTotalDaily, 2)}</td>
-        <td>${formatPercent(row.stats.roi)}</td>
       </tr>
     `;
   }
@@ -604,12 +601,6 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return '-';
     return number.toFixed(digits == null ? 2 : digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
-  }
-
-  function formatPercent(value) {
-    const number = Number(value);
-    if (!Number.isFinite(number)) return '-';
-    return `${formatNumber(number, 1)}%`;
   }
 
   function formatTime(value) {
