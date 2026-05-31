@@ -1,9 +1,8 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong.ccwu.cc/
-// @version      0.3.0
+// @version      0.3.1
 // @description  为 HYB Farm Dashboard 自动导入黑与白农场实时价格。
-// @match        https://hyb-farm-dashboard.papaya-hey.workers.dev/*
 // @match        https://hyb.gudong.ccwu.cc/*
 // @match        https://cdk.hybgzs.com/*
 // @run-at       document-idle
@@ -16,8 +15,7 @@
 
   const DASHBOARD_URL = 'https://hyb.gudong.ccwu.cc/';
   const DASHBOARD_ORIGINS = new Set([
-    'https://hyb.gudong.ccwu.cc',
-    'https://hyb-farm-dashboard.papaya-hey.workers.dev'
+    'https://hyb.gudong.ccwu.cc'
   ]);
   const CDK_ORIGIN = 'https://cdk.hybgzs.com';
   const UNIT_PER_USD = 500000;
