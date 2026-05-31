@@ -66,7 +66,6 @@
         source: 'shop',
         viewLevel: 1,
         cycleMode: 'active',
-        seedMode: 'reserve',
         activeHours: DEFAULT_ACTIVE_HOURS,
         autoRefreshPrices: true,
         landCounts: [13, 0, 0, 0, 0, 0, 0],
@@ -86,6 +85,7 @@
       merged.config = Object.assign({}, base.config, stored.config || {});
       merged.config.landCounts = normalizeLandCounts(merged.config.landCounts);
       merged.config.source = 'shop';
+      delete merged.config.seedMode;
       merged.prices = { shop: cleanPriceMap((stored.prices && stored.prices.shop) || {}) };
       merged.previousPrices = { shop: cleanPriceMap((stored.previousPrices && stored.previousPrices.shop) || {}) };
       return merged;
@@ -305,7 +305,7 @@
     const netYield = Math.max(0, grossYield - 1);
     const growthHours = Math.max(0.01, seed.growthHours * Math.max(0.05, 1 - (lv - 1) / 15));
     const dailyCycles = dailyCycleCount(growthHours);
-    const saleYield = state.config.seedMode === 'enough' ? grossYield : netYield;
+    const saleYield = netYield;
     return { grossYield, netYield, saleYield, growthHours, dailyCycles };
   }
 
@@ -324,7 +324,7 @@
       const singleNet = hasPrice ? stats.saleYield * price : null;
       const hourly = hasPrice ? singleNet / stats.growthHours : null;
       const singleDaily = hasPrice ? singleNet * stats.dailyCycles : null;
-      const totalDaily = hasPrice ? singleDaily * totalLands() : null;
+      const totalDaily = hasPrice ? totalDailyForSeed(seed, price) : null;
       const expPerCrop = seed.experienceValue;
       const expPerHarvest = expPerCrop * stats.grossYield;
       const expHourly = expPerHarvest / stats.growthHours;
@@ -336,10 +336,20 @@
     return rows.sort((a, b) => compareRows(a, b, state.config.sortKey) * dir || a.seed.sortOrder - b.seed.sortOrder);
   }
 
+  function totalDailyForSeed(seed, price) {
+    return state.config.landCounts.reduce((sum, count, index) => {
+      if (!count) return sum;
+      const stats = levelStats(seed, index + 1);
+      return sum + count * stats.saleYield * price * stats.dailyCycles;
+    }, 0);
+  }
 
   function totalDailyExpForSeed(seed) {
-    const stats = levelStats(seed, state.config.viewLevel);
-    return seed.experienceValue * stats.grossYield * totalLands() * stats.dailyCycles;
+    return state.config.landCounts.reduce((sum, count, index) => {
+      if (!count) return sum;
+      const stats = levelStats(seed, index + 1);
+      return sum + count * seed.experienceValue * stats.grossYield * stats.dailyCycles;
+    }, 0);
   }
 
   function compareRows(a, b, key) {
@@ -411,14 +421,10 @@
         <button class="btn" data-action="export">导出历史</button>
         <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
         <button class="btn warn" data-action="clear-current">清空实时价</button>
-        <span class="field" style="display:inline-flex;align-items:center;border:0;background:transparent;padding:0;color:#475569;">价格来源：商店收购价</span>
+        <span class="field" style="display:inline-flex;align-items:center;border:0;background:transparent;padding:0;color:#475569;">价格来源：交易所售价</span>
         <select class="field" id="cycleMode">
           <option value="active" ${state.config.cycleMode === 'active' ? 'selected' : ''}>${state.config.activeHours}h 活跃估算</option>
           <option value="full24" ${state.config.cycleMode === 'full24' ? 'selected' : ''}>24h 理论轮转</option>
-        </select>
-        <select class="field" id="seedMode">
-          <option value="reserve" ${state.config.seedMode === 'reserve' ? 'selected' : ''}>留种扣 1</option>
-          <option value="enough" ${state.config.seedMode === 'enough' ? 'selected' : ''}>种子充足不扣</option>
         </select>
       </section>
       <section class="landbar">
@@ -432,8 +438,8 @@
         <span><strong>状态</strong> ${escapeHtml(state.status)}</span>
         <span>来源：${sourceLabel()}</span>
         <span>最后导入：${state.lastImportedAt ? formatTime(state.lastImportedAt) : '暂无'}</span>
-        <span>收益口径：${state.config.seedMode === 'enough' ? '种子充足，不扣留种' : '留种扣 1'}</span>
-        <span>经验口径：单个作物经验 × 收获数量 × 总地块数 × 当前等级每天次数</span>
+        <span>收益口径：每块每轮扣 1 留种；全地按各等级地块混合计算</span>
+        <span>经验口径：不扣留种；全地按各等级地块混合计算</span>
         ${state.error ? `<span class="bad">${escapeHtml(state.error)}</span>` : ''}
       </section>
       <section class="summary">
@@ -543,8 +549,6 @@
     });
     const cycle = document.getElementById('cycleMode');
     if (cycle) cycle.addEventListener('change', () => { state.config.cycleMode = cycle.value; saveState(); render(); });
-    const seedMode = document.getElementById('seedMode');
-    if (seedMode) seedMode.addEventListener('change', () => { state.config.seedMode = seedMode.value === 'enough' ? 'enough' : 'reserve'; saveState(); render(); });
     const viewLevel = document.getElementById('viewLevel');
     if (viewLevel) viewLevel.addEventListener('change', () => { state.config.viewLevel = clampInt(viewLevel.value, 1, 7, 1); saveState(); render(); });
     document.querySelectorAll('.land-input').forEach((input) => {
@@ -596,7 +600,7 @@
     if (action === 'settings') { state.view = 'settings'; render(); return; }
     if (action === 'clear-current') {
       state.prices.shop = {};
-      state.status = '已清空商店收购价。';
+      state.status = '已清空交易所价格。';
       saveState(); render(); return;
     }
     if (action === 'clear-history') {
@@ -653,7 +657,7 @@
   }
 
   function sourceLabel() {
-    return '商店收购价';
+    return '交易所售价';
   }
 
   function clampInt(value, min, max, fallback) {
