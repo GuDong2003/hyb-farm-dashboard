@@ -39,12 +39,22 @@ docs/         Architecture and privacy notes
 
 ## Deployment Target
 
-Cloudflare Pages, static-only by default.
+Cloudflare Workers Static Assets, static-only by default.
 
-```text
-Framework preset: None
-Build command: empty
-Build output directory: web
+```bash
+npm install
+npm run deploy
+```
+
+`wrangler.toml` publishes the `web/` directory as Worker static assets.
+
+```toml
+name = "hyb-farm-dashboard"
+compatibility_date = "2026-05-31"
+
+[assets]
+directory = "./web"
+not_found_handling = "single-page-application"
 ```
 
 No server-side user data storage is planned for the default mode.
