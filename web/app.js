@@ -61,7 +61,7 @@
   function loadState() {
     const base = {
       view: 'table',
-      status: '等待价格数据；启用自动导入后可自动获取实时价格。',
+      status: '等待价格数据；点击导入可设置实时价格自动获取。',
       config: {
         source: 'shop',
         viewLevel: 1,
@@ -414,7 +414,7 @@
   function renderTableView(rows, bestRevenue, bestExpDay, bestExpHour) {
     return `
       <section class="toolbar">
-        <button class="btn primary" data-action="settings">启用自动导入</button>
+        <button class="btn primary" data-action="settings">导入</button>
         <button class="btn" data-action="export">导出历史</button>
         <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
         <button class="btn warn" data-action="clear-current">清空实时价</button>
