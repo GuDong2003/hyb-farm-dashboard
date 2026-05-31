@@ -2,7 +2,7 @@
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong.ccwu.cc/
 // @version      0.1.0
-// @description  在黑与白农场页面抓取商店收购价，并导入 HYB Farm Dashboard。
+// @description  在黑与白农场页面导入实时价格到 HYB Farm Dashboard。
 // @match        https://cdk.hybgzs.com/*
 // @run-at       document-idle
 // @grant        none
@@ -86,9 +86,9 @@
 
   async function syncShopPrices() {
     try {
-      showToast('正在抓取商店收购价...');
+      showToast('正在获取实时价格...');
       const json = await fetchJson('/api/farm/recycle/prices', 15000);
-      if (json && json.success === false) throw new Error('商店收购价接口返回失败');
+      if (json && json.success === false) throw new Error('价格接口返回失败');
 
       const shop = {};
       const list = Array.isArray(json && json.data) ? json.data : [];
@@ -124,8 +124,8 @@
     const button = document.createElement('button');
     button.id = 'hyb-dashboard-sync-button';
     button.type = 'button';
-    button.textContent = '同步收购价';
-    button.title = '抓取商店收购价并导入 HYB Farm Dashboard';
+    button.textContent = '导入实时价格';
+    button.title = '获取当前商店价格并导入 HYB Farm Dashboard';
     button.style.cssText = [
       'position:fixed',
       'right:16px',
