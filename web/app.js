@@ -397,7 +397,7 @@
             <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
             <th><button data-sort="totalDaily">每天收益(全地)${sortMark('totalDaily')}</button></th>
             <th><button data-sort="expPerCrop">单个作物经验${sortMark('expPerCrop')}</button></th>
-            <th><button data-sort="expPerHarvest">单次收获经验${sortMark('expPerHarvest')}</button></th>
+            <th><button data-sort="expPerHarvest">单块收获经验${sortMark('expPerHarvest')}</button></th>
             <th><button data-sort="expHourly">每小时经验${sortMark('expHourly')}</button></th>
             <th><button data-sort="expTotalDaily">每天经验(全地)${sortMark('expTotalDaily')}</button></th>
           </tr>
