@@ -53,7 +53,7 @@ CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
 
-The workflow lives at `.github/workflows/deploy.yml` and runs on every push to `main`.
+The workflow lives at `.github/workflows/deploy.yml` and runs on every push to `main`. See `docs/deployment.md` for Cloudflare token setup.
 
 `wrangler.toml` publishes the `web/` directory as Worker static assets.
 
