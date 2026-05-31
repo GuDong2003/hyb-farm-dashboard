@@ -460,7 +460,7 @@
       <table>
         <thead>
           <tr>
-            <th>VIP</th>
+            <th>类型</th>
             <th><button data-sort="name">作物${sortMark('name')}</button></th>
             <th>产量 毛/计</th>
             <th><button data-sort="growth">生长(h)${sortMark('growth')}</button></th>
@@ -486,7 +486,7 @@
   function renderRow(row, best) {
     return `
       <tr class="${row.seed.isVipOnly ? 'vip' : ''} ${best ? 'best' : ''}">
-        <td>${row.seed.isVipOnly ? '<span class="vip-badge">VIP</span>' : ''}</td>
+        <td>${row.seed.isVipOnly ? 'VIP' : '普通'}</td>
         <td title="${escapeHtml(row.seed.id)}"><div class="crop-cell"><img class="crop-icon" src="./assets/crops/${escapeHtml(row.seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'"/><strong class="crop-name">${escapeHtml(row.seed.name)}</strong></div></td>
         <td title="毛产量 / 当前收益口径计入产量">${formatNumber(row.stats.grossYield, 0)}/${formatNumber(row.stats.saleYield, 0)}</td>
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
