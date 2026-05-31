@@ -522,7 +522,7 @@
   }
 
   function dailyCycleLabel() {
-    return state.config.cycleMode === 'full24' ? '24h理论' : `${state.config.activeHours}h活跃`;
+    return state.config.cycleMode === 'full24' ? '24h' : `${state.config.activeHours}h`;
   }
 
   function compareRows(a, b, key) {
