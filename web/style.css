@@ -180,9 +180,11 @@ tr:hover td { background: #eef6ff; }
 .red { color: var(--red); font-weight: 800; }
 .muted { color: var(--muted); }
 .price-input { width: 90px; height: 28px; padding: 0 7px; border: 1px solid #cbd5e1; border-radius: 5px; text-align: right; background: #fff; }
-.price-delta { display: inline-flex; justify-content: center; align-items: center; min-width: 64px; gap: 3px; font-weight: 850; font-variant-numeric: tabular-nums; }
-.price-delta.up { color: var(--green); }
-.price-delta.down { color: var(--red); }
+.price-delta { display: inline-grid; grid-template-columns: 12px 1fr; align-items: center; column-gap: 4px; width: 72px; font-weight: 850; font-variant-numeric: tabular-nums; }
+.price-delta-arrow { text-align: center; }
+.price-delta-value { text-align: right; }
+.price-delta.up { color: var(--red); }
+.price-delta.down { color: var(--green); }
 .price-delta.flat { color: var(--muted); }
 
 .summary {
