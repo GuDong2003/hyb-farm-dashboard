@@ -44,6 +44,8 @@ Cloudflare Workers Static Assets, static-only by default.
 
 ```bash
 npm install
+cp wrangler.example.toml wrangler.toml
+# Fill in the D1 database name/id in wrangler.toml.
 npm run deploy
 ```
 
@@ -52,19 +54,12 @@ For GitHub Actions auto-deploy, add these repository secrets:
 ```text
 CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
+CLOUDFLARE_D1_DATABASE_NAME
+CLOUDFLARE_D1_DATABASE_ID
 ```
 
 The workflow lives at `.github/workflows/deploy.yml` and runs on every push to `main`. See `docs/deployment.md` for Cloudflare token setup.
 
-`wrangler.toml` publishes the `web/` directory as Worker static assets.
-
-```toml
-name = "hyb-farm-dashboard"
-compatibility_date = "2026-05-31"
-
-[assets]
-directory = "./web"
-not_found_handling = "single-page-application"
-```
+`wrangler.example.toml` documents the Worker static asset and D1 bindings without committing private deployment identifiers.
 
 No private farm data is stored server-side. Cloudflare D1 stores public crop price submissions and the accepted default price snapshot.

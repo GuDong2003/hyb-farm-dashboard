@@ -6,12 +6,14 @@ This project is configured for Cloudflare Workers Static Assets.
 
 ```bash
 npm install
+cp wrangler.example.toml wrangler.toml
+# Fill in REPLACE_WITH_D1_DATABASE_NAME and REPLACE_WITH_D1_DATABASE_ID.
 npx wrangler login
-npx wrangler d1 migrations apply hyb-farm-dashboard-db --remote
+npx wrangler d1 migrations apply <your-d1-database-name> --remote
 npm run deploy
 ```
 
-If `wrangler login` times out, run it again in an interactive terminal and finish the browser authorization flow.
+`wrangler.toml` is intentionally ignored by Git so real Cloudflare resource identifiers are not committed. If `wrangler login` times out, run it again in an interactive terminal and finish the browser authorization flow.
 
 ## GitHub Actions Deployment
 
@@ -30,6 +32,8 @@ Add these repository secrets in GitHub:
 ```text
 CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
+CLOUDFLARE_D1_DATABASE_NAME
+CLOUDFLARE_D1_DATABASE_ID
 ```
 
 Path:
@@ -51,6 +55,17 @@ or after logging in locally:
 ```bash
 npx wrangler whoami
 ```
+
+### Cloudflare D1 Database
+
+Create or inspect the D1 database with Wrangler:
+
+```bash
+npx wrangler d1 create <your-d1-database-name>
+npx wrangler d1 list
+```
+
+Use the database name and ID as local `wrangler.toml` values and as the GitHub secrets `CLOUDFLARE_D1_DATABASE_NAME` and `CLOUDFLARE_D1_DATABASE_ID`.
 
 ### Cloudflare API Token
 

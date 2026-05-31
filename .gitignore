@@ -1,4 +1,5 @@
 node_modules/
+wrangler.toml
 dist/
 build/
 .wrangler/

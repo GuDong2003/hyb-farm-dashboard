@@ -10,5 +10,5 @@ run_worker_first = ["/api/*"]
 
 [[d1_databases]]
 binding = "PRICE_DB"
-database_name = "hyb-farm-dashboard-db"
-database_id = "99d3fde9-4d9e-4370-ad9d-dcfb2827815d"
+database_name = "REPLACE_WITH_D1_DATABASE_NAME"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"

@@ -59,4 +59,4 @@ CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
 
-Cloudflare resource names and IDs in `wrangler.toml` are identifiers, not credentials, but they can be moved to a private deployment config if you prefer not to publish infrastructure identifiers.
+Real Cloudflare resource names and IDs are kept out of the public repository. Use `wrangler.example.toml` as the template, keep local `wrangler.toml` ignored, and store production D1 identifiers in GitHub Actions secrets.
