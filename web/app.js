@@ -319,7 +319,10 @@
     const prices = priceMap();
     const rows = SEEDS.map((seed) => {
       const price = Number(prices[seed.id]);
+      const previousPrice = Number((state.previousPrices.shop || {})[seed.id]);
       const hasPrice = Number.isFinite(price);
+      const hasPreviousPrice = Number.isFinite(previousPrice);
+      const priceDelta = hasPrice && hasPreviousPrice ? price - previousPrice : null;
       const stats = levelStats(seed, state.config.viewLevel);
       const singleNet = hasPrice ? stats.saleYield * price : null;
       const hourly = hasPrice ? singleNet / stats.growthHours : null;
@@ -330,7 +333,7 @@
       const expHourly = expPerHarvest / stats.growthHours;
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
-      return { seed, price: hasPrice ? price : null, stats, singleNet, hourly, singleDaily, totalDaily, expPerCrop, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
+      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, stats, singleNet, hourly, singleDaily, totalDaily, expPerCrop, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
     });
     const dir = state.config.sortDir === 'asc' ? 1 : -1;
     return rows.sort((a, b) => compareRows(a, b, state.config.sortKey) * dir || a.seed.sortOrder - b.seed.sortOrder);
@@ -355,6 +358,7 @@
   function compareRows(a, b, key) {
     if (key === 'name') return a.seed.name.localeCompare(b.seed.name, 'zh-CN');
     if (key === 'price') return nullableCompare(a.price, b.price);
+    if (key === 'priceDelta') return nullableCompare(a.priceDelta, b.priceDelta);
     if (key === 'growth') return nullableCompare(a.stats.growthHours, b.stats.growthHours);
     if (key === 'singleNet') return nullableCompare(a.singleNet, b.singleNet);
     if (key === 'hourly') return nullableCompare(a.hourly, b.hourly);
@@ -469,6 +473,7 @@
             <th><button data-sort="growth">生长(h)${sortMark('growth')}</button></th>
             <th>每天次数</th>
             <th><button data-sort="price">当前售价($)${sortMark('price')}</button></th>
+            <th><button data-sort="priceDelta">价格差${sortMark('priceDelta')}</button></th>
             <th><button data-sort="singleNet">单次收益${sortMark('singleNet')}</button></th>
             <th><button data-sort="hourly">每小时收益${sortMark('hourly')}</button></th>
             <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
@@ -486,6 +491,15 @@
     `;
   }
 
+  function renderPriceDelta(delta) {
+    const value = Number(delta);
+    if (!Number.isFinite(value)) return '<span class="price-delta flat">-</span>';
+    if (Math.abs(value) < 0.000005) return '<span class="price-delta flat">→ $0</span>';
+    const direction = value > 0 ? 'up' : 'down';
+    const arrow = value > 0 ? '↑' : '↓';
+    return `<span class="price-delta ${direction}">${arrow} ${formatUsd(Math.abs(value))}</span>`;
+  }
+
   function renderRow(row, best) {
     return `
       <tr class="${row.seed.isVipOnly ? 'vip' : ''} ${best ? 'best' : ''}">
@@ -495,6 +509,7 @@
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
         <td>${formatNumber(row.stats.dailyCycles, 2)}</td>
         <td><input class="price-input" data-price="${escapeHtml(row.seed.id)}" type="number" min="0" step="0.00001" value="${row.price == null ? '' : formatNumber(row.price, 5)}" /></td>
+        <td>${renderPriceDelta(row.priceDelta)}</td>
         <td>${formatUsd(row.singleNet)}</td>
         <td>${formatUsd(row.hourly)}</td>
         <td>${formatUsd(row.singleDaily)}</td>
