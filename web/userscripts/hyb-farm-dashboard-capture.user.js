@@ -1,18 +1,25 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong.ccwu.cc/
-// @version      0.1.0
-// @description  在黑与白农场页面导入实时价格到 HYB Farm Dashboard。
+// @version      0.2.0
+// @description  为 HYB Farm Dashboard 自动导入黑与白农场实时价格。
+// @match        https://hyb.gudong.ccwu.cc/*
 // @match        https://cdk.hybgzs.com/*
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      cdk.hybgzs.com
 // ==/UserScript==
 
 (function () {
   'use strict';
 
   const DASHBOARD_URL = 'https://hyb.gudong.ccwu.cc/';
+  const CDK_ORIGIN = 'https://cdk.hybgzs.com';
+  const DASHBOARD_ORIGIN = new URL(DASHBOARD_URL).origin;
   const UNIT_PER_USD = 500000;
+  const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
+  const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
+  const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
   const SEED_IDS = new Set([
     'carrot',
     'tomato',
@@ -60,12 +67,24 @@
     toast.textContent = `[HYB Farm Dashboard] ${message}`;
   }
 
+  function gmRequest() {
+    if (typeof GM_xmlhttpRequest === 'function') return GM_xmlhttpRequest;
+    return null;
+  }
+
   async function fetchJson(path, timeoutMs) {
+    const url = new URL(path, CDK_ORIGIN).href;
+    const sameOrigin = new URL(url).origin === location.origin;
+    if (sameOrigin || !gmRequest()) return fetchJsonWithFetch(url, timeoutMs);
+    return fetchJsonWithGm(url, timeoutMs);
+  }
+
+  async function fetchJsonWithFetch(url, timeoutMs) {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), timeoutMs || 15000);
     try {
-      const response = await fetch(path, {
-        credentials: 'same-origin',
+      const response = await fetch(url, {
+        credentials: new URL(url).origin === location.origin ? 'same-origin' : 'include',
         cache: 'no-store',
         headers: { accept: 'application/json' },
         signal: controller.signal
@@ -77,6 +96,62 @@
     }
   }
 
+  function fetchJsonWithGm(url, timeoutMs) {
+    const request = gmRequest();
+    if (!request) return fetchJsonWithFetch(url, timeoutMs);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let handle = null;
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+      const done = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      const timer = window.setTimeout(() => {
+        if (handle && typeof handle.abort === 'function') handle.abort();
+        const error = new Error('请求超时');
+        error.name = 'AbortError';
+        fail(error);
+      }, timeoutMs || 15000);
+      handle = request({
+        method: 'GET',
+        url,
+        headers: { accept: 'application/json' },
+        responseType: 'json',
+        anonymous: false,
+        withCredentials: true,
+        timeout: timeoutMs || 15000,
+        onload: (response) => {
+          window.clearTimeout(timer);
+          if (response.status < 200 || response.status >= 300) {
+            fail(new Error(`HTTP ${response.status}`));
+            return;
+          }
+          try {
+            done(response.response || JSON.parse(response.responseText));
+          } catch (error) {
+            fail(error);
+          }
+        },
+        onerror: () => {
+          window.clearTimeout(timer);
+          fail(new Error('网络请求失败'));
+        },
+        ontimeout: () => {
+          window.clearTimeout(timer);
+          const error = new Error('请求超时');
+          error.name = 'AbortError';
+          fail(error);
+        }
+      });
+    });
+  }
+
   function encodeSnapshot(data) {
     return btoa(unescape(encodeURIComponent(JSON.stringify(data))))
       .replace(/\+/g, '-')
@@ -84,39 +159,50 @@
       .replace(/=+$/, '');
   }
 
+  async function captureShopSnapshot() {
+    const json = await fetchJson('/api/farm/recycle/prices', 15000);
+    if (json && json.success === false) throw new Error('价格接口返回失败');
+
+    const shop = {};
+    const list = Array.isArray(json && json.data) ? json.data : [];
+    list.forEach((item) => {
+      if (!item || !SEED_IDS.has(item.seedId)) return;
+      const raw = Number(item.recyclePrice);
+      if (Number.isFinite(raw)) shop[item.seedId] = raw / UNIT_PER_USD;
+    });
+
+    const matched = Object.keys(shop).length;
+    if (!matched) throw new Error(`没有匹配到作物价格，接口返回 ${list.length} 项`);
+
+    return {
+      version: 1,
+      source: 'userscript',
+      capturedAt: Date.now(),
+      prices: { shop },
+      matched,
+      totalSeeds: SEED_IDS.size
+    };
+  }
+
   async function syncShopPrices() {
     try {
       showToast('正在获取实时价格...');
-      const json = await fetchJson('/api/farm/recycle/prices', 15000);
-      if (json && json.success === false) throw new Error('价格接口返回失败');
-
-      const shop = {};
-      const list = Array.isArray(json && json.data) ? json.data : [];
-      list.forEach((item) => {
-        if (!item || !SEED_IDS.has(item.seedId)) return;
-        const raw = Number(item.recyclePrice);
-        if (Number.isFinite(raw)) shop[item.seedId] = raw / UNIT_PER_USD;
-      });
-
-      const matched = Object.keys(shop).length;
-      if (!matched) throw new Error(`没有匹配到作物价格，接口返回 ${list.length} 项`);
-
-      const payload = {
-        version: 1,
-        source: 'userscript',
-        capturedAt: Date.now(),
-        prices: { shop }
-      };
-
-      showToast(`已抓取 ${matched}/${SEED_IDS.size} 个作物，正在打开 Dashboard...`);
+      const payload = await captureShopSnapshot();
+      showToast(`已抓取 ${payload.matched}/${payload.totalSeeds} 个作物，正在打开 Dashboard...`);
       window.setTimeout(() => {
         location.href = `${DASHBOARD_URL}#snapshot=${encodeSnapshot(payload)}`;
       }, 500);
     } catch (error) {
-      const message = error && error.name === 'AbortError' ? '请求超时' : String(error && error.message || error);
-      showToast(`同步失败：${message}`, true);
-      alert(`[HYB Farm Dashboard] 同步失败：${message}`);
+      const message = friendlyError(error);
+      showToast(`导入失败：${message}`, true);
+      alert(`[HYB Farm Dashboard] 导入失败：${message}`);
     }
+  }
+
+  function friendlyError(error) {
+    const message = error && error.name === 'AbortError' ? '请求超时' : String(error && error.message || error);
+    if (/HTTP 401/.test(message)) return '请先登录 cdk.hybgzs.com 后再获取价格';
+    return message;
   }
 
   function installButton() {
@@ -145,9 +231,29 @@
     document.body.appendChild(button);
   }
 
+  function installDashboardBridge() {
+    if (location.origin !== DASHBOARD_ORIGIN) return;
+    window.addEventListener('message', async (event) => {
+      const data = event && event.data;
+      if (event.source !== window || !data || data.type !== BRIDGE_REQUEST || !data.requestId) return;
+      try {
+        const snapshot = await captureShopSnapshot();
+        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: true, snapshot }, DASHBOARD_ORIGIN);
+      } catch (error) {
+        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: false, error: friendlyError(error) }, DASHBOARD_ORIGIN);
+      }
+    });
+    window.postMessage({ type: BRIDGE_READY }, DASHBOARD_ORIGIN);
+  }
+
+  function boot() {
+    installDashboardBridge();
+    if (location.origin === CDK_ORIGIN) installButton();
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', installButton, { once: true });
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
   } else {
-    installButton();
+    boot();
   }
 })();

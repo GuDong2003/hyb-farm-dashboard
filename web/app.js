@@ -8,6 +8,10 @@
   const DB_NAME = 'hybFarmDashboardDB';
   const DB_VERSION = 1;
   const SNAPSHOT_STORE = 'snapshots';
+  const PRICE_REFRESH_MS = 60 * 60 * 1000;
+  const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
+  const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
+  const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
 
   const SEEDS = [
     { id: 'carrot', name: '胡萝卜', price: '500000', growthTime: 1800, harvestQuantity: 2, harvestValue: '500000', experienceValue: 5, isVipOnly: false, sortOrder: 10 },
@@ -33,6 +37,8 @@
 
   const state = loadState();
   let dbPromise = null;
+  let appReady = false;
+  let priceBridgeRequest = null;
 
   function normalizeSeed(seed) {
     return {
@@ -55,13 +61,14 @@
   function loadState() {
     const base = {
       view: 'table',
-      status: '等待价格数据；安装脚本后可导入实时价格。',
+      status: '等待价格数据；启用自动导入后可自动获取实时价格。',
       config: {
         source: 'shop',
         viewLevel: 1,
         cycleMode: 'active',
         seedMode: 'reserve',
         activeHours: DEFAULT_ACTIVE_HOURS,
+        autoRefreshPrices: true,
         landCounts: [13, 0, 0, 0, 0, 0, 0],
         sortKey: 'totalDaily',
         sortDir: 'desc'
@@ -203,6 +210,73 @@
     saveState();
   }
 
+  function hasShopPrices() {
+    return Object.keys(state.prices.shop || {}).length > 0;
+  }
+
+  function shouldAutoRequestPrices(force) {
+    if (force) return true;
+    if (!state.config.autoRefreshPrices) return false;
+    if (!hasShopPrices()) return true;
+    const importedAt = Number(state.lastImportedAt) || 0;
+    return !importedAt || Date.now() - importedAt >= PRICE_REFRESH_MS;
+  }
+
+  function installPriceBridgeListener() {
+    window.addEventListener('message', (event) => {
+      const data = event && event.data;
+      if (event.source !== window || !data || data.type !== BRIDGE_READY) return;
+      if (appReady) requestScriptPrices(false);
+    });
+  }
+
+  function requestScriptPrices(force) {
+    if (!shouldAutoRequestPrices(force) || priceBridgeRequest) return false;
+
+    const requestId = `price:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    state.error = '';
+    state.status = '正在通过脚本获取实时价格...';
+    render();
+
+    function cleanup() {
+      if (!priceBridgeRequest || priceBridgeRequest.id !== requestId) return;
+      window.clearTimeout(priceBridgeRequest.timer);
+      window.removeEventListener('message', priceBridgeRequest.onMessage);
+      priceBridgeRequest = null;
+    }
+
+    const onMessage = (event) => {
+      const data = event && event.data;
+      if (event.source !== window || !data || data.type !== BRIDGE_RESPONSE || data.requestId !== requestId) return;
+      cleanup();
+      if (!data.ok || !data.snapshot) {
+        state.status = `自动获取失败：${String(data.error || '脚本未返回价格')}`;
+        render();
+        return;
+      }
+      applySnapshot(data.snapshot).then(() => {
+        state.status = `已自动导入 ${formatTime(state.lastImportedAt)} 的实时价格。`;
+        render();
+      }).catch((error) => {
+        state.status = `自动导入失败：${String(error && error.message || error)}`;
+        render();
+      });
+    };
+
+    const timer = window.setTimeout(() => {
+      cleanup();
+      state.status = hasShopPrices()
+        ? `已使用 ${formatTime(state.lastImportedAt)} 的价格；未检测到脚本自动响应。`
+        : '未检测到自动导入脚本；安装脚本后会在打开页面时自动获取实时价格。';
+      render();
+    }, 18000);
+
+    priceBridgeRequest = { id: requestId, timer, onMessage };
+    window.addEventListener('message', onMessage);
+    window.postMessage({ type: BRIDGE_REQUEST, requestId, force: Boolean(force) }, location.origin);
+    return true;
+  }
+
   function cleanPriceMap(map) {
     const out = {};
     Object.keys(map || {}).forEach((key) => {
@@ -340,7 +414,7 @@
   function renderTableView(rows, bestRevenue, bestExpDay, bestExpHour) {
     return `
       <section class="toolbar">
-        <button class="btn primary" data-action="settings">安装一键抓取</button>
+        <button class="btn primary" data-action="settings">启用自动导入</button>
         <button class="btn" data-action="export">导出历史</button>
         <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
         <button class="btn warn" data-action="clear-current">清空实时价</button>
@@ -440,12 +514,16 @@
               <div class="settings-label">用户脚本管理器</div>
               <div>
                 <a class="bookmarklet primary" href="./userscripts/hyb-farm-dashboard-capture.user.js">点击安装脚本</a>
-                <p class="settings-copy">安装后打开 <a href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">cdk.hybgzs.com</a>，页面右下角会出现“导入实时价格”按钮。点击后会抓取当前商店价格并导入本 Dashboard。</p>
+                <p class="settings-copy">安装后打开本 Dashboard 会自动获取实时价格；打开 <a href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">cdk.hybgzs.com</a> 时，页面右下角也会出现“导入实时价格”按钮。</p>
               </div>
             </div>
             <div class="settings-row">
+              <div class="settings-label">自动刷新</div>
+              <label class="settings-copy"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /> 每小时自动获取实时价格</label>
+            </div>
+            <div class="settings-row">
               <div class="settings-label">隐私</div>
-              <div class="settings-copy">抓取数据通过 <span class="code">#snapshot</span> 带回本页，fragment 不会发送给 Cloudflare。导入后会保存到你当前浏览器的 IndexedDB。</div>
+              <div class="settings-copy">价格数据通过脚本消息或 <span class="code">#snapshot</span> 带回本页，fragment 不会发送给 Cloudflare。导入后会保存到你当前浏览器的 IndexedDB。</div>
             </div>
           </div>
         </section>
@@ -507,6 +585,14 @@
         saveState();
         render();
       });
+    });
+    const autoRefreshPrices = document.getElementById('autoRefreshPrices');
+    if (autoRefreshPrices) autoRefreshPrices.addEventListener('change', () => {
+      state.config.autoRefreshPrices = autoRefreshPrices.checked;
+      state.status = state.config.autoRefreshPrices ? '已开启每小时自动获取实时价格。' : '已关闭每小时自动获取实时价格。';
+      saveState();
+      render();
+      if (state.config.autoRefreshPrices) window.setTimeout(() => requestScriptPrices(false), 0);
     });
     const importFile = document.getElementById('importFile');
     if (importFile) importFile.addEventListener('change', importJsonFile);
@@ -606,9 +692,12 @@
   }
 
   async function init() {
+    installPriceBridgeListener();
     await importSnapshotFromHash();
     await refreshHistoryCount();
     render();
+    appReady = true;
+    window.setTimeout(() => requestScriptPrices(false), 600);
   }
 
   init().catch((error) => {
