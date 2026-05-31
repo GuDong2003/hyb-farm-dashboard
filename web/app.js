@@ -330,9 +330,9 @@
       const totalDaily = hasPrice ? totalDailyForSeed(seed, price) : null;
       const expPerCrop = seed.experienceValue;
       const expPerHarvest = expPerCrop * stats.grossYield;
-      const expHourly = expPerHarvest / stats.growthHours;
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
+      const expHourly = expTotalDaily / dailyHourBasis();
       return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, stats, singleNet, hourly, singleDaily, totalDaily, expPerCrop, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
     });
     const dir = state.config.sortDir === 'asc' ? 1 : -1;
@@ -353,6 +353,10 @@
       const stats = levelStats(seed, index + 1);
       return sum + count * seed.experienceValue * stats.grossYield * stats.dailyCycles;
     }, 0);
+  }
+
+  function dailyHourBasis() {
+    return state.config.cycleMode === 'full24' ? 24 : Math.max(1, state.config.activeHours);
   }
 
   function compareRows(a, b, key) {
@@ -447,7 +451,8 @@
       <section class="formula-bar">
         <span class="formula-title">公式</span>
         <span>收益：Σ(地块数 × (毛产量 - 1) × 售价 × 每天次数)</span>
-        <span>经验：Σ(地块数 × 毛产量 × 单个经验 × 每天次数)</span>
+        <span>每天经验：Σ(地块数 × 单块收获经验 × 每天次数)</span>
+        <span>每小时经验：每天经验 ÷ ${state.config.cycleMode === 'full24' ? '24h' : `${state.config.activeHours}h`}</span>
         <span>等级：毛产量=round(基础产量 × (1 + (Lv - 1) / 3))；时间=基础时间 × (1 - (Lv - 1) / 15)</span>
       </section>
       <section class="summary">
@@ -480,7 +485,7 @@
             <th><button data-sort="totalDaily">每天收益(全地)${sortMark('totalDaily')}</button></th>
             <th><button data-sort="expPerCrop">单个作物经验${sortMark('expPerCrop')}</button></th>
             <th><button data-sort="expPerHarvest">单块收获经验${sortMark('expPerHarvest')}</button></th>
-            <th><button data-sort="expHourly">每小时经验${sortMark('expHourly')}</button></th>
+            <th><button data-sort="expHourly">每小时经验(全地)${sortMark('expHourly')}</button></th>
             <th><button data-sort="expTotalDaily">每天经验(全地)${sortMark('expTotalDaily')}</button></th>
           </tr>
         </thead>
