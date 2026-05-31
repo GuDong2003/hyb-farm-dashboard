@@ -41,6 +41,7 @@
   let dbPromise = null;
   let appReady = false;
   let priceBridgeRequest = null;
+  let autoRefreshTimer = null;
 
   function normalizeSeed(seed) {
     return {
@@ -79,6 +80,7 @@
       previousPrices: { shop: {} },
       lastImportedAt: 0,
       cloudDefaultAt: 0,
+      priceOrigin: '',
       historyCount: 0,
       error: ''
     };
@@ -93,6 +95,7 @@
       if (merged.config.sortKey === 'expPerCrop') merged.config.sortKey = 'expPerHarvest';
       merged.prices = { shop: cleanPriceMap((stored.prices && stored.prices.shop) || {}) };
       merged.previousPrices = { shop: cleanPriceMap((stored.previousPrices && stored.previousPrices.shop) || {}) };
+      merged.priceOrigin = typeof stored.priceOrigin === 'string' ? stored.priceOrigin : '';
       return merged;
     } catch (_) {
       return base;
@@ -104,7 +107,8 @@
       config: state.config,
       prices: state.prices,
       previousPrices: state.previousPrices,
-      lastImportedAt: state.lastImportedAt
+      lastImportedAt: state.lastImportedAt,
+      priceOrigin: state.priceOrigin
     }));
   }
 
@@ -208,6 +212,7 @@
       state.prices.shop = cleanPriceMap(prices.shop);
     }
     state.lastImportedAt = capturedAt;
+    state.priceOrigin = 'local';
     state.config.source = 'shop';
     snapshot.id = snapshot.id || `snapshot:${capturedAt}`;
     snapshot.capturedAt = capturedAt;
@@ -216,24 +221,36 @@
     if (state.config.autoUploadPrices) queueCloudSubmission(snapshot);
   }
 
-  async function loadCloudDefaultPrices() {
+  async function loadCloudDefaultPrices(renderAfter) {
+    let changed = false;
     try {
       const response = await fetch(CLOUD_DEFAULT_ENDPOINT, { headers: { accept: 'application/json' }, cache: 'no-store' });
-      if (!response.ok) return;
+      if (!response.ok) return false;
       const data = await response.json();
       const snapshot = data && data.snapshot;
       const prices = snapshot && snapshot.prices && snapshot.prices.shop;
       const cloudCapturedAt = Number(snapshot && snapshot.capturedAt) || 0;
-      if (cloudCapturedAt) state.cloudDefaultAt = cloudCapturedAt;
-      if (!prices || hasShopPrices()) return;
-      state.prices.shop = cleanPriceMap(prices);
-      state.lastImportedAt = cloudCapturedAt || state.lastImportedAt;
-      state.config.source = 'shop';
-      state.status = `使用云端默认价格：${formatTime(state.lastImportedAt)}。`;
-      saveState();
+      if (cloudCapturedAt && state.cloudDefaultAt !== cloudCapturedAt) {
+        state.cloudDefaultAt = cloudCapturedAt;
+        changed = true;
+      }
+      const canUseCloud = !hasShopPrices() || state.priceOrigin === 'cloud';
+      const isNewerCloud = cloudCapturedAt && cloudCapturedAt > (Number(state.lastImportedAt) || 0);
+      if (prices && canUseCloud && isNewerCloud) {
+        state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
+        state.prices.shop = cleanPriceMap(prices);
+        state.lastImportedAt = cloudCapturedAt;
+        state.priceOrigin = 'cloud';
+        state.config.source = 'shop';
+        state.status = `使用云端默认价格：${formatTime(state.lastImportedAt)}。`;
+        saveState();
+        changed = true;
+      }
     } catch (_) {
       // Cloud defaults are only a fallback; local use should keep working offline.
     }
+    if (changed && renderAfter) render();
+    return changed;
   }
 
   function hasShopPrices() {
@@ -354,13 +371,28 @@
       state.status = hasShopPrices()
         ? (state.lastImportedAt ? `使用上次导入价格：${formatTime(state.lastImportedAt)}。` : '使用当前已保存价格。')
         : '未检测到自动导入脚本；安装脚本后会在打开页面时自动获取实时价格。';
-      render();
+      loadCloudDefaultPrices(false).then(() => render()).catch(() => render());
     }, 18000);
 
     priceBridgeRequest = { id: requestId, timer, onMessage };
     window.addEventListener('message', onMessage);
     window.postMessage({ type: BRIDGE_REQUEST, requestId, force: Boolean(force) }, location.origin);
     return true;
+  }
+
+  function runAutoRefresh() {
+    if (!state.config.autoRefreshPrices) return;
+    if (!requestScriptPrices(false)) loadCloudDefaultPrices(true);
+  }
+
+  function scheduleAutoRefresh() {
+    if (autoRefreshTimer) window.clearTimeout(autoRefreshTimer);
+    autoRefreshTimer = null;
+    if (!state.config.autoRefreshPrices) return;
+    autoRefreshTimer = window.setTimeout(() => {
+      runAutoRefresh();
+      scheduleAutoRefresh();
+    }, PRICE_REFRESH_MS);
   }
 
   function cleanPriceMap(map) {
@@ -654,7 +686,7 @@
           </div>
           <div class="toggle-list">
             <label class="toggle-row">
-              <span class="toggle-text"><strong>每小时自动刷新</strong><small>通过用户脚本获取交易所价格</small></span>
+              <span class="toggle-text"><strong>每小时自动刷新</strong><small>优先脚本实时价；无脚本时刷新云端默认价</small></span>
               <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
             <label class="toggle-row">
@@ -732,6 +764,7 @@
         const value = Number(input.value);
         if (Number.isFinite(value) && value >= 0) map[input.dataset.price] = value;
         else delete map[input.dataset.price];
+        state.priceOrigin = 'manual';
         state.status = '已手动更新当前价格。';
         saveState();
         render();
@@ -743,7 +776,8 @@
       state.status = state.config.autoRefreshPrices ? '已开启每小时自动获取实时价格。' : '已关闭每小时自动获取实时价格。';
       saveState();
       render();
-      if (state.config.autoRefreshPrices) window.setTimeout(() => requestScriptPrices(false), 0);
+      if (state.config.autoRefreshPrices) runAutoRefresh();
+      scheduleAutoRefresh();
     });
     const autoUploadPrices = document.getElementById('autoUploadPrices');
     if (autoUploadPrices) autoUploadPrices.addEventListener('change', () => {
@@ -783,6 +817,7 @@
     }
     if (action === 'clear-current') {
       state.prices.shop = {};
+      state.priceOrigin = '';
       state.status = '已清空交易所价格。';
       saveState(); render(); return;
     }
@@ -821,6 +856,7 @@
         state.config = Object.assign(state.config, json.state.config || {});
         state.prices = Object.assign(state.prices, json.state.prices || {});
         state.lastImportedAt = Number(json.state.lastImportedAt) || state.lastImportedAt;
+        state.priceOrigin = typeof json.state.priceOrigin === 'string' ? json.state.priceOrigin : 'local';
       } else if (json.prices) {
         await applySnapshot(json);
       }
@@ -888,11 +924,12 @@
   async function init() {
     installPriceBridgeListener();
     await importSnapshotFromHash();
-    await loadCloudDefaultPrices();
+    await loadCloudDefaultPrices(false);
     await refreshHistoryCount();
     render();
     appReady = true;
-    window.setTimeout(() => requestScriptPrices(false), 600);
+    window.setTimeout(runAutoRefresh, 600);
+    scheduleAutoRefresh();
   }
 
   init().catch((error) => {
