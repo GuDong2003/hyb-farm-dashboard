@@ -493,11 +493,11 @@
 
   function renderPriceDelta(delta) {
     const value = Number(delta);
-    if (!Number.isFinite(value)) return '<span class="price-delta flat"><span class="price-delta-arrow"></span><span class="price-delta-value">-</span></span>';
-    if (Math.abs(value) < 0.000005) return '<span class="price-delta flat"><span class="price-delta-arrow">→</span><span class="price-delta-value">$0</span></span>';
+    if (!Number.isFinite(value)) return '<span class="price-delta flat"><span class="price-delta-value">-</span><span class="price-delta-arrow"></span></span>';
+    if (Math.abs(value) < 0.000005) return '<span class="price-delta flat"><span class="price-delta-value">$0</span><span class="price-delta-arrow">→</span></span>';
     const direction = value > 0 ? 'up' : 'down';
     const arrow = value > 0 ? '↑' : '↓';
-    return `<span class="price-delta ${direction}"><span class="price-delta-arrow">${arrow}</span><span class="price-delta-value">${formatUsd(Math.abs(value))}</span></span>`;
+    return `<span class="price-delta ${direction}"><span class="price-delta-value">${formatUsd(Math.abs(value))}</span><span class="price-delta-arrow">${arrow}</span></span>`;
   }
 
   function renderRow(row, best) {
