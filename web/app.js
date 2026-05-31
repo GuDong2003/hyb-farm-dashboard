@@ -55,7 +55,7 @@
   function loadState() {
     const base = {
       view: 'table',
-      status: '等待商店收购价；安装 bookmarklet 后可抓实时回收价格。',
+      status: '等待商店收购价；安装油猴脚本后可抓实时回收价格。',
       config: {
         source: 'shop',
         viewLevel: 1,
@@ -431,17 +431,16 @@
   }
 
   function renderSettings() {
-    const bookmarklet = buildBookmarklet();
     return `
       <div class="settings">
         <section class="settings-section">
-          <h2>安装一键抓取</h2>
+          <h2>安装油猴脚本</h2>
           <div class="settings-body">
             <div class="settings-row">
-              <div class="settings-label">Bookmarklet</div>
+              <div class="settings-label">Tampermonkey</div>
               <div>
-                <a class="bookmarklet primary" href="${escapeHtml(bookmarklet)}">一键抓取商店收购价</a>
-                <p class="settings-copy">把这个按钮拖到浏览器收藏夹。之后先登录 cdk.hybgzs.com，再点收藏夹里的“一键抓取商店收购价”。</p>
+                <a class="bookmarklet primary" href="./userscripts/hyb-farm-dashboard-capture.user.js">点击安装油猴脚本</a>
+                <p class="settings-copy">安装后打开 cdk.hybgzs.com，页面右下角会出现“同步收购价”按钮。点击后会抓取商店收购价并导入本 Dashboard。</p>
               </div>
             </div>
             <div class="settings-row">
@@ -459,13 +458,6 @@
         </section>
       </div>
     `;
-  }
-
-  function buildBookmarklet() {
-    const appUrl = new URL('.', location.href).href;
-    const crops = SEEDS.map((seed) => ({ id: seed.id, name: seed.name }));
-    const code = `(async function(){var DEPLOY=${JSON.stringify(appUrl)};var CROPS=${JSON.stringify(crops)};var FACTOR=${UNIT_PER_USD};var box;function say(msg,err){try{if(!box){box=document.createElement('div');box.style.cssText='position:fixed;right:16px;top:16px;z-index:2147483647;max-width:420px;padding:12px 16px;border-radius:8px;background:#111827;color:#fff;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:pre-wrap';document.body.appendChild(box)}box.style.background=err?'#b91c1c':'#111827';box.textContent='[HYB Farm Dashboard] '+msg}catch(_){}}async function fetchJson(url,timeout){var ctrl=new AbortController();var timer=setTimeout(function(){ctrl.abort()},timeout||15000);try{var r=await fetch(url,{credentials:'same-origin',cache:'no-store',headers:{accept:'application/json'},signal:ctrl.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}finally{clearTimeout(timer)}}function b64(json){return btoa(unescape(encodeURIComponent(json))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')}try{if(!/hybgzs\\.com$/.test(location.hostname)){say('请在 cdk.hybgzs.com 已登录页面运行',true);alert('请在 cdk.hybgzs.com 已登录页面运行');return}var bySeed={};CROPS.forEach(function(c){bySeed[c.id]=true});say('开始抓取商店收购价...');var shopJson=await fetchJson('/api/farm/recycle/prices',15000);var shop={};(shopJson.data||[]).forEach(function(item){if(!item||!item.seedId||!bySeed[item.seedId])return;var p=Number(item.recyclePrice);if(Number.isFinite(p))shop[item.seedId]=p/FACTOR});var payload={version:1,capturedAt:Date.now(),prices:{shop:shop}};say('商店收购价完成，正在打开 Dashboard...');setTimeout(function(){location.href=DEPLOY+'#snapshot='+b64(JSON.stringify(payload))},500)}catch(e){var msg=e&&e.name==='AbortError'?'请求超时':(e&&e.message||e);say('异常：'+msg,true);alert('抓取失败：'+msg)}})();`;
-    return 'javascript:' + code;
   }
 
   function bindEvents() {
