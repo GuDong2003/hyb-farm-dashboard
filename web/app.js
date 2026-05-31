@@ -249,11 +249,12 @@
       const hourly = hasPrice ? singleNet / stats.growthHours : null;
       const singleDaily = hasPrice ? singleNet * stats.dailyCycles : null;
       const totalDaily = hasPrice ? totalDailyForSeed(seed, price) : null;
-      const expPerHarvest = seed.experienceValue;
+      const expPerCrop = seed.experienceValue;
+      const expPerHarvest = expPerCrop * stats.grossYield;
       const expHourly = expPerHarvest / stats.growthHours;
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
-      return { seed, price: hasPrice ? price : null, stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
+      return { seed, price: hasPrice ? price : null, stats, singleNet, hourly, singleDaily, totalDaily, expPerCrop, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
     });
     const dir = state.config.sortDir === 'asc' ? 1 : -1;
     return rows.sort((a, b) => compareRows(a, b, state.config.sortKey) * dir || a.seed.sortOrder - b.seed.sortOrder);
@@ -269,7 +270,7 @@
 
   function totalDailyExpForSeed(seed) {
     const stats = levelStats(seed, state.config.viewLevel);
-    return seed.experienceValue * totalLands() * stats.dailyCycles;
+    return seed.experienceValue * stats.grossYield * totalLands() * stats.dailyCycles;
   }
 
   function compareRows(a, b, key) {
@@ -279,6 +280,7 @@
     if (key === 'singleNet') return nullableCompare(a.singleNet, b.singleNet);
     if (key === 'hourly') return nullableCompare(a.hourly, b.hourly);
     if (key === 'singleDaily') return nullableCompare(a.singleDaily, b.singleDaily);
+    if (key === 'expPerCrop') return nullableCompare(a.expPerCrop, b.expPerCrop);
     if (key === 'expPerHarvest') return nullableCompare(a.expPerHarvest, b.expPerHarvest);
     if (key === 'expHourly') return nullableCompare(a.expHourly, b.expHourly);
     if (key === 'expTotalDaily') return nullableCompare(a.expTotalDaily, b.expTotalDaily);
@@ -358,7 +360,7 @@
         <span><strong>状态</strong> ${escapeHtml(state.status)}</span>
         <span>来源：${sourceLabel()}</span>
         <span>最后导入：${state.lastImportedAt ? formatTime(state.lastImportedAt) : '暂无'}</span>
-        <span>经验口径：单次经验 × 总地块数 × 当前等级每天次数</span>
+        <span>经验口径：单个作物经验 × 毛产量 × 总地块数 × 当前等级每天次数</span>
         ${state.error ? `<span class="bad">${escapeHtml(state.error)}</span>` : ''}
       </section>
       <section class="table-wrap">
@@ -388,7 +390,8 @@
             <th><button data-sort="hourly">每小时收益${sortMark('hourly')}</button></th>
             <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
             <th><button data-sort="totalDaily">每天收益(全地)${sortMark('totalDaily')}</button></th>
-            <th><button data-sort="expPerHarvest">单次经验${sortMark('expPerHarvest')}</button></th>
+            <th><button data-sort="expPerCrop">单个作物经验${sortMark('expPerCrop')}</button></th>
+            <th><button data-sort="expPerHarvest">单次收获经验${sortMark('expPerHarvest')}</button></th>
             <th><button data-sort="expHourly">每小时经验${sortMark('expHourly')}</button></th>
             <th><button data-sort="expTotalDaily">每天经验(全地)${sortMark('expTotalDaily')}</button></th>
             <th><button data-sort="roi">ROI${sortMark('roi')}</button></th>
@@ -414,6 +417,7 @@
         <td>${formatUsd(row.hourly)}</td>
         <td>${formatUsd(row.singleDaily)}</td>
         <td class="blue">${formatUsd(row.totalDaily)}</td>
+        <td>${formatNumber(row.expPerCrop, 0)}</td>
         <td>${formatNumber(row.expPerHarvest, 0)}</td>
         <td class="green">${formatNumber(row.expHourly, 2)}</td>
         <td class="green">${formatNumber(row.expTotalDaily, 2)}</td>
