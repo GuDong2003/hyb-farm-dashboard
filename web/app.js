@@ -329,7 +329,7 @@
       const singleDaily = hasPrice ? singleNet * stats.dailyCycles : null;
       const totalDaily = hasPrice ? totalDailyForSeed(seed, price) : null;
       const expPerCrop = seed.experienceValue;
-      const expPerHarvest = expPerCrop * stats.grossYield;
+      const expPerHarvest = expPerCrop * seed.harvestQuantity;
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
       const expHourly = expTotalDaily / dailyHourBasis();
@@ -351,7 +351,7 @@
     return state.config.landCounts.reduce((sum, count, index) => {
       if (!count) return sum;
       const stats = levelStats(seed, index + 1);
-      return sum + count * seed.experienceValue * stats.grossYield * stats.dailyCycles;
+      return sum + count * seed.experienceValue * seed.harvestQuantity * stats.dailyCycles;
     }, 0);
   }
 
@@ -451,9 +451,10 @@
       <section class="formula-bar">
         <span class="formula-title">公式</span>
         <span>收益：Σ(地块数 × (毛产量 - 1) × 售价 × 每天次数)</span>
+        <span>单块收获经验：单作物经验 × 作物收获数量</span>
         <span>每天经验：Σ(地块数 × 单块收获经验 × 每天次数)</span>
         <span>每小时经验：每天经验 ÷ ${state.config.cycleMode === 'full24' ? '24h' : `${state.config.activeHours}h`}</span>
-        <span>等级：毛产量=round(基础产量 × (1 + (Lv - 1) / 3))；时间=基础时间 × (1 - (Lv - 1) / 15)</span>
+        <span>等级：收益产量随等级变化；经验收获数量固定</span>
       </section>
       <section class="summary">
         <div>收益最优：<span>${bestRevenue ? `${escapeHtml(bestRevenue.row.seed.name)} ${formatUsd(bestRevenue.value)}/天` : '暂无'}</span></div>
