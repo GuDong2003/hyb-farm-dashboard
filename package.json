@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prepare:wrangler": "node scripts/create-wrangler-config.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
