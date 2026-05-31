@@ -47,6 +47,9 @@ npm install
 cp wrangler.example.toml wrangler.toml
 # Fill in the D1 database name/id in wrangler.toml.
 npm run deploy
+
+# Or generate wrangler.toml from environment variables:
+# npm run prepare:wrangler
 ```
 
 For GitHub Actions auto-deploy, add these repository secrets:

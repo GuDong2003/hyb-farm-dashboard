@@ -28,18 +28,7 @@ jobs:
         env:
           CLOUDFLARE_D1_DATABASE_NAME: ${{ secrets.CLOUDFLARE_D1_DATABASE_NAME }}
           CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
-        run: |
-          node <<'NODE'
-          const fs = require('fs');
-          const required = ['CLOUDFLARE_D1_DATABASE_NAME', 'CLOUDFLARE_D1_DATABASE_ID'];
-          for (const key of required) {
-            if (!process.env[key]) throw new Error(`${key} is required`);
-          }
-          const config = fs.readFileSync('wrangler.example.toml', 'utf8')
-            .replace('REPLACE_WITH_D1_DATABASE_NAME', process.env.CLOUDFLARE_D1_DATABASE_NAME)
-            .replace('REPLACE_WITH_D1_DATABASE_ID', process.env.CLOUDFLARE_D1_DATABASE_ID);
-          fs.writeFileSync('wrangler.toml', config);
-          NODE
+        run: npm run prepare:wrangler
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
