@@ -2,20 +2,20 @@
 
 Privacy-first dashboard for 黑与白 farm data analysis.
 
-This project is planned as a Cloudflare Pages static web app. It helps users analyze crop market prices, profit, experience efficiency, and farm rankings without uploading private farm data to the server.
+This project is planned as a Cloudflare Workers static web app with small API endpoints for shared price defaults. It helps users analyze crop market prices, profit, experience efficiency, and farm rankings without uploading private farm data to the server.
 
 ## Privacy Model
 
-The default architecture is local-only:
+Private farm data stays local by default:
 
-1. The public Cloudflare Pages site serves static HTML, CSS, and JavaScript.
-2. A bookmarklet runs on `cdk.hybgzs.com` after the user logs in.
-3. The bookmarklet reads same-origin farm APIs in the user's browser.
-4. The bookmarklet redirects back to this dashboard with a `#snapshot=...` URL fragment.
+1. The public Cloudflare Worker serves static HTML, CSS, JavaScript, and `/api/*` endpoints.
+2. A userscript runs on `cdk.hybgzs.com` after the user logs in.
+3. The userscript reads same-origin farm APIs in the user's browser.
+4. The userscript redirects back to this dashboard with a `#snapshot=...` URL fragment or responds through the in-page bridge.
 5. The dashboard imports that snapshot into the user's local IndexedDB.
-6. Cloudflare and GitHub do not receive the snapshot payload.
+6. The dashboard may submit crop price snapshots to the Cloudflare Worker for public default-price validation.
 
-URL fragments are not sent in HTTP requests, so `#snapshot=...` stays inside the user's browser.
+The D1 database stores crop prices, capture timestamps, submission metadata, and accepted default snapshots. It does not store private farm layout or account data. URL fragments are not sent in HTTP requests, so `#snapshot=...` still stays inside the user's browser unless the dashboard explicitly submits the crop prices for validation.
 
 ## Planned Features
 
@@ -27,7 +27,8 @@ URL fragments are not sent in HTTP requests, so `#snapshot=...` stays inside the
 - Farm leaderboard analysis
 - Local IndexedDB history
 - JSON export/import backup
-- Bookmarklet installation page
+- Userscript installation page
+- Cloud-validated default crop price snapshots
 
 ## Repository Layout
 
@@ -66,4 +67,4 @@ directory = "./web"
 not_found_handling = "single-page-application"
 ```
 
-No server-side user data storage is planned for the default mode.
+No private farm data is stored server-side. Cloudflare D1 stores public crop price submissions and the accepted default price snapshot.

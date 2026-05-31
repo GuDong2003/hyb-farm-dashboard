@@ -12,6 +12,8 @@
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
+  const CLOUD_DEFAULT_ENDPOINT = '/api/default-prices';
+  const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
 
   const SEEDS = [
     { id: 'carrot', name: '胡萝卜', price: '500000', growthTime: 1800, harvestQuantity: 2, harvestValue: '500000', experienceValue: 5, isVipOnly: false, sortOrder: 10 },
@@ -209,10 +211,81 @@
     snapshot.capturedAt = capturedAt;
     await putSnapshot(snapshot);
     saveState();
+    queueCloudSubmission(snapshot);
+  }
+
+  async function loadCloudDefaultPrices() {
+    if (hasShopPrices()) return;
+    try {
+      const response = await fetch(CLOUD_DEFAULT_ENDPOINT, { headers: { accept: 'application/json' }, cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json();
+      const snapshot = data && data.snapshot;
+      const prices = snapshot && snapshot.prices && snapshot.prices.shop;
+      if (!prices || hasShopPrices()) return;
+      state.prices.shop = cleanPriceMap(prices);
+      state.lastImportedAt = Number(snapshot.capturedAt) || state.lastImportedAt;
+      state.config.source = 'shop';
+      state.status = `使用云端默认价格：${formatTime(state.lastImportedAt)}。`;
+      saveState();
+    } catch (_) {
+      // Cloud defaults are only a fallback; local use should keep working offline.
+    }
   }
 
   function hasShopPrices() {
     return Object.keys(state.prices.shop || {}).length > 0;
+  }
+
+  function snapshotFromCurrentPrices() {
+    const prices = cleanPriceMap(state.prices.shop || {});
+    const matched = Object.keys(prices).length;
+    if (!matched) return null;
+    const capturedAt = Number(state.lastImportedAt) || Date.now();
+    return {
+      version: 1,
+      source: 'dashboard-upload',
+      capturedAt,
+      prices: { shop: prices },
+      matched,
+      totalSeeds: SEEDS.length
+    };
+  }
+
+  function queueCloudSubmission(snapshot) {
+    submitSnapshotToCloud(snapshot).then((result) => {
+      const text = cloudSubmissionStatusText(result);
+      if (!text) return;
+      state.status = `${state.status.replace(/。$/, '')}；${text}`;
+      render();
+    }).catch(() => {});
+  }
+
+  async function submitSnapshotToCloud(snapshot) {
+    const response = await fetch(CLOUD_SUBMIT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ snapshot })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.reason || data.error || `HTTP ${response.status}`);
+    return data;
+  }
+
+  function cloudSubmissionStatusText(result) {
+    if (!result || !result.ok) return '';
+    if (result.status === 'accepted') return '云端默认价格已更新。';
+    if (result.status === 'pending') return `云端待对比 ${result.consensusCount || 1}/${result.required || 2}。`;
+    if (result.status === 'rejected') return `云端未采用：${cloudReasonText(result.reason)}。`;
+    return '';
+  }
+
+  function cloudReasonText(reason) {
+    if (reason === 'stale_or_existing_data') return '不是更新的数据';
+    if (reason === 'too_few_prices') return '价格数量不足';
+    if (reason === 'price_out_of_range') return '存在异常价格';
+    if (reason === 'future_captured_at') return '时间异常';
+    return reason || '校验未通过';
   }
 
   function shouldAutoRequestPrices(force) {
@@ -433,6 +506,7 @@
       <section class="toolbar">
         <button class="btn primary" data-action="settings">导入</button>
         <button class="btn" data-action="refresh-prices" title="通过用户脚本立即获取交易所价格">↻ 立即刷新</button>
+        <button class="btn" data-action="upload-cloud" title="上传当前价格到云端校验池">上传云端</button>
         <button class="btn" data-action="export">导出历史</button>
         <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
         <button class="btn warn" data-action="clear-current">清空实时价</button>
@@ -644,6 +718,20 @@
       }
       return;
     }
+    if (action === 'upload-cloud') {
+      const snapshot = snapshotFromCurrentPrices();
+      if (!snapshot) { state.status = '没有可上传的当前价格。'; render(); return; }
+      state.status = '正在上传云端校验...';
+      render();
+      try {
+        const result = await submitSnapshotToCloud(snapshot);
+        state.status = cloudSubmissionStatusText(result) || '云端已收到价格数据。';
+      } catch (error) {
+        state.status = `云端上传失败：${String(error && error.message || error)}`;
+      }
+      render();
+      return;
+    }
     if (action === 'clear-current') {
       state.prices.shop = {};
       state.status = '已清空交易所价格。';
@@ -751,6 +839,7 @@
   async function init() {
     installPriceBridgeListener();
     await importSnapshotFromHash();
+    await loadCloudDefaultPrices();
     await refreshHistoryCount();
     render();
     appReady = true;

@@ -7,6 +7,7 @@ This project is configured for Cloudflare Workers Static Assets.
 ```bash
 npm install
 npx wrangler login
+npx wrangler d1 migrations apply hyb-farm-dashboard-db --remote
 npm run deploy
 ```
 
@@ -66,6 +67,7 @@ For a custom token, use permissions equivalent to:
 ```text
 Account / Workers Scripts / Edit
 Account / Account Settings / Read
+Account / D1 / Edit
 User / User Details / Read
 ```
 
@@ -77,4 +79,4 @@ If you later add a custom domain or routes, add the relevant Zone permissions fo
 npx wrangler deploy --dry-run
 ```
 
-A successful dry run should read the files from `web/` and exit without uploading.
+A successful dry run should read the files from `web/`, validate the Worker script, and exit without uploading.
