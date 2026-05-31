@@ -119,7 +119,7 @@ th { position: sticky; top: 0; z-index: 1; background: #e9eef5; color: #111827; 
 td { overflow: hidden; text-overflow: ellipsis; }
 th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
 th:nth-child(1), td:nth-child(1) { width: 44px; }
-th:nth-child(2), td:nth-child(2) { width: 132px; }
+th:nth-child(2), td:nth-child(2) { width: 124px; }
 th:nth-child(3), td:nth-child(3) { width: 76px; }
 th:nth-child(4), td:nth-child(4) { width: 72px; }
 th:nth-child(5), td:nth-child(5) { width: 74px; }
@@ -140,7 +140,7 @@ tr.best td { background: #fff1b8; }
 tr:hover td { background: #eef6ff; }
 .crop-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .crop-icon { flex: none; width: 34px; height: 34px; object-fit: contain; image-rendering: auto; }
-.crop-id { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.crop-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .vip-badge { display: inline-block; min-width: 30px; padding: 2px 5px; border-radius: 5px; color: #fff; background: var(--amber); font-size: 11px; text-align: center; font-weight: 800; }
 .blue { color: var(--blue); font-weight: 850; }
 .green { color: var(--green); font-weight: 800; }
