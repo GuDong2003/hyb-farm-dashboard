@@ -51,7 +51,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .status { margin-left: auto; color: var(--muted); font-size: 13px; white-space: nowrap; }
 
 .main { padding: 14px 18px 22px; }
-.toolbar, .landbar, .notice, .settings-section {
+.toolbar, .landbar, .notice, .formula-bar, .settings-section {
   border: 1px solid var(--line);
   background: var(--surface);
 }
@@ -78,10 +78,23 @@ button, a { -webkit-tap-highlight-color: transparent; }
   align-items: center;
   padding: 8px 10px;
   border-top: 0;
-  border-radius: 0 0 8px 8px;
   color: var(--muted);
   font-size: 13px;
 }
+.formula-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  padding: 8px 10px;
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.formula-title { color: var(--text); font-weight: 850; }
 .notice strong { color: var(--text); }
 .notice .bad { color: var(--red); font-weight: 750; }
 .notice .good { color: var(--green); font-weight: 750; }

@@ -438,9 +438,13 @@
         <span><strong>状态</strong> ${escapeHtml(state.status)}</span>
         <span>来源：${sourceLabel()}</span>
         <span>最后导入：${state.lastImportedAt ? formatTime(state.lastImportedAt) : '暂无'}</span>
-        <span>收益口径：每块每轮扣 1 留种；全地按各等级地块混合计算</span>
-        <span>经验口径：不扣留种；全地按各等级地块混合计算</span>
         ${state.error ? `<span class="bad">${escapeHtml(state.error)}</span>` : ''}
+      </section>
+      <section class="formula-bar">
+        <span class="formula-title">公式</span>
+        <span>收益：Σ(地块数 × (毛产量 - 1) × 售价 × 每天次数)</span>
+        <span>经验：Σ(地块数 × 毛产量 × 单个经验 × 每天次数)</span>
+        <span>等级：毛产量=round(基础产量 × (1 + (Lv - 1) / 3))；时间=基础时间 × (1 - (Lv - 1) / 15)</span>
       </section>
       <section class="summary">
         <div>收益最优：<span>${bestRevenue ? `${escapeHtml(bestRevenue.row.seed.name)} ${formatUsd(bestRevenue.value)}/天` : '暂无'}</span></div>
