@@ -579,7 +579,7 @@
         <span>单块收获经验：单作物经验 × 作物收获数量</span>
         <span>每天经验：Σ(地块数 × 单块收获经验 × 每天次数)</span>
         <span>每小时经验：每天经验 ÷ ${state.config.cycleMode === 'full24' ? '24h' : `${state.config.activeHours}h`}</span>
-        <span>等级：收益产量随等级变化；经验收获数量固定</span>
+        <span>等级：收益产量每级 +1/3；生长时间每级 -1/15；经验收获数量固定</span>
       </section>
       <section class="summary">
         <div>收益最优：<span>${bestRevenue ? `${escapeHtml(bestRevenue.row.seed.name)} ${formatUsd(bestRevenue.value)}/天` : '暂无'}</span></div>
