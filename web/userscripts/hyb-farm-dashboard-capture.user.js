@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong.ccwu.cc/
-// @version      0.3.3
+// @version      0.3.4
 // @description  为 HYB Farm Dashboard 自动导入黑与白农场实时价格。
 // @match        https://hyb.gudong.ccwu.cc/*
 // @match        https://cdk.hybgzs.com/*
@@ -19,6 +19,8 @@
   ]);
   const CDK_ORIGIN = 'https://cdk.hybgzs.com';
   const UNIT_PER_USD = 500000;
+  const TREND_HOUR_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=hour&trendRange=24';
+  const TREND_DAY_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=day&trendRange=7';
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
@@ -203,23 +205,58 @@
     return null;
   }
 
-  async function captureShopSnapshot() {
-    const json = await fetchJson('/api/farm/recycle/prices', 15000);
+  function normalizeTrendSeries(series) {
+    if (!Array.isArray(series)) return [];
+    return series.map((point) => {
+      const bucketStartedAt = typeof (point && point.bucketStartedAt) === 'string' ? point.bucketStartedAt : '';
+      const avgUnitPrice = Number(point && point.avgUnitPrice);
+      if (!bucketStartedAt || !Number.isFinite(avgUnitPrice)) return null;
+      return { bucketStartedAt, avgUnitPrice };
+    }).filter(Boolean).sort((a, b) => Date.parse(a.bucketStartedAt) - Date.parse(b.bucketStartedAt));
+  }
+
+  function rememberTrendItem(item, seriesKey, shop, shopChangeRates, shopTrends) {
+    if (!item || !SEED_IDS.has(item.seedId)) return;
+    const raw = Number(item.unitPrice || item.recyclePrice);
+    if (Number.isFinite(raw) && (seriesKey === 'hourly' || shop[item.seedId] == null)) shop[item.seedId] = raw / UNIT_PER_USD;
+
+    const changeRate = extractChangeRate(item);
+    if (Number.isFinite(changeRate)) shopChangeRates[item.seedId] = changeRate;
+
+    const series = normalizeTrendSeries(item.trend);
+    const lastRefreshedAt = typeof item.lastRefreshedAt === 'string' ? item.lastRefreshedAt : '';
+    if (Number.isFinite(raw) || series.length || lastRefreshedAt) {
+      const trend = shopTrends[item.seedId] || (shopTrends[item.seedId] = {});
+      if (Number.isFinite(raw) && (seriesKey === 'hourly' || !Number.isFinite(Number(trend.unitPrice)))) trend.unitPrice = raw;
+      if (lastRefreshedAt && (!trend.lastRefreshedAt || Date.parse(lastRefreshedAt) > Date.parse(trend.lastRefreshedAt))) trend.lastRefreshedAt = lastRefreshedAt;
+      if (series.length) trend[seriesKey] = series;
+    }
+  }
+
+  function mergeTrendResponse(json, seriesKey, shop, shopChangeRates, shopTrends) {
     if (json && json.success === false) throw new Error('价格接口返回失败');
+
+    const list = Array.isArray(json && json.data) ? json.data : [];
+    list.forEach((item) => rememberTrendItem(item, seriesKey, shop, shopChangeRates, shopTrends));
+
+    const items = Array.isArray(json && json.market && json.market.items) ? json.market.items : [];
+    items.forEach((item) => rememberTrendItem(item, seriesKey, shop, shopChangeRates, shopTrends));
+  }
+
+  async function captureShopSnapshot() {
+    const [hourJson, dayJson] = await Promise.all([
+      fetchJson(TREND_HOUR_URL, 15000),
+      fetchJson(TREND_DAY_URL, 15000)
+    ]);
 
     const shop = {};
     const shopChangeRates = {};
-    const list = Array.isArray(json && json.data) ? json.data : [];
-    list.forEach((item) => {
-      if (!item || !SEED_IDS.has(item.seedId)) return;
-      const raw = Number(item.recyclePrice);
-      if (Number.isFinite(raw)) shop[item.seedId] = raw / UNIT_PER_USD;
-      const changeRate = extractChangeRate(item);
-      if (Number.isFinite(changeRate)) shopChangeRates[item.seedId] = changeRate;
-    });
+    const shopTrends = {};
+    mergeTrendResponse(hourJson, 'hourly', shop, shopChangeRates, shopTrends);
+    mergeTrendResponse(dayJson, 'daily', shop, shopChangeRates, shopTrends);
 
     const matched = Object.keys(shop).length;
-    if (!matched) throw new Error(`没有匹配到作物价格，接口返回 ${list.length} 项`);
+    if (!matched) throw new Error('没有匹配到作物价格');
 
     const payload = {
       version: 1,
@@ -230,6 +267,7 @@
       totalSeeds: SEED_IDS.size
     };
     if (Object.keys(shopChangeRates).length) payload.priceChangeRates = { shop: shopChangeRates };
+    if (Object.keys(shopTrends).length) payload.priceTrends = { shop: shopTrends };
     return payload;
   }
 
@@ -237,9 +275,9 @@
     try {
       showToast('正在获取实时价格...');
       const payload = await captureShopSnapshot();
-      const rateCount = payload.priceChangeRates && payload.priceChangeRates.shop ? Object.keys(payload.priceChangeRates.shop).length : 0;
-      const rateText = rateCount ? `，涨跌幅 ${rateCount} 个` : '';
-      showToast(`已抓取 ${payload.matched}/${payload.totalSeeds} 个作物${rateText}，正在打开 Dashboard...`);
+      const trendCount = payload.priceTrends && payload.priceTrends.shop ? Object.keys(payload.priceTrends.shop).length : 0;
+      const trendText = trendCount ? `，趋势 ${trendCount} 个` : '';
+      showToast(`已抓取 ${payload.matched}/${payload.totalSeeds} 个作物${trendText}，正在打开 Dashboard...`);
       window.setTimeout(() => {
         location.href = `${DASHBOARD_URL}#snapshot=${encodeSnapshot(payload)}`;
       }, 500);

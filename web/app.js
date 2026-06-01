@@ -75,12 +75,14 @@
         autoUploadPrices: false,
         theme: 'system',
         landCounts: [13, 0, 0, 0, 0, 0, 0],
+        trendWindow: '24h',
         sortKey: 'totalDaily',
         sortDir: 'desc'
       },
       prices: { shop: defaultPrices() },
       previousPrices: { shop: {} },
       priceChangeRates: { shop: {} },
+      priceTrends: { shop: {} },
       lastImportedAt: 0,
       cloudDefaultAt: 0,
       priceOrigin: '',
@@ -94,12 +96,14 @@
       merged.config = Object.assign({}, base.config, stored.config || {});
       merged.config.landCounts = normalizeLandCounts(merged.config.landCounts);
       merged.config.source = 'shop';
+      if (!['1h', '6h', '12h', '24h', '7d'].includes(merged.config.trendWindow)) merged.config.trendWindow = base.config.trendWindow;
       delete merged.config.seedMode;
       if (merged.config.sortKey === 'expPerCrop') merged.config.sortKey = 'expPerHarvest';
       if (merged.config.sortKey === 'priceDelta') merged.config.sortKey = 'priceChangeRate';
       merged.prices = { shop: cleanPriceMap((stored.prices && stored.prices.shop) || {}) };
       merged.previousPrices = { shop: cleanPriceMap((stored.previousPrices && stored.previousPrices.shop) || {}) };
       merged.priceChangeRates = { shop: cleanSignedNumberMap((stored.priceChangeRates && stored.priceChangeRates.shop) || {}) };
+      merged.priceTrends = { shop: cleanTrendMap((stored.priceTrends && stored.priceTrends.shop) || {}) };
       merged.priceOrigin = typeof stored.priceOrigin === 'string' ? stored.priceOrigin : '';
       return merged;
     } catch (_) {
@@ -155,6 +159,7 @@
       prices: state.prices,
       previousPrices: state.previousPrices,
       priceChangeRates: state.priceChangeRates,
+      priceTrends: state.priceTrends,
       lastImportedAt: state.lastImportedAt,
       priceOrigin: state.priceOrigin
     }));
@@ -256,10 +261,12 @@
     const capturedAt = Number(snapshot.capturedAt) || Date.now();
     const prices = snapshot.prices || {};
     const priceChangeRates = snapshot.priceChangeRates || snapshot.changeRates || snapshot.priceRates || {};
+    const priceTrends = snapshot.priceTrends || snapshot.trends || {};
     if (prices.shop) {
       state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
       state.prices.shop = cleanPriceMap(prices.shop);
       state.priceChangeRates.shop = cleanSignedNumberMap(priceChangeRates.shop || {});
+      state.priceTrends.shop = cleanTrendMap(priceTrends.shop || {});
     }
     state.lastImportedAt = capturedAt;
     state.priceOrigin = 'local';
@@ -280,6 +287,7 @@
       const snapshot = data && data.snapshot;
       const prices = snapshot && snapshot.prices && snapshot.prices.shop;
       const priceChangeRates = snapshot && (snapshot.priceChangeRates || snapshot.changeRates || snapshot.priceRates);
+      const priceTrends = snapshot && (snapshot.priceTrends || snapshot.trends);
       const cloudCapturedAt = Number(snapshot && snapshot.capturedAt) || 0;
       if (cloudCapturedAt && state.cloudDefaultAt !== cloudCapturedAt) {
         state.cloudDefaultAt = cloudCapturedAt;
@@ -290,6 +298,7 @@
         state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
         state.prices.shop = cleanPriceMap(prices);
         state.priceChangeRates.shop = cleanSignedNumberMap((priceChangeRates && priceChangeRates.shop) || {});
+        state.priceTrends.shop = cleanTrendMap((priceTrends && priceTrends.shop) || {});
         state.lastImportedAt = cloudCapturedAt;
         state.priceOrigin = 'cloud';
         state.config.source = 'shop';
@@ -311,6 +320,7 @@
   function snapshotFromCurrentPrices() {
     const prices = cleanPriceMap(state.prices.shop || {});
     const priceChangeRates = cleanSignedNumberMap((state.priceChangeRates && state.priceChangeRates.shop) || {});
+    const priceTrends = cleanTrendMap((state.priceTrends && state.priceTrends.shop) || {});
     const matched = Object.keys(prices).length;
     if (!matched) return null;
     const capturedAt = Number(state.lastImportedAt) || Date.now();
@@ -323,6 +333,7 @@
       totalSeeds: SEEDS.length
     };
     if (Object.keys(priceChangeRates).length) snapshot.priceChangeRates = { shop: priceChangeRates };
+    if (Object.keys(priceTrends).length) snapshot.priceTrends = { shop: priceTrends };
     return snapshot;
   }
 
@@ -352,6 +363,8 @@
     delete out.priceChangeRates;
     delete out.changeRates;
     delete out.priceRates;
+    delete out.priceTrends;
+    delete out.trends;
     return out;
   }
 
@@ -475,6 +488,33 @@
     return out;
   }
 
+  function cleanTrendMap(map) {
+    const out = {};
+    Object.keys(map || {}).forEach((key) => {
+      const item = map[key] || {};
+      const hourly = cleanTrendSeries(item.hourly || item.hour || []);
+      const daily = cleanTrendSeries(item.daily || item.day || []);
+      const unitPrice = Number(item.unitPrice);
+      const lastRefreshedAt = typeof item.lastRefreshedAt === 'string' ? item.lastRefreshedAt : '';
+      if (hourly.length || daily.length || Number.isFinite(unitPrice) || lastRefreshedAt) {
+        out[key] = { hourly, daily };
+        if (Number.isFinite(unitPrice)) out[key].unitPrice = unitPrice;
+        if (lastRefreshedAt) out[key].lastRefreshedAt = lastRefreshedAt;
+      }
+    });
+    return out;
+  }
+
+  function cleanTrendSeries(series) {
+    if (!Array.isArray(series)) return [];
+    return series.map((point) => {
+      const avgUnitPrice = Number(point && point.avgUnitPrice);
+      const bucketStartedAt = typeof (point && point.bucketStartedAt) === 'string' ? point.bucketStartedAt : '';
+      if (!bucketStartedAt || !Number.isFinite(avgUnitPrice)) return null;
+      return { bucketStartedAt, avgUnitPrice };
+    }).filter(Boolean).sort((a, b) => Date.parse(a.bucketStartedAt) - Date.parse(b.bucketStartedAt));
+  }
+
   function decodeBase64Url(value) {
     const padded = String(value).replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
     return decodeURIComponent(escape(atob(padded)));
@@ -511,14 +551,16 @@
       const price = Number(prices[seed.id]);
       const previousPrice = Number((state.previousPrices.shop || {})[seed.id]);
       const capturedRate = Number(changeRates[seed.id]);
+      const trendChange = trendChangeForSeed(seed.id);
       const hasPrice = Number.isFinite(price);
       const hasPreviousPrice = Number.isFinite(previousPrice);
       const priceDelta = hasPrice && hasPreviousPrice ? price - previousPrice : null;
       const computedRate = priceDelta != null && previousPrice > 0 ? (priceDelta / previousPrice) * 100 : null;
+      const hasTrendRate = Number.isFinite(Number(trendChange.rate));
       const hasCapturedRate = Number.isFinite(capturedRate);
       const hasComputedRate = Number.isFinite(computedRate);
-      const priceChangeRate = hasCapturedRate ? capturedRate : (hasComputedRate ? computedRate : null);
-      const priceChangeSource = hasCapturedRate ? 'exchange' : (hasComputedRate ? 'computed' : 'none');
+      const priceChangeRate = hasTrendRate ? trendChange.rate : (hasCapturedRate ? capturedRate : (hasComputedRate ? computedRate : null));
+      const priceChangeSource = hasTrendRate ? trendChange.source : (hasCapturedRate ? 'exchange' : (hasComputedRate ? 'computed' : 'none'));
       const stats = levelStats(seed, state.config.viewLevel);
       const singleNet = hasPrice ? stats.saleYield * price : null;
       const hourly = hasPrice ? singleNet / stats.growthHours : null;
@@ -529,7 +571,7 @@
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
       const expHourly = expTotalDaily / dailyHourBasis();
-      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, priceChangeRate, priceChangeSource, stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
+      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, priceChangeRate, priceChangeSource, priceChangeBaseAt: trendChange.baseAt || '', priceTrendUpdatedAt: trendChange.updatedAt || '', stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
     });
     const dir = state.config.sortDir === 'asc' ? 1 : -1;
     return rows.sort((a, b) => compareRows(a, b, state.config.sortKey) * dir || a.seed.sortOrder - b.seed.sortOrder);
@@ -557,6 +599,47 @@
 
   function dailyCycleLabel() {
     return state.config.cycleMode === 'full24' ? '24h' : `${state.config.activeHours}h`;
+  }
+
+  function trendWindowLabel() {
+    return ['1h', '6h', '12h', '24h', '7d'].includes(state.config.trendWindow) ? state.config.trendWindow : '24h';
+  }
+
+  function trendWindowConfig() {
+    const value = trendWindowLabel();
+    if (value === '7d') return { value, source: 'daily', ms: 7 * 24 * 60 * 60 * 1000 };
+    return { value, source: 'hourly', ms: Number(value.replace('h', '')) * 60 * 60 * 1000 };
+  }
+
+  function trendChangeForSeed(seedId) {
+    const trend = state.priceTrends && state.priceTrends.shop && state.priceTrends.shop[seedId];
+    if (!trend) return {};
+    const config = trendWindowConfig();
+    const series = Array.isArray(trend[config.source]) ? trend[config.source] : [];
+    const anchor = trendAnchor(series, config.ms, trend.lastRefreshedAt);
+    const current = Number(trend.unitPrice);
+    const base = Number(anchor && anchor.avgUnitPrice);
+    if (!Number.isFinite(current) || !Number.isFinite(base) || base <= 0) return {};
+    return {
+      rate: ((current - base) / base) * 100,
+      source: `trend-${config.source}`,
+      baseAt: anchor.bucketStartedAt,
+      updatedAt: trend.lastRefreshedAt || ''
+    };
+  }
+
+  function trendAnchor(series, windowMs, referenceAt) {
+    const points = Array.isArray(series) ? series.filter((point) => Number.isFinite(Date.parse(point.bucketStartedAt)) && Number.isFinite(Number(point.avgUnitPrice))) : [];
+    if (!points.length) return null;
+    const reference = Date.parse(referenceAt) || Date.now();
+    const target = reference - windowMs;
+    let anchor = null;
+    for (const point of points) {
+      const time = Date.parse(point.bucketStartedAt);
+      if (time <= target) anchor = point;
+      else break;
+    }
+    return anchor || points[0];
   }
 
   function compareRows(a, b, key) {
@@ -638,6 +721,13 @@
         <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
         <button class="btn warn" data-action="clear-current">清空实时价</button>
         <span class="field" style="display:inline-flex;align-items:center;border:0;background:transparent;padding:0;color:#475569;">价格来源：交易所售价</span>
+        <select class="field" id="trendWindow" title="涨跌幅区间">
+          <option value="1h" ${trendWindowLabel() === '1h' ? 'selected' : ''}>涨跌幅 1h</option>
+          <option value="6h" ${trendWindowLabel() === '6h' ? 'selected' : ''}>涨跌幅 6h</option>
+          <option value="12h" ${trendWindowLabel() === '12h' ? 'selected' : ''}>涨跌幅 12h</option>
+          <option value="24h" ${trendWindowLabel() === '24h' ? 'selected' : ''}>涨跌幅 24h</option>
+          <option value="7d" ${trendWindowLabel() === '7d' ? 'selected' : ''}>涨跌幅 7d</option>
+        </select>
         <select class="field" id="cycleMode">
           <option value="active" ${state.config.cycleMode === 'active' ? 'selected' : ''}>${state.config.activeHours}h 活跃估算</option>
           <option value="full24" ${state.config.cycleMode === 'full24' ? 'selected' : ''}>24h 理论轮转</option>
@@ -663,6 +753,7 @@
         <span>单块收获经验：单作物经验 × 作物收获数量</span>
         <span>每天经验：Σ(地块数 × 单块收获经验 × 每天次数（${dailyCycleLabel()}）)</span>
         <span>每小时经验：每天经验 ÷ ${state.config.cycleMode === 'full24' ? '24h' : `${state.config.activeHours}h`}</span>
+        <span>涨跌幅：当前价 vs 选定区间基准价（${trendWindowLabel()}）</span>
         <span>等级：收益产量每级 +1/3；生长时间每级 -1/15；经验收获数量固定</span>
       </section>
       <section class="summary">
@@ -716,10 +807,18 @@
 
   function priceChangeRateTitle(row) {
     if (!Number.isFinite(Number(row.priceChangeRate))) return '没有涨跌幅数据';
-    const sourceText = row.priceChangeSource === 'exchange' ? '交易所涨跌幅度' : '按上次价格计算的涨跌幅度';
+    const sourceText = row.priceChangeSource === 'trend-hourly'
+      ? `按 ${trendWindowLabel()} 小时趋势计算`
+      : row.priceChangeSource === 'trend-daily'
+        ? `按 ${trendWindowLabel()} 日线趋势计算`
+        : row.priceChangeSource === 'exchange'
+          ? '交易所涨跌幅度'
+          : '按上次价格计算的涨跌幅度';
+    const baseText = row.priceChangeBaseAt ? `，基准时间：${formatTime(row.priceChangeBaseAt)}` : '';
+    const updatedText = row.priceTrendUpdatedAt ? `，刷新：${formatTime(row.priceTrendUpdatedAt)}` : '';
     const deltaText = Number.isFinite(Number(row.priceDelta)) ? `，价差：${formatSignedUsd(row.priceDelta)}` : '';
     const previousText = Number.isFinite(Number(row.previousPrice)) ? `，上次价格：${formatUsd(row.previousPrice)}` : '';
-    return `${sourceText}：${formatSignedPercent(row.priceChangeRate)}，当前价格：${formatUsd(row.price)}${previousText}${deltaText}`;
+    return `${sourceText}：${formatSignedPercent(row.priceChangeRate)}，当前价格：${formatUsd(row.price)}${baseText}${updatedText}${previousText}${deltaText}`;
   }
 
   function renderRow(row, best) {
@@ -831,6 +930,8 @@
     });
     const cycle = document.getElementById('cycleMode');
     if (cycle) cycle.addEventListener('change', () => { state.config.cycleMode = cycle.value; saveState(); render(); });
+    const trendWindow = document.getElementById('trendWindow');
+    if (trendWindow) trendWindow.addEventListener('change', () => { state.config.trendWindow = trendWindow.value; saveState(); render(); });
     const viewLevel = document.getElementById('viewLevel');
     if (viewLevel) viewLevel.addEventListener('change', () => { state.config.viewLevel = clampInt(viewLevel.value, 1, 7, 1); saveState(); render(); });
     document.querySelectorAll('.land-input').forEach((input) => {
@@ -858,10 +959,12 @@
       input.addEventListener('change', () => {
         const map = state.prices.shop || (state.prices.shop = {});
         const rateMap = state.priceChangeRates.shop || (state.priceChangeRates.shop = {});
+        const trendMap = state.priceTrends.shop || (state.priceTrends.shop = {});
         const value = Number(input.value);
         if (Number.isFinite(value) && value >= 0) map[input.dataset.price] = value;
         else delete map[input.dataset.price];
         delete rateMap[input.dataset.price];
+        delete trendMap[input.dataset.price];
         state.lastImportedAt = Date.now();
         state.priceOrigin = 'manual';
         state.status = '已手动更新当前价格。';
@@ -932,6 +1035,7 @@
     if (action === 'clear-current') {
       state.prices.shop = {};
       state.priceChangeRates.shop = {};
+      state.priceTrends.shop = {};
       state.priceOrigin = '';
       state.status = '已清空交易所价格。';
       saveState(); render(); return;
@@ -947,7 +1051,7 @@
 
   async function exportJson() {
     const snapshots = await allSnapshots();
-    const payload = { app: 'HYB Farm Dashboard', exportedAt: new Date().toISOString(), state: { config: state.config, prices: state.prices, lastImportedAt: state.lastImportedAt }, snapshots };
+    const payload = { app: 'HYB Farm Dashboard', exportedAt: new Date().toISOString(), state: { config: state.config, prices: state.prices, priceChangeRates: state.priceChangeRates, priceTrends: state.priceTrends, lastImportedAt: state.lastImportedAt }, snapshots };
     const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -972,6 +1076,8 @@
         state.prices = Object.assign(state.prices, json.state.prices || {});
         state.priceChangeRates = Object.assign(state.priceChangeRates || { shop: {} }, json.state.priceChangeRates || {});
         state.priceChangeRates.shop = cleanSignedNumberMap((state.priceChangeRates && state.priceChangeRates.shop) || {});
+        state.priceTrends = Object.assign(state.priceTrends || { shop: {} }, json.state.priceTrends || {});
+        state.priceTrends.shop = cleanTrendMap((state.priceTrends && state.priceTrends.shop) || {});
         state.lastImportedAt = Number(json.state.lastImportedAt) || state.lastImportedAt;
         state.priceOrigin = typeof json.state.priceOrigin === 'string' ? json.state.priceOrigin : 'local';
       } else if (json.prices) {
@@ -1029,7 +1135,9 @@
   }
 
   function formatTime(value) {
-    const date = new Date(Number(value));
+    const numeric = Number(value);
+    const raw = Number.isFinite(numeric) && String(value).trim() !== '' ? numeric : Date.parse(value);
+    const date = new Date(raw);
     if (!Number.isFinite(date.getTime())) return '暂无';
     return date.toLocaleString('zh-CN', { hour12: false });
   }
