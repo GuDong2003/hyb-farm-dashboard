@@ -232,7 +232,7 @@ th:nth-child(3) { white-space: nowrap; }
 th:nth-child(4), td:nth-child(4) { width: 72px; }
 th:nth-child(5), td:nth-child(5) { width: 108px; }
 th:nth-child(6), td:nth-child(6) { width: 106px; }
-th:nth-child(7), td:nth-child(7) { width: 116px; }
+th:nth-child(7), td:nth-child(7) { width: 92px; }
 th:nth-child(8), td:nth-child(8) { width: 90px; }
 th:nth-child(9), td:nth-child(9) { width: 132px; }
 th:nth-child(10), td:nth-child(10) { width: 124px; }
@@ -267,7 +267,7 @@ tr:hover td { background: var(--row-hover); }
 .red { color: var(--red); font-weight: 800; }
 .muted { color: var(--muted); }
 .price-input { width: 90px; height: 28px; padding: 0 7px; border: 1px solid var(--control-border); border-radius: 5px; text-align: right; background: var(--control-bg); color: var(--text); }
-.price-delta { display: inline-grid; grid-template-columns: 1fr 12px 40px; align-items: center; column-gap: 4px; width: 104px; font-weight: 850; font-variant-numeric: tabular-nums; }
+.price-delta { display: inline-grid; grid-template-columns: 12px minmax(0, 1fr); align-items: center; column-gap: 4px; width: 72px; font-weight: 850; font-variant-numeric: tabular-nums; }
 .price-delta-arrow { text-align: center; }
 .price-delta-value, .price-delta-percent { text-align: right; }
 .price-delta.up { color: var(--red); }

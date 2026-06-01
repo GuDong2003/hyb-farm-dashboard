@@ -80,6 +80,7 @@
       },
       prices: { shop: defaultPrices() },
       previousPrices: { shop: {} },
+      priceChangeRates: { shop: {} },
       lastImportedAt: 0,
       cloudDefaultAt: 0,
       priceOrigin: '',
@@ -95,8 +96,10 @@
       merged.config.source = 'shop';
       delete merged.config.seedMode;
       if (merged.config.sortKey === 'expPerCrop') merged.config.sortKey = 'expPerHarvest';
+      if (merged.config.sortKey === 'priceDelta') merged.config.sortKey = 'priceChangeRate';
       merged.prices = { shop: cleanPriceMap((stored.prices && stored.prices.shop) || {}) };
       merged.previousPrices = { shop: cleanPriceMap((stored.previousPrices && stored.previousPrices.shop) || {}) };
+      merged.priceChangeRates = { shop: cleanSignedNumberMap((stored.priceChangeRates && stored.priceChangeRates.shop) || {}) };
       merged.priceOrigin = typeof stored.priceOrigin === 'string' ? stored.priceOrigin : '';
       return merged;
     } catch (_) {
@@ -151,6 +154,7 @@
       config: state.config,
       prices: state.prices,
       previousPrices: state.previousPrices,
+      priceChangeRates: state.priceChangeRates,
       lastImportedAt: state.lastImportedAt,
       priceOrigin: state.priceOrigin
     }));
@@ -251,9 +255,11 @@
   async function applySnapshot(snapshot) {
     const capturedAt = Number(snapshot.capturedAt) || Date.now();
     const prices = snapshot.prices || {};
+    const priceChangeRates = snapshot.priceChangeRates || snapshot.changeRates || snapshot.priceRates || {};
     if (prices.shop) {
       state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
       state.prices.shop = cleanPriceMap(prices.shop);
+      state.priceChangeRates.shop = cleanSignedNumberMap(priceChangeRates.shop || {});
     }
     state.lastImportedAt = capturedAt;
     state.priceOrigin = 'local';
@@ -273,6 +279,7 @@
       const data = await response.json();
       const snapshot = data && data.snapshot;
       const prices = snapshot && snapshot.prices && snapshot.prices.shop;
+      const priceChangeRates = snapshot && (snapshot.priceChangeRates || snapshot.changeRates || snapshot.priceRates);
       const cloudCapturedAt = Number(snapshot && snapshot.capturedAt) || 0;
       if (cloudCapturedAt && state.cloudDefaultAt !== cloudCapturedAt) {
         state.cloudDefaultAt = cloudCapturedAt;
@@ -282,6 +289,7 @@
       if (prices && (!hasShopPrices() || isNewerCloud)) {
         state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
         state.prices.shop = cleanPriceMap(prices);
+        state.priceChangeRates.shop = cleanSignedNumberMap((priceChangeRates && priceChangeRates.shop) || {});
         state.lastImportedAt = cloudCapturedAt;
         state.priceOrigin = 'cloud';
         state.config.source = 'shop';
@@ -302,10 +310,11 @@
 
   function snapshotFromCurrentPrices() {
     const prices = cleanPriceMap(state.prices.shop || {});
+    const priceChangeRates = cleanSignedNumberMap((state.priceChangeRates && state.priceChangeRates.shop) || {});
     const matched = Object.keys(prices).length;
     if (!matched) return null;
     const capturedAt = Number(state.lastImportedAt) || Date.now();
-    return {
+    const snapshot = {
       version: 1,
       source: 'dashboard-upload',
       capturedAt,
@@ -313,6 +322,8 @@
       matched,
       totalSeeds: SEEDS.length
     };
+    if (Object.keys(priceChangeRates).length) snapshot.priceChangeRates = { shop: priceChangeRates };
+    return snapshot;
   }
 
   function queueCloudSubmission(snapshot) {
@@ -329,11 +340,19 @@
     const response = await fetch(CLOUD_SUBMIT_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ snapshot })
+      body: JSON.stringify({ snapshot: snapshotForCloud(snapshot) })
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.reason || data.error || `HTTP ${response.status}`);
     return data;
+  }
+
+  function snapshotForCloud(snapshot) {
+    const out = Object.assign({}, snapshot || {});
+    delete out.priceChangeRates;
+    delete out.changeRates;
+    delete out.priceRates;
+    return out;
   }
 
   function cloudSubmissionStatusText(result) {
@@ -447,6 +466,15 @@
     return out;
   }
 
+  function cleanSignedNumberMap(map) {
+    const out = {};
+    Object.keys(map || {}).forEach((key) => {
+      const value = Number(map[key]);
+      if (Number.isFinite(value)) out[key] = value;
+    });
+    return out;
+  }
+
   function decodeBase64Url(value) {
     const padded = String(value).replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
     return decodeURIComponent(escape(atob(padded)));
@@ -478,13 +506,19 @@
 
   function computeRows() {
     const prices = priceMap();
+    const changeRates = (state.priceChangeRates && state.priceChangeRates.shop) || {};
     const rows = SEEDS.map((seed) => {
       const price = Number(prices[seed.id]);
       const previousPrice = Number((state.previousPrices.shop || {})[seed.id]);
+      const capturedRate = Number(changeRates[seed.id]);
       const hasPrice = Number.isFinite(price);
       const hasPreviousPrice = Number.isFinite(previousPrice);
       const priceDelta = hasPrice && hasPreviousPrice ? price - previousPrice : null;
-      const priceDeltaRate = priceDelta != null && previousPrice > 0 ? (priceDelta / previousPrice) * 100 : null;
+      const computedRate = priceDelta != null && previousPrice > 0 ? (priceDelta / previousPrice) * 100 : null;
+      const hasCapturedRate = Number.isFinite(capturedRate);
+      const hasComputedRate = Number.isFinite(computedRate);
+      const priceChangeRate = hasCapturedRate ? capturedRate : (hasComputedRate ? computedRate : null);
+      const priceChangeSource = hasCapturedRate ? 'exchange' : (hasComputedRate ? 'computed' : 'none');
       const stats = levelStats(seed, state.config.viewLevel);
       const singleNet = hasPrice ? stats.saleYield * price : null;
       const hourly = hasPrice ? singleNet / stats.growthHours : null;
@@ -495,7 +529,7 @@
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
       const expHourly = expTotalDaily / dailyHourBasis();
-      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, priceDeltaRate, stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
+      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, priceChangeRate, priceChangeSource, stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
     });
     const dir = state.config.sortDir === 'asc' ? 1 : -1;
     return rows.sort((a, b) => compareRows(a, b, state.config.sortKey) * dir || a.seed.sortOrder - b.seed.sortOrder);
@@ -528,7 +562,7 @@
   function compareRows(a, b, key) {
     if (key === 'name') return a.seed.name.localeCompare(b.seed.name, 'zh-CN');
     if (key === 'price') return nullableCompare(a.price, b.price);
-    if (key === 'priceDelta') return nullableCompare(a.priceDelta, b.priceDelta);
+    if (key === 'priceChangeRate') return nullableCompare(a.priceChangeRate, b.priceChangeRate);
     if (key === 'growth') return nullableCompare(a.stats.growthHours, b.stats.growthHours);
     if (key === 'dailyCycles') return nullableCompare(a.stats.dailyCycles, b.stats.dailyCycles);
     if (key === 'singleNet') return nullableCompare(a.singleNet, b.singleNet);
@@ -654,7 +688,7 @@
             <th><button data-sort="growth">生长(h)${sortMark('growth')}</button></th>
             <th><button data-sort="dailyCycles">每天次数 ${dailyCycleLabel()}${sortMark('dailyCycles')}</button></th>
             <th><button data-sort="price">当前售价($)${sortMark('price')}</button></th>
-            <th><button data-sort="priceDelta">价格差${sortMark('priceDelta')}</button></th>
+            <th><button data-sort="priceChangeRate">涨跌幅度${sortMark('priceChangeRate')}</button></th>
             <th><button data-sort="singleNet">单次收益${sortMark('singleNet')}</button></th>
             <th><button data-sort="hourly">每小时收益(单地)${sortMark('hourly')}</button></th>
             <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
@@ -671,22 +705,21 @@
     `;
   }
 
-  function renderPriceDelta(delta, rate) {
-    const value = Number(delta);
-    const percent = Number(rate);
-    const percentText = Number.isFinite(percent) ? `${formatNumber(Math.abs(percent), 1)}%` : '';
-    if (!Number.isFinite(value)) return '<span class="price-delta flat"><span class="price-delta-value">-</span><span class="price-delta-arrow"></span><span class="price-delta-percent"></span></span>';
-    if (Math.abs(value) < 0.000005) return `<span class="price-delta flat"><span class="price-delta-value">$0</span><span class="price-delta-arrow">→</span><span class="price-delta-percent">${percentText || '0%'}</span></span>`;
+  function renderPriceChangeRate(rate) {
+    const value = Number(rate);
+    if (!Number.isFinite(value)) return '<span class="price-delta flat"><span class="price-delta-arrow"></span><span class="price-delta-percent">-</span></span>';
+    if (Math.abs(value) < 0.000005) return '<span class="price-delta flat"><span class="price-delta-arrow">→</span><span class="price-delta-percent">0%</span></span>';
     const direction = value > 0 ? 'up' : 'down';
     const arrow = value > 0 ? '↑' : '↓';
-    return `<span class="price-delta ${direction}"><span class="price-delta-value">${formatUsd(Math.abs(value))}</span><span class="price-delta-arrow">${arrow}</span><span class="price-delta-percent">${percentText}</span></span>`;
+    return `<span class="price-delta ${direction}"><span class="price-delta-arrow">${arrow}</span><span class="price-delta-percent">${formatNumber(Math.abs(value), 2)}%</span></span>`;
   }
 
-  function priceDeltaTitle(row) {
-    if (!Number.isFinite(Number(row.priceDelta))) return '没有上次价格可比较';
-    const rate = Number(row.priceDeltaRate);
-    const rateText = Number.isFinite(rate) ? `，涨跌幅：${formatSignedPercent(rate)}` : '';
-    return `上次价格：${formatUsd(row.previousPrice)}，当前价格：${formatUsd(row.price)}，差值：${formatSignedUsd(row.priceDelta)}${rateText}`;
+  function priceChangeRateTitle(row) {
+    if (!Number.isFinite(Number(row.priceChangeRate))) return '没有涨跌幅数据';
+    const sourceText = row.priceChangeSource === 'exchange' ? '交易所涨跌幅度' : '按上次价格计算的涨跌幅度';
+    const deltaText = Number.isFinite(Number(row.priceDelta)) ? `，价差：${formatSignedUsd(row.priceDelta)}` : '';
+    const previousText = Number.isFinite(Number(row.previousPrice)) ? `，上次价格：${formatUsd(row.previousPrice)}` : '';
+    return `${sourceText}：${formatSignedPercent(row.priceChangeRate)}，当前价格：${formatUsd(row.price)}${previousText}${deltaText}`;
   }
 
   function renderRow(row, best) {
@@ -698,7 +731,7 @@
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
         <td>${formatNumber(row.stats.dailyCycles, 2)}</td>
         <td><input class="price-input" data-price="${escapeHtml(row.seed.id)}" type="number" min="0" step="0.00001" value="${row.price == null ? '' : formatNumber(row.price, 5)}" /></td>
-        <td title="${escapeHtml(priceDeltaTitle(row))}">${renderPriceDelta(row.priceDelta, row.priceDeltaRate)}</td>
+        <td title="${escapeHtml(priceChangeRateTitle(row))}">${renderPriceChangeRate(row.priceChangeRate)}</td>
         <td>${formatUsd(row.singleNet)}</td>
         <td>${formatUsd(row.hourly)}</td>
         <td>${formatUsd(row.singleDaily)}</td>
@@ -824,9 +857,11 @@
     document.querySelectorAll('[data-price]').forEach((input) => {
       input.addEventListener('change', () => {
         const map = state.prices.shop || (state.prices.shop = {});
+        const rateMap = state.priceChangeRates.shop || (state.priceChangeRates.shop = {});
         const value = Number(input.value);
         if (Number.isFinite(value) && value >= 0) map[input.dataset.price] = value;
         else delete map[input.dataset.price];
+        delete rateMap[input.dataset.price];
         state.lastImportedAt = Date.now();
         state.priceOrigin = 'manual';
         state.status = '已手动更新当前价格。';
@@ -896,6 +931,7 @@
     }
     if (action === 'clear-current') {
       state.prices.shop = {};
+      state.priceChangeRates.shop = {};
       state.priceOrigin = '';
       state.status = '已清空交易所价格。';
       saveState(); render(); return;
@@ -934,6 +970,8 @@
       if (json.state) {
         state.config = Object.assign(state.config, json.state.config || {});
         state.prices = Object.assign(state.prices, json.state.prices || {});
+        state.priceChangeRates = Object.assign(state.priceChangeRates || { shop: {} }, json.state.priceChangeRates || {});
+        state.priceChangeRates.shop = cleanSignedNumberMap((state.priceChangeRates && state.priceChangeRates.shop) || {});
         state.lastImportedAt = Number(json.state.lastImportedAt) || state.lastImportedAt;
         state.priceOrigin = typeof json.state.priceOrigin === 'string' ? json.state.priceOrigin : 'local';
       } else if (json.prices) {
