@@ -715,7 +715,6 @@
         <button class="btn" data-action="upload-cloud" title="上传当前价格到云端校验池">上传云端</button>
         <button class="btn" data-action="export">导出历史</button>
         <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
-        <button class="btn warn" data-action="clear-current">清空实时价</button>
         <span class="field" style="display:inline-flex;align-items:center;border:0;background:transparent;padding:0;color:#475569;">价格来源：交易所售价</span>
         <select class="field" id="trendWindow" title="涨跌幅区间">
           <option value="1h" ${trendWindowLabel() === '1h' ? 'selected' : ''}>涨跌幅 1h</option>
@@ -1028,14 +1027,7 @@
       render();
       return;
     }
-    if (action === 'clear-current') {
-      state.prices.shop = {};
-      state.priceChangeRates.shop = {};
-      state.priceTrends.shop = {};
-      state.priceOrigin = '';
-      state.status = '已清空交易所价格。';
-      saveState(); render(); return;
-    }
+
     if (action === 'clear-history') {
       if (!confirm(`确认清空 ${state.historyCount} 条历史记录？`)) return;
       await clearHistory();
