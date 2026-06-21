@@ -360,11 +360,7 @@
 
   function snapshotForCloud(snapshot) {
     const out = Object.assign({}, snapshot || {});
-    delete out.priceChangeRates;
-    delete out.changeRates;
-    delete out.priceRates;
-    delete out.priceTrends;
-    delete out.trends;
+    // 云端默认价格需要同时携带涨跌幅/趋势数据；否则新用户首次打开只能看到价格，涨跌幅会退化成 0/-。
     return out;
   }
 
