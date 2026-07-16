@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong226.com/
-// @version      0.3.5
+// @version      0.3.6
 // @description  为 HYB Farm Dashboard 自动导入黑与白农场实时价格。
 // @match        https://hyb.gudong.ccwu.cc/*
 // @match        https://hyb.gudong226.com/*
@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const DASHBOARD_URL = location.origin + '/';
+  const DASHBOARD_URL = 'https://hyb.gudong226.com/';
   const DASHBOARD_ORIGINS = new Set([
     'https://hyb.gudong.ccwu.cc',
     'https://hyb.gudong226.com'
