@@ -826,8 +826,7 @@
             <button data-view="table" class="${state.view === 'table' ? 'active' : ''}">收益表</button>
             <button data-view="settings" class="${state.view === 'settings' ? 'active' : ''}">设置</button>
           </nav>
-          <div class="status">历史 ${state.historyCount} 条</div>
-          <button class="topbar-link ${state.view === 'history' ? 'active' : ''}" data-view="history" title="查看历史记录和涨跌异常">历史</button>
+          <button class="topbar-link history-link ${state.view === 'history' ? 'active' : ''}" data-view="history" title="查看历史记录和涨跌异常">历史 ${state.historyCount} 条</button>
           <button class="theme-toggle" data-action="theme" aria-label="${themeLabel()}" title="${themeLabel()}">${themeIcon()}</button>
           <a class="github-link" href="https://github.com/GuDong2003/hyb-farm-dashboard" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub">
             <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">

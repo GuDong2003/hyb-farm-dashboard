@@ -120,7 +120,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
   cursor: pointer;
 }
 .nav button.active { color: var(--blue); background: var(--blue-soft); font-weight: 750; }
-.status { margin-left: auto; color: var(--muted); font-size: 13px; white-space: nowrap; }
 .github-link, .theme-toggle, .topbar-link {
   display: inline-grid;
   place-items: center;
@@ -134,7 +133,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   cursor: pointer;
 }
 .github-link, .theme-toggle { width: 34px; }
-.topbar-link { padding: 0 10px; font-size: 13px; font-weight: 750; }
+.topbar-link { padding: 0 10px; font-size: 13px; font-weight: 750; white-space: nowrap; }
+.history-link { margin-left: auto; }
 .topbar-link.active { color: var(--blue); background: var(--blue-soft); }
 .github-link:hover, .theme-toggle:hover, .topbar-link:hover { background: var(--icon-hover); }
 .github-link svg { width: 20px; height: 20px; fill: currentColor; }
@@ -290,7 +290,7 @@ tr:hover td { background: var(--row-hover); }
 }
 .summary span { color: var(--muted); font-weight: 600; }
 
-.history-view { display: grid; gap: 12px; max-width: 1180px; }
+.history-view { display: grid; gap: 12px; width: 100%; }
 .history-head, .history-section {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -363,7 +363,7 @@ tr:hover td { background: var(--row-hover); }
 @media (max-width: 820px) {
   .topbar { flex-wrap: wrap; height: auto; padding: 10px 12px; }
   .brand { min-width: 0; width: 100%; }
-  .status { margin-left: 0; }
+  .history-link { margin-left: 0; }
   .main { padding: 10px 10px 18px; }
   .history-head { align-items: flex-start; flex-direction: column; }
   .history-row { grid-template-columns: 132px 132px 100px 100px 82px minmax(110px, 1fr); min-width: 690px; }
