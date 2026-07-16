@@ -901,40 +901,70 @@
     `;
   }
 
-  function renderHistoryAnomalyBars(group) {
-    const events = Array.isArray(group && group.events) ? group.events : [];
-    if (!events.length) {
+  function renderHistoryLineChart(seedId, result) {
+    const seriesItem = (result.series || []).find((item) => item.seedId === seedId);
+    const points = seriesItem && Array.isArray(seriesItem.points)
+      ? seriesItem.points.filter((point) => Number.isFinite(point.capturedAt) && Number.isFinite(point.price))
+      : [];
+    if (points.length < 2) {
       return `
-        <aside class="history-bars-panel">
-          <div class="history-bars-head"><strong>涨跌分布</strong><span>暂无</span></div>
-          <div class="history-bars-empty">暂无异常记录</div>
+        <aside class="history-line-panel">
+          <div class="history-line-head"><strong>价格趋势</strong><span>暂无</span></div>
+          <div class="history-line-empty">趋势数据不足</div>
         </aside>
       `;
     }
-    const maxRate = Math.max(...events.map((event) => Math.abs(Number(event.changeRate)) || 0), PRICE_CHANGE_ALERT_THRESHOLD);
-    return `
-      <aside class="history-bars-panel">
-        <div class="history-bars-head"><strong>涨跌分布</strong><span>${events.length} 条</span></div>
-        <div class="history-bars-list">
-          ${events.map((event) => renderHistoryAnomalyBar(event, maxRate)).join('')}
-        </div>
-      </aside>
-    `;
-  }
 
-  function renderHistoryAnomalyBar(event, maxRate) {
-    const rate = Number(event.changeRate);
-    const direction = rate > 0 ? 'up' : 'down';
-    const width = Math.max(8, Math.min(100, (Math.abs(rate) / Math.max(1, maxRate)) * 100));
+    const width = 420;
+    const height = 236;
+    const pad = { left: 44, right: 12, top: 14, bottom: 28 };
+    const minTime = points[0].capturedAt;
+    const maxTime = points[points.length - 1].capturedAt;
+    const prices = points.map((point) => point.price);
+    let minPrice = Math.min(...prices);
+    let maxPrice = Math.max(...prices);
+    if (minPrice === maxPrice) {
+      minPrice = Math.max(0, minPrice * 0.9);
+      maxPrice = maxPrice * 1.1 + 1;
+    }
+    const pricePad = (maxPrice - minPrice) * 0.12;
+    minPrice = Math.max(0, minPrice - pricePad);
+    maxPrice += pricePad;
+    const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
+    const y = (price) => pad.top + (1 - ((price - minPrice) / Math.max(1, maxPrice - minPrice))) * (height - pad.top - pad.bottom);
+    const path = points.map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`).join(' ');
+    const eventMap = new Map(((result.groups || []).find((group) => group.seedId === seedId)?.events || []).map((event) => [String(event.capturedAt), event]));
+    const markers = points.map((point) => {
+      const event = eventMap.get(String(point.capturedAt));
+      if (!event) return '';
+      const direction = Number(event.changeRate) > 0 ? 'up' : 'down';
+      const title = `${formatTime(event.previousCapturedAt)} -> ${formatTime(event.capturedAt)} ${formatSignedPercent(event.changeRate)}`;
+      return `<circle class="history-line-marker ${direction}" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="4"><title>${escapeHtml(title)}</title></circle>`;
+    }).join('');
+    const yTicks = [0, 0.5, 1].map((ratio) => {
+      const tickY = pad.top + ratio * (height - pad.top - pad.bottom);
+      const value = maxPrice - (maxPrice - minPrice) * ratio;
+      return `<g><line class="history-line-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line><text class="history-line-label" x="${pad.left - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(formatUsd(value))}</text></g>`;
+    }).join('');
+    const first = points[0];
+    const last = points[points.length - 1];
+    const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
     return `
-      <div class="history-bars-item">
-        <div class="history-bars-top">
-          <span>${formatTime(event.capturedAt)}</span>
-          <strong class="${direction}">${formatSignedPercent(rate)}</strong>
+      <aside class="history-line-panel">
+        <div class="history-line-head"><strong>价格趋势</strong><span>${points.length} 点</span></div>
+        <div class="history-line-chart-wrap">
+          <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(seedId)} 价格趋势" preserveAspectRatio="xMidYMid meet">
+            <rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>
+            ${yTicks}
+            <path class="history-line-path" d="${path}"></path>
+            ${points.map((point) => `<circle class="history-line-point" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="2"><title>${escapeHtml(`${formatTime(point.capturedAt)} ${formatUsd(point.price)}`)}</title></circle>`).join('')}
+            ${markers}
+            <text class="history-line-label" x="${pad.left}" y="${height - 8}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt))}</text>
+            <text class="history-line-label" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt))}</text>
+          </svg>
         </div>
-        <div class="history-bars-track"><span class="history-bars-fill ${direction}" style="width:${formatNumber(width, 2)}%"></span></div>
-        <div class="history-bars-meta"><span>${formatUsd(event.previousPrice)}</span><span>${event.previousCapturedAt ? formatTime(event.previousCapturedAt) : '-'}</span><span>${formatUsd(event.currentPrice)}</span></div>
-      </div>
+        <div class="history-line-meta"><span>${formatUsd(first.price)}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${formatSignedPercent(totalChange)}</span><span>${formatUsd(last.price)}</span></div>
+      </aside>
     `;
   }
 
@@ -977,7 +1007,7 @@
             </div>
             ${group.events.map(renderHistoryEvent).join('')}
           </div>
-          ${renderHistoryAnomalyBars(group)}
+          ${renderHistoryLineChart(group.seedId, result || emptyHistoryResult())}
         </div>
       </div>
     `;
