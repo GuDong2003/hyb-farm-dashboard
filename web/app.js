@@ -2,7 +2,7 @@
   'use strict';
 
   const UNIT_PER_USD = 500000;
-  const MAX_LANDS = 18;
+  const MAX_LANDS = 20;
   const DEFAULT_ACTIVE_HOURS = 16;
   const STORE_KEY = 'hybFarmDashboard.v1';
   const DB_NAME = 'hybFarmDashboardDB';
@@ -14,6 +14,8 @@
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
   const CLOUD_DEFAULT_ENDPOINT = '/api/default-prices';
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
+  const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
+  const PRICE_CHANGE_ALERT_THRESHOLD = 20;
 
   const SEEDS = [
     { id: 'carrot', name: '胡萝卜', price: '500000', growthTime: 1800, harvestQuantity: 2, harvestValue: '500000', experienceValue: 5, isVipOnly: false, sortOrder: 10 },
@@ -36,6 +38,8 @@
     { id: 'moonflower', name: '月光花', price: '15000000', growthTime: 172800, harvestQuantity: 10, harvestValue: '2400000', experienceValue: 60, isVipOnly: true, sortOrder: 140 },
     { id: 'weekly_lotus', name: '七日彩莲', price: '100000000', growthTime: 604800, harvestQuantity: 20, harvestValue: '30000000', experienceValue: 200, isVipOnly: true, sortOrder: 145 }
   ].map(normalizeSeed);
+
+  const SEED_BY_ID = Object.fromEntries(SEEDS.map((seed) => [seed.id, seed]));
 
   const state = loadState();
   applyTheme();
@@ -87,6 +91,10 @@
       cloudDefaultAt: 0,
       priceOrigin: '',
       historyCount: 0,
+      historyAlerts: null,
+      historyLoading: false,
+      historyLoadedAt: 0,
+      historyError: '',
       error: ''
     };
 
@@ -217,6 +225,133 @@
       request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result : []);
       request.onerror = () => reject(request.error || new Error('历史读取失败'));
     });
+  }
+
+  async function loadHistoryAlerts(force) {
+    if (state.historyLoading) return;
+    if (!force && state.historyAlerts && Date.now() - state.historyLoadedAt < 60 * 1000) return;
+    state.historyLoading = true;
+    state.historyError = '';
+    try {
+      const [cloudResult, localSnapshots] = await Promise.allSettled([
+        fetchCloudHistoryAlerts(force),
+        allSnapshots()
+      ]);
+      const cloud = cloudResult.status === 'fulfilled'
+        ? cloudResult.value
+        : { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: 0, eventCount: 0, groups: [] };
+      const local = buildSnapshotChangeHistory(localSnapshots.status === 'fulfilled' ? localSnapshots.value : [], PRICE_CHANGE_ALERT_THRESHOLD);
+      state.historyAlerts = { cloud, local };
+      state.historyLoadedAt = Date.now();
+      const errors = [];
+      if (cloudResult.status === 'rejected') errors.push(`云端历史：${String(cloudResult.reason && cloudResult.reason.message || cloudResult.reason)}`);
+      if (localSnapshots.status === 'rejected') errors.push(`本地历史：${String(localSnapshots.reason && localSnapshots.reason.message || localSnapshots.reason)}`);
+      state.historyError = errors.join('；');
+    } finally {
+      state.historyLoading = false;
+    }
+  }
+
+  async function fetchCloudHistoryAlerts(force) {
+    const endpoint = `${CLOUD_HISTORY_ENDPOINT}?threshold=${encodeURIComponent(PRICE_CHANGE_ALERT_THRESHOLD)}`;
+    const response = await fetch(endpoint, {
+      headers: { accept: 'application/json' },
+      cache: force ? 'reload' : 'no-store'
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data || data.ok === false) throw new Error(data.error || data.reason || `HTTP ${response.status}`);
+    return normalizeHistoryResult(data);
+  }
+
+  function buildSnapshotChangeHistory(snapshots, threshold) {
+    const rows = (Array.isArray(snapshots) ? snapshots : [])
+      .map(snapshotHistoryRow)
+      .filter(Boolean)
+      .sort((a, b) => a.capturedAt - b.capturedAt);
+    const previousBySeed = {};
+    const groupsBySeed = {};
+    rows.forEach((row) => {
+      Object.keys(row.prices).forEach((seedId) => {
+        const currentPrice = Number(row.prices[seedId]);
+        if (!Number.isFinite(currentPrice) || currentPrice < 0) return;
+        const previous = previousBySeed[seedId];
+        if (previous && previous.price > 0) {
+          const changeRate = ((currentPrice - previous.price) / previous.price) * 100;
+          if (Number.isFinite(changeRate) && Math.abs(changeRate) >= threshold) {
+            const events = groupsBySeed[seedId] || (groupsBySeed[seedId] = []);
+            events.push({
+              capturedAt: row.capturedAt,
+              previousCapturedAt: previous.capturedAt,
+              previousPrice: previous.price,
+              currentPrice,
+              changeRate,
+              source: row.source,
+              submissionId: 0
+            });
+          }
+        }
+        previousBySeed[seedId] = { price: currentPrice, capturedAt: row.capturedAt };
+      });
+    });
+    return normalizeHistoryResult({
+      threshold,
+      totalSnapshots: rows.length,
+      groups: Object.keys(groupsBySeed).map((seedId) => ({ seedId, events: groupsBySeed[seedId] }))
+    });
+  }
+
+  function snapshotHistoryRow(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    const capturedAt = Number(snapshot.capturedAt);
+    const prices = snapshot.prices && snapshot.prices.shop ? snapshot.prices.shop : snapshot.prices;
+    if (!Number.isFinite(capturedAt) || capturedAt <= 0 || !prices || typeof prices !== 'object') return null;
+    return {
+      capturedAt,
+      source: String(snapshot.source || 'local'),
+      prices: cleanPriceMap(prices)
+    };
+  }
+
+  function normalizeHistoryResult(data) {
+    const threshold = Number(data && data.threshold) || PRICE_CHANGE_ALERT_THRESHOLD;
+    const totalSnapshots = Number(data && data.totalSnapshots) || 0;
+    const groups = Array.isArray(data && data.groups) ? data.groups : [];
+    let eventCount = 0;
+    const normalizedGroups = groups.map((group) => {
+      const seedId = String(group && group.seedId || '');
+      const events = (Array.isArray(group && group.events) ? group.events : [])
+        .map(normalizeHistoryEvent)
+        .filter(Boolean)
+        .sort((a, b) => b.capturedAt - a.capturedAt);
+      eventCount += events.length;
+      return { seedId, events };
+    }).filter((group) => group.seedId && group.events.length)
+      .sort((a, b) => seedSortOrder(a.seedId) - seedSortOrder(b.seedId));
+    return { threshold, totalSnapshots, eventCount, groups: normalizedGroups };
+  }
+
+  function normalizeHistoryEvent(event) {
+    const capturedAt = Number(event && event.capturedAt);
+    const previousCapturedAt = Number(event && event.previousCapturedAt);
+    const previousPrice = Number(event && event.previousPrice);
+    const currentPrice = Number(event && event.currentPrice);
+    const changeRate = Number(event && event.changeRate);
+    if (!Number.isFinite(capturedAt) || !Number.isFinite(previousPrice) || !Number.isFinite(currentPrice) || !Number.isFinite(changeRate)) return null;
+    return {
+      capturedAt,
+      acceptedAt: Number(event && event.acceptedAt) || 0,
+      previousCapturedAt: Number.isFinite(previousCapturedAt) ? previousCapturedAt : 0,
+      previousPrice,
+      currentPrice,
+      changeRate,
+      source: String(event && event.source || ''),
+      submissionId: Number(event && event.submissionId) || 0
+    };
+  }
+
+  function seedSortOrder(seedId) {
+    const seed = SEED_BY_ID[seedId];
+    return seed ? seed.sortOrder : 9999;
   }
 
   async function refreshHistoryCount() {
@@ -692,6 +827,7 @@
             <button data-view="settings" class="${state.view === 'settings' ? 'active' : ''}">设置</button>
           </nav>
           <div class="status">历史 ${state.historyCount} 条</div>
+          <button class="topbar-link ${state.view === 'history' ? 'active' : ''}" data-view="history" title="查看历史记录和涨跌异常">历史</button>
           <button class="theme-toggle" data-action="theme" aria-label="${themeLabel()}" title="${themeLabel()}">${themeIcon()}</button>
           <a class="github-link" href="https://github.com/GuDong2003/hyb-farm-dashboard" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub">
             <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
@@ -700,11 +836,95 @@
           </a>
         </header>
         <main class="main">
-          ${state.view === 'settings' ? renderSettings() : renderTableView(rows, bestRevenue, bestExpDay, bestExpHour)}
+          ${state.view === 'settings' ? renderSettings() : state.view === 'history' ? renderHistoryView() : renderTableView(rows, bestRevenue, bestExpDay, bestExpHour)}
         </main>
       </div>
     `;
     bindEvents();
+  }
+
+  function renderHistoryView() {
+    const alerts = state.historyAlerts || {};
+    const cloud = alerts.cloud || { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: 0, eventCount: 0, groups: [] };
+    const local = alerts.local || { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: state.historyCount, eventCount: 0, groups: [] };
+    return `
+      <div class="history-view">
+        <section class="history-head">
+          <div class="history-title">
+            <h2>历史记录</h2>
+            <p>按作物显示相邻历史价格中涨跌幅超过 ${formatNumber(PRICE_CHANGE_ALERT_THRESHOLD, 0)}% 的异常记录。</p>
+          </div>
+          <div class="history-stats">
+            <span class="history-stat-chip"><span>本地历史</span><strong>${state.historyCount}</strong><span>条</span></span>
+            <span class="history-stat-chip"><span>云端快照</span><strong>${cloud.totalSnapshots}</strong><span>条</span></span>
+            <span class="history-stat-chip"><span>异常</span><strong>${cloud.eventCount + local.eventCount}</strong><span>条</span></span>
+            <button class="btn" data-action="refresh-history">刷新历史</button>
+          </div>
+        </section>
+        ${state.historyError ? `<div class="history-error">历史读取失败：${escapeHtml(state.historyError)}</div>` : ''}
+        ${state.historyLoading ? '<div class="history-empty">正在读取历史记录...</div>' : ''}
+        ${renderHistorySection('云端已上传历史', '来自 D1 中已被接受的上传快照，可回看你已经上传过的历史价格。', cloud)}
+        ${renderHistorySection('本地浏览器历史', '来自当前浏览器 IndexedDB 中保存的导入快照，未上传云端的历史也会在这里参与计算。', local)}
+      </div>
+    `;
+  }
+
+  function renderHistorySection(title, note, result) {
+    const data = result || { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: 0, eventCount: 0, groups: [] };
+    return `
+      <section class="history-section">
+        <div class="history-section-head">
+          <div class="history-section-title">
+            <h2>${escapeHtml(title)}</h2>
+            <p class="history-section-note">${escapeHtml(note)}</p>
+          </div>
+          <div class="history-stats">
+            <span class="history-stat-chip"><span>快照</span><strong>${data.totalSnapshots}</strong></span>
+            <span class="history-stat-chip"><span>异常</span><strong>${data.eventCount}</strong></span>
+          </div>
+        </div>
+        ${data.eventCount ? `<div class="history-groups">${data.groups.map(renderHistoryGroup).join('')}</div>` : '<div class="history-empty">暂无超过阈值的涨跌异常。</div>'}
+      </section>
+    `;
+  }
+
+  function renderHistoryGroup(group) {
+    const seed = SEED_BY_ID[group.seedId] || { id: group.seedId, name: group.seedId, isVipOnly: false };
+    return `
+      <div class="history-group">
+        <div class="history-group-head">
+          <img class="history-crop-icon" src="./assets/crops/${escapeHtml(seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'" />
+          <strong>${escapeHtml(seed.name)}</strong>
+          <span>${escapeHtml(seed.id)} · ${group.events.length} 条</span>
+        </div>
+        <div class="history-rows">
+          <div class="history-row history-row-head">
+            <div>记录时间</div>
+            <div>上一条时间</div>
+            <div class="history-price">上一价格</div>
+            <div class="history-price">当前价格</div>
+            <div class="history-price">涨跌幅</div>
+            <div>来源</div>
+          </div>
+          ${group.events.map(renderHistoryEvent).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderHistoryEvent(event) {
+    const direction = Number(event.changeRate) > 0 ? 'up' : 'down';
+    const source = event.submissionId ? `${event.source || 'cloud'} #${event.submissionId}` : (event.source || 'local');
+    return `
+      <div class="history-row">
+        <div>${formatTime(event.capturedAt)}</div>
+        <div>${event.previousCapturedAt ? formatTime(event.previousCapturedAt) : '-'}</div>
+        <div class="history-price">${formatUsd(event.previousPrice)}</div>
+        <div class="history-price">${formatUsd(event.currentPrice)}</div>
+        <div class="history-rate ${direction}">${formatSignedPercent(event.changeRate)}</div>
+        <div class="history-source" title="${escapeHtml(source)}">${escapeHtml(source)}</div>
+      </div>
+    `;
   }
 
   function renderTableView(rows, bestRevenue, bestExpDay, bestExpHour) {
@@ -917,6 +1137,9 @@
     document.querySelectorAll('[data-view]').forEach((button) => {
       button.addEventListener('click', () => {
         state.view = button.dataset.view;
+        if (state.view === 'history') {
+          loadHistoryAlerts(false).then(() => render()).catch(() => render());
+        }
         render();
       });
     });
@@ -998,6 +1221,11 @@
   async function handleAction(event) {
     const action = event.currentTarget.dataset.action;
     if (action === 'settings') { state.view = 'settings'; render(); return; }
+    if (action === 'refresh-history') {
+      await loadHistoryAlerts(true);
+      render();
+      return;
+    }
     if (action === 'theme') {
       state.config.theme = cycleThemeMode();
       applyTheme();

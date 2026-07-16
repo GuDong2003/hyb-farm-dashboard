@@ -25,6 +25,7 @@ const MIN_MATCHED_PRICES = 15;
 const MAX_PRICE_USD = 1000000;
 const MAX_TREND_POINTS_PER_SERIES = 200;
 const FUTURE_TOLERANCE_MS = 10 * 60 * 1000;
+const DEFAULT_PRICE_CHANGE_THRESHOLD = 20;
 
 export default {
   async fetch(request, env) {
@@ -32,6 +33,10 @@ export default {
 
     if (url.pathname === '/api/default-prices' && request.method === 'GET') {
       return getDefaultPrices(env);
+    }
+
+    if (url.pathname === '/api/price-history' && request.method === 'GET') {
+      return getPriceHistory(request, env);
     }
 
     if (url.pathname === '/api/price-submissions' && request.method === 'POST') {
@@ -57,6 +62,28 @@ async function getDefaultPrices(env) {
   const snapshot = snapshotFromDefaultRow(row);
   await hydrateSnapshotTrends(env, snapshot);
   return jsonResponse({ ok: true, snapshot }, 200, {
+    'cache-control': 'public, max-age=60'
+  });
+}
+
+async function getPriceHistory(request, env) {
+  assertDatabase(env);
+  const url = new URL(request.url);
+  const threshold = normalizeChangeThreshold(url.searchParams.get('threshold'));
+  const rows = await env.PRICE_DB.prepare(`
+    SELECT id, submitted_at, accepted_at, captured_at, source, prices_json
+    FROM price_submissions
+    WHERE accepted = 1
+    ORDER BY captured_at ASC, id ASC
+  `).all();
+  const result = buildPriceChangeHistory((rows && rows.results) || [], threshold);
+  return jsonResponse({
+    ok: true,
+    threshold,
+    totalSnapshots: result.totalSnapshots,
+    eventCount: result.eventCount,
+    groups: result.groups
+  }, 200, {
     'cache-control': 'public, max-age=60'
   });
 }
@@ -386,6 +413,55 @@ function bucketMapToSeries(bucketMap) {
     }))
     .sort((a, b) => Date.parse(a.bucketStartedAt) - Date.parse(b.bucketStartedAt))
     .slice(-MAX_TREND_POINTS_PER_SERIES);
+}
+
+function normalizeChangeThreshold(value) {
+  const threshold = Number(value);
+  if (Number.isFinite(threshold) && threshold > 0 && threshold <= 1000) return threshold;
+  return DEFAULT_PRICE_CHANGE_THRESHOLD;
+}
+
+function buildPriceChangeHistory(rows, threshold) {
+  const previousBySeed = {};
+  const eventsBySeed = {};
+  let totalSnapshots = 0;
+  for (const row of rows) {
+    const capturedAt = Number(row.captured_at);
+    if (!Number.isFinite(capturedAt) || capturedAt <= 0) continue;
+    const prices = safeJsonObject(row.prices_json);
+    if (!Object.keys(prices).length) continue;
+    totalSnapshots += 1;
+    for (const seedId of SEED_IDS) {
+      const currentPrice = Number(prices[seedId]);
+      if (!Number.isFinite(currentPrice) || currentPrice < 0) continue;
+      const previous = previousBySeed[seedId];
+      if (previous && previous.price > 0) {
+        const changeRate = ((currentPrice - previous.price) / previous.price) * 100;
+        if (Number.isFinite(changeRate) && Math.abs(changeRate) >= threshold) {
+          const events = eventsBySeed[seedId] || (eventsBySeed[seedId] = []);
+          events.push({
+            submissionId: Number(row.id) || 0,
+            source: String(row.source || ''),
+            capturedAt,
+            acceptedAt: Number(row.accepted_at) || 0,
+            previousCapturedAt: previous.capturedAt,
+            previousPrice: Number(previous.price.toFixed(5)),
+            currentPrice: Number(currentPrice.toFixed(5)),
+            changeRate: Number(changeRate.toFixed(6))
+          });
+        }
+      }
+      previousBySeed[seedId] = { price: currentPrice, capturedAt };
+    }
+  }
+
+  let eventCount = 0;
+  const groups = SEED_IDS.map((seedId) => {
+    const events = (eventsBySeed[seedId] || []).slice().sort((a, b) => b.capturedAt - a.capturedAt);
+    eventCount += events.length;
+    return { seedId, events };
+  }).filter((group) => group.events.length);
+  return { totalSnapshots, eventCount, groups };
 }
 
 function safeJsonObject(value) {

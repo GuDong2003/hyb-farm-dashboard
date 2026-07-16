@@ -121,11 +121,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .nav button.active { color: var(--blue); background: var(--blue-soft); font-weight: 750; }
 .status { margin-left: auto; color: var(--muted); font-size: 13px; white-space: nowrap; }
-.github-link, .theme-toggle {
+.github-link, .theme-toggle, .topbar-link {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 34px;
   height: 34px;
   border: 0;
   border-radius: 6px;
@@ -134,7 +133,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
   text-decoration: none;
   cursor: pointer;
 }
-.github-link:hover, .theme-toggle:hover { background: var(--icon-hover); }
+.github-link, .theme-toggle { width: 34px; }
+.topbar-link { padding: 0 10px; font-size: 13px; font-weight: 750; }
+.topbar-link.active { color: var(--blue); background: var(--blue-soft); }
+.github-link:hover, .theme-toggle:hover, .topbar-link:hover { background: var(--icon-hover); }
 .github-link svg { width: 20px; height: 20px; fill: currentColor; }
 .theme-toggle { font-size: 18px; line-height: 1; }
 
@@ -288,6 +290,38 @@ tr:hover td { background: var(--row-hover); }
 }
 .summary span { color: var(--muted); font-weight: 600; }
 
+.history-view { display: grid; gap: 12px; max-width: 1180px; }
+.history-head, .history-section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.history-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 14px; }
+.history-title { display: grid; gap: 4px; min-width: 0; }
+.history-title h2, .history-section h2 { margin: 0; font-size: 16px; line-height: 1.25; }
+.history-title p, .history-section-note { margin: 0; color: var(--muted); line-height: 1.45; }
+.history-stats { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.history-stat-chip { display: inline-flex; gap: 5px; align-items: baseline; padding: 6px 9px; border-radius: 6px; background: var(--history-bg); color: var(--muted); font-size: 13px; }
+.history-stat-chip strong { color: var(--text); font-size: 16px; }
+.history-section { padding: 14px; }
+.history-section-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.history-section-title { display: grid; gap: 4px; min-width: 0; }
+.history-empty, .history-error { padding: 12px; border: 1px solid var(--line-soft); border-radius: 8px; color: var(--muted); background: var(--formula-bg); }
+.history-error { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
+.history-groups { display: grid; gap: 10px; }
+.history-group { border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+.history-group-head { display: flex; gap: 9px; align-items: center; padding: 9px 10px; background: var(--table-head-bg); }
+.history-group-head strong { font-size: 14px; }
+.history-group-head span { color: var(--muted); font-size: 12px; }
+.history-crop-icon { flex: none; width: 30px; height: 30px; object-fit: contain; }
+.history-rows { overflow-x: auto; }
+.history-row { display: grid; grid-template-columns: 160px 160px 115px 115px 90px minmax(130px, 1fr); gap: 8px; align-items: center; min-width: 820px; padding: 8px 10px; border-top: 1px solid var(--line-soft); font-size: 13px; }
+.history-row:nth-child(even) { background: var(--row-alt); }
+.history-row-head { color: var(--muted); font-size: 12px; font-weight: 850; background: var(--formula-bg); }
+.history-price, .history-rate { text-align: right; font-variant-numeric: tabular-nums; }
+.history-rate.up { color: var(--red); font-weight: 850; }
+.history-rate.down { color: var(--green); font-weight: 850; }
+.history-source { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 1120px; }
 .settings-panel { border-radius: 8px; padding: 14px; }
 .settings-wide { grid-column: 1 / -1; }
@@ -331,6 +365,8 @@ tr:hover td { background: var(--row-hover); }
   .brand { min-width: 0; width: 100%; }
   .status { margin-left: 0; }
   .main { padding: 10px 10px 18px; }
+  .history-head { align-items: flex-start; flex-direction: column; }
+  .history-row { grid-template-columns: 132px 132px 100px 100px 82px minmax(110px, 1fr); min-width: 690px; }
   .settings { grid-template-columns: 1fr; }
   .settings-head { align-items: flex-start; flex-direction: column; }
 }
