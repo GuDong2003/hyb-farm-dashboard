@@ -901,23 +901,23 @@
     `;
   }
 
-  function renderHistoryLineChart(seedId, result) {
-    const seriesItem = (result.series || []).find((item) => item.seedId === seedId);
-    const points = seriesItem && Array.isArray(seriesItem.points)
-      ? seriesItem.points.filter((point) => Number.isFinite(point.capturedAt) && Number.isFinite(point.price))
-      : [];
+  function renderHistoryLineChart(group) {
+    const events = (Array.isArray(group && group.events) ? group.events : [])
+      .slice()
+      .sort((a, b) => Number(a.previousCapturedAt || a.capturedAt) - Number(b.previousCapturedAt || b.capturedAt));
+    const points = anomalyChartPoints(events);
     if (points.length < 2) {
       return `
         <aside class="history-line-panel">
-          <div class="history-line-head"><strong>价格趋势</strong><span>暂无</span></div>
+          <div class="history-line-head"><strong>异常区间</strong><span>暂无</span></div>
           <div class="history-line-empty">趋势数据不足</div>
         </aside>
       `;
     }
 
     const width = 420;
-    const height = 236;
-    const pad = { left: 44, right: 12, top: 14, bottom: 28 };
+    const height = 250;
+    const pad = { left: 48, right: 14, top: 14, bottom: 30 };
     const minTime = points[0].capturedAt;
     const maxTime = points[points.length - 1].capturedAt;
     const prices = points.map((point) => point.price);
@@ -933,7 +933,7 @@
     const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
     const y = (price) => pad.top + (1 - ((price - minPrice) / Math.max(1, maxPrice - minPrice))) * (height - pad.top - pad.bottom);
     const path = points.map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`).join(' ');
-    const eventMap = new Map(((result.groups || []).find((group) => group.seedId === seedId)?.events || []).map((event) => [String(event.capturedAt), event]));
+    const eventMap = new Map(events.map((event) => [String(event.capturedAt), event]));
     const markers = points.map((point) => {
       const event = eventMap.get(String(point.capturedAt));
       if (!event) return '';
@@ -951,9 +951,9 @@
     const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
     return `
       <aside class="history-line-panel">
-        <div class="history-line-head"><strong>价格趋势</strong><span>${points.length} 点</span></div>
+        <div class="history-line-head"><strong>异常区间</strong><span>${events.length} 段</span></div>
         <div class="history-line-chart-wrap">
-          <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(seedId)} 价格趋势" preserveAspectRatio="xMidYMid meet">
+          <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(group.seedId)} 异常涨跌区间" preserveAspectRatio="xMidYMid meet">
             <rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>
             ${yTicks}
             <path class="history-line-path" d="${path}"></path>
@@ -966,6 +966,32 @@
         <div class="history-line-meta"><span>${formatUsd(first.price)}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${formatSignedPercent(totalChange)}</span><span>${formatUsd(last.price)}</span></div>
       </aside>
     `;
+  }
+
+  function anomalyChartPoints(events) {
+    const out = [];
+    const seen = new Set();
+    events.forEach((event) => {
+      const previousCapturedAt = Number(event.previousCapturedAt);
+      const capturedAt = Number(event.capturedAt);
+      const previousPrice = Number(event.previousPrice);
+      const currentPrice = Number(event.currentPrice);
+      if (Number.isFinite(previousCapturedAt) && Number.isFinite(previousPrice)) {
+        const key = `${previousCapturedAt}:prev:${previousPrice}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push({ capturedAt: previousCapturedAt, price: previousPrice, kind: 'previous' });
+        }
+      }
+      if (Number.isFinite(capturedAt) && Number.isFinite(currentPrice)) {
+        const key = `${capturedAt}:current:${currentPrice}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push({ capturedAt, price: currentPrice, kind: 'current' });
+        }
+      }
+    });
+    return out.sort((a, b) => a.capturedAt - b.capturedAt);
   }
 
   function renderHistorySection(title, note, result) {
@@ -1007,7 +1033,7 @@
             </div>
             ${group.events.map(renderHistoryEvent).join('')}
           </div>
-          ${renderHistoryLineChart(group.seedId, result || emptyHistoryResult())}
+          ${renderHistoryLineChart(group)}
         </div>
       </div>
     `;

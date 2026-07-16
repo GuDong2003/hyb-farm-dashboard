@@ -322,11 +322,11 @@ tr:hover td { background: var(--row-hover); }
 .history-price, .history-rate { text-align: right; font-variant-numeric: tabular-nums; }
 .history-rate.up { color: var(--red); font-weight: 850; }
 .history-rate.down { color: var(--green); font-weight: 850; }
-.history-line-panel { display: grid; grid-template-rows: auto auto auto; gap: 8px; min-height: 242px; padding: 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--formula-bg); }
+.history-line-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; min-height: 280px; padding: 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--formula-bg); }
 .history-line-head, .history-line-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
 .history-line-head strong { color: var(--text); font-size: 13px; }
-.history-line-chart-wrap { display: grid; place-items: center; width: 100%; aspect-ratio: 420 / 236; min-height: 0; overflow: hidden; }
-.history-line-chart { display: block; width: 100%; height: 100%; max-height: 236px; }
+.history-line-chart-wrap { display: grid; place-items: stretch; width: 100%; min-height: 0; overflow: hidden; }
+.history-line-chart { display: block; width: 100%; height: 100%; min-height: 228px; }
 .history-line-bg { fill: var(--formula-bg); }
 .history-line-grid { stroke: var(--line-soft); stroke-width: 1; }
 .history-line-path { fill: none; stroke: var(--blue); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
@@ -338,7 +338,7 @@ tr:hover td { background: var(--row-hover); }
 .history-line-meta { font-variant-numeric: tabular-nums; }
 .history-line-meta .up { color: var(--red); font-weight: 850; }
 .history-line-meta .down { color: var(--green); font-weight: 850; }
-.history-line-empty { display: grid; place-items: center; min-height: 210px; color: var(--muted); font-size: 13px; }
+.history-line-empty { display: grid; place-items: center; min-height: 228px; color: var(--muted); font-size: 13px; }
 .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 1120px; }
 .settings-panel { border-radius: 8px; padding: 14px; }
 .settings-wide { grid-column: 1 / -1; }
