@@ -120,6 +120,24 @@ button, a { -webkit-tap-highlight-color: transparent; }
   cursor: pointer;
 }
 .nav button.active { color: var(--blue); background: var(--blue-soft); font-weight: 750; }
+.top-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(520px, 38vw);
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--warn-border);
+  border-radius: 6px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.top-alert strong, .top-alert span { overflow: hidden; text-overflow: ellipsis; }
+.top-alert strong { color: var(--text); }
+.top-alert-label { flex: none; font-weight: 850; }
 .github-link, .theme-toggle, .topbar-link {
   display: inline-grid;
   place-items: center;
@@ -380,6 +398,7 @@ tr:hover td { background: var(--row-hover); }
 @media (max-width: 820px) {
   .topbar { flex-wrap: wrap; height: auto; padding: 10px 12px; }
   .brand { min-width: 0; width: 100%; }
+  .top-alert { order: 4; width: 100%; max-width: none; justify-content: center; }
   .history-link { margin-left: 0; }
   .main { padding: 10px 10px 18px; }
   .history-head { align-items: flex-start; flex-direction: column; }

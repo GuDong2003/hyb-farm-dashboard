@@ -841,6 +841,17 @@
     }, null);
   }
 
+  function topPriceRiseAlert(rows) {
+    const best = rows.reduce((current, row) => {
+      const rate = Number(row.priceChangeRate);
+      if (!Number.isFinite(rate) || rate < PRICE_CHANGE_ALERT_THRESHOLD) return current;
+      if (!current || rate > Number(current.priceChangeRate)) return row;
+      return current;
+    }, null);
+    if (!best) return '';
+    return `<div class="top-alert" title="${escapeHtml(priceChangeRateTitle(best))}"><span class="top-alert-label">涨幅异常</span><strong>${escapeHtml(best.seed.name)}</strong><span>${formatSignedPercent(best.priceChangeRate)}</span><span>${formatUsd(best.price)}</span></div>`;
+  }
+
   function totalLands() {
     return state.config.landCounts.reduce((sum, count) => sum + count, 0);
   }
@@ -859,6 +870,7 @@
             <button data-view="table" class="${state.view === 'table' ? 'active' : ''}">收益表</button>
             <button data-view="settings" class="${state.view === 'settings' ? 'active' : ''}">设置</button>
           </nav>
+          ${topPriceRiseAlert(rows)}
           <button class="topbar-link history-link ${state.view === 'history' ? 'active' : ''}" data-view="history" title="查看历史记录和涨跌异常">历史 ${state.historyCount} 条</button>
           <button class="theme-toggle" data-action="theme" aria-label="${themeLabel()}" title="${themeLabel()}">${themeIcon()}</button>
           <a class="github-link" href="https://github.com/GuDong2003/hyb-farm-dashboard" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub">
