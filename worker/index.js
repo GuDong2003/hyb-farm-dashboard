@@ -82,7 +82,8 @@ async function getPriceHistory(request, env) {
     threshold,
     totalSnapshots: result.totalSnapshots,
     eventCount: result.eventCount,
-    groups: result.groups
+    groups: result.groups,
+    series: result.series
   }, 200, {
     'cache-control': 'public, max-age=60'
   });
@@ -424,6 +425,7 @@ function normalizeChangeThreshold(value) {
 function buildPriceChangeHistory(rows, threshold) {
   const previousBySeed = {};
   const eventsBySeed = {};
+  const seriesBySeed = {};
   let totalSnapshots = 0;
   for (const row of rows) {
     const capturedAt = Number(row.captured_at);
@@ -434,6 +436,14 @@ function buildPriceChangeHistory(rows, threshold) {
     for (const seedId of SEED_IDS) {
       const currentPrice = Number(prices[seedId]);
       if (!Number.isFinite(currentPrice) || currentPrice < 0) continue;
+      const points = seriesBySeed[seedId] || (seriesBySeed[seedId] = []);
+      points.push({
+        submissionId: Number(row.id) || 0,
+        source: String(row.source || ''),
+        capturedAt,
+        price: Number(currentPrice.toFixed(5))
+      });
+
       const previous = previousBySeed[seedId];
       if (previous && previous.price > 0) {
         const changeRate = ((currentPrice - previous.price) / previous.price) * 100;
@@ -461,7 +471,11 @@ function buildPriceChangeHistory(rows, threshold) {
     eventCount += events.length;
     return { seedId, events };
   }).filter((group) => group.events.length);
-  return { totalSnapshots, eventCount, groups };
+  const series = SEED_IDS.map((seedId) => ({
+    seedId,
+    points: (seriesBySeed[seedId] || []).slice().sort((a, b) => a.capturedAt - b.capturedAt)
+  })).filter((item) => item.points.length);
+  return { totalSnapshots, eventCount, groups, series };
 }
 
 function safeJsonObject(value) {

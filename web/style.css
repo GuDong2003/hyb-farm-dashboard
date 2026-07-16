@@ -304,8 +304,24 @@ tr:hover td { background: var(--row-hover); }
 .history-stat-chip { display: inline-flex; gap: 5px; align-items: baseline; padding: 6px 9px; border-radius: 6px; background: var(--history-bg); color: var(--muted); font-size: 13px; }
 .history-stat-chip strong { color: var(--text); font-size: 16px; }
 .history-section { padding: 14px; }
+.history-chart-section { padding-bottom: 12px; }
 .history-section-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .history-section-title { display: grid; gap: 4px; min-width: 0; }
+.history-chart-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.history-chart-controls .field { min-width: 150px; }
+.history-chart-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--formula-bg); }
+.history-chart { display: block; width: 100%; min-width: 760px; height: 320px; }
+.history-chart-bg { fill: var(--formula-bg); }
+.history-chart-grid { stroke: var(--line-soft); stroke-width: 1; }
+.history-chart-axis { stroke: var(--line); stroke-width: 1.2; }
+.history-chart-line { fill: none; stroke: var(--blue); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.history-chart-point { fill: var(--surface); stroke: var(--blue); stroke-width: 1.5; }
+.history-chart-marker { stroke: var(--surface); stroke-width: 2; }
+.history-chart-marker.up { fill: var(--red); }
+.history-chart-marker.down { fill: var(--green); }
+.history-chart-label { fill: var(--muted); font-size: 12px; }
+.history-chart-summary { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; color: var(--muted); font-size: 13px; }
+.history-chart-summary span:first-child { color: var(--text); font-weight: 850; }
 .history-empty, .history-error { padding: 12px; border: 1px solid var(--line-soft); border-radius: 8px; color: var(--muted); background: var(--formula-bg); }
 .history-error { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
 .history-groups { display: grid; gap: 10px; }

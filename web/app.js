@@ -94,6 +94,8 @@
       historyAlerts: null,
       historyLoading: false,
       historyLoadedAt: 0,
+      historyChartSource: 'cloud',
+      historyChartSeedId: '',
       historyError: '',
       error: ''
     };
@@ -239,10 +241,11 @@
       ]);
       const cloud = cloudResult.status === 'fulfilled'
         ? cloudResult.value
-        : { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: 0, eventCount: 0, groups: [] };
+        : emptyHistoryResult();
       const local = buildSnapshotChangeHistory(localSnapshots.status === 'fulfilled' ? localSnapshots.value : [], PRICE_CHANGE_ALERT_THRESHOLD);
       state.historyAlerts = { cloud, local };
       state.historyLoadedAt = Date.now();
+      syncHistoryChartSelection(true);
       const errors = [];
       if (cloudResult.status === 'rejected') errors.push(`云端历史：${String(cloudResult.reason && cloudResult.reason.message || cloudResult.reason)}`);
       if (localSnapshots.status === 'rejected') errors.push(`本地历史：${String(localSnapshots.reason && localSnapshots.reason.message || localSnapshots.reason)}`);
@@ -270,10 +273,13 @@
       .sort((a, b) => a.capturedAt - b.capturedAt);
     const previousBySeed = {};
     const groupsBySeed = {};
+    const seriesBySeed = {};
     rows.forEach((row) => {
       Object.keys(row.prices).forEach((seedId) => {
         const currentPrice = Number(row.prices[seedId]);
         if (!Number.isFinite(currentPrice) || currentPrice < 0) return;
+        const points = seriesBySeed[seedId] || (seriesBySeed[seedId] = []);
+        points.push({ capturedAt: row.capturedAt, price: currentPrice, source: row.source, submissionId: 0 });
         const previous = previousBySeed[seedId];
         if (previous && previous.price > 0) {
           const changeRate = ((currentPrice - previous.price) / previous.price) * 100;
@@ -296,7 +302,8 @@
     return normalizeHistoryResult({
       threshold,
       totalSnapshots: rows.length,
-      groups: Object.keys(groupsBySeed).map((seedId) => ({ seedId, events: groupsBySeed[seedId] }))
+      groups: Object.keys(groupsBySeed).map((seedId) => ({ seedId, events: groupsBySeed[seedId] })),
+      series: Object.keys(seriesBySeed).map((seedId) => ({ seedId, points: seriesBySeed[seedId] }))
     });
   }
 
@@ -327,7 +334,36 @@
       return { seedId, events };
     }).filter((group) => group.seedId && group.events.length)
       .sort((a, b) => seedSortOrder(a.seedId) - seedSortOrder(b.seedId));
-    return { threshold, totalSnapshots, eventCount, groups: normalizedGroups };
+    const series = normalizeHistorySeries(data && data.series);
+    return { threshold, totalSnapshots, eventCount, groups: normalizedGroups, series };
+  }
+
+  function normalizeHistorySeries(series) {
+    return (Array.isArray(series) ? series : []).map((item) => {
+      const seedId = String(item && item.seedId || '');
+      const points = (Array.isArray(item && item.points) ? item.points : [])
+        .map(normalizeHistoryPoint)
+        .filter(Boolean)
+        .sort((a, b) => a.capturedAt - b.capturedAt);
+      return { seedId, points };
+    }).filter((item) => item.seedId && item.points.length)
+      .sort((a, b) => seedSortOrder(a.seedId) - seedSortOrder(b.seedId));
+  }
+
+  function normalizeHistoryPoint(point) {
+    const capturedAt = Number(point && point.capturedAt);
+    const price = Number(point && point.price);
+    if (!Number.isFinite(capturedAt) || !Number.isFinite(price)) return null;
+    return {
+      capturedAt,
+      price,
+      source: String(point && point.source || ''),
+      submissionId: Number(point && point.submissionId) || 0
+    };
+  }
+
+  function emptyHistoryResult() {
+    return { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: 0, eventCount: 0, groups: [], series: [] };
   }
 
   function normalizeHistoryEvent(event) {
@@ -347,6 +383,39 @@
       source: String(event && event.source || ''),
       submissionId: Number(event && event.submissionId) || 0
     };
+  }
+
+  function syncHistoryChartSelection(allowSourceSwitch) {
+    let source = state.historyChartSource === 'local' ? 'local' : 'cloud';
+    let result = historyResultForSource(source);
+    if (allowSourceSwitch && !result.series.length) {
+      const fallbackSource = source === 'cloud' ? 'local' : 'cloud';
+      const fallback = historyResultForSource(fallbackSource);
+      if (fallback.series.length) {
+        source = fallbackSource;
+        result = fallback;
+        state.historyChartSource = fallbackSource;
+      }
+    }
+    if (!result.series.length) {
+      state.historyChartSeedId = '';
+      return;
+    }
+    if (!result.series.some((item) => item.seedId === state.historyChartSeedId)) {
+      const withMostAlerts = result.series.slice().sort((a, b) => historyEventCount(result, b.seedId) - historyEventCount(result, a.seedId))[0];
+      state.historyChartSeedId = withMostAlerts ? withMostAlerts.seedId : result.series[0].seedId;
+    }
+  }
+
+  function historyResultForSource(source) {
+    const alerts = state.historyAlerts || {};
+    if (source === 'local') return alerts.local || emptyHistoryResult();
+    return alerts.cloud || emptyHistoryResult();
+  }
+
+  function historyEventCount(result, seedId) {
+    const group = result && result.groups && result.groups.find((item) => item.seedId === seedId);
+    return group ? group.events.length : 0;
   }
 
   function seedSortOrder(seedId) {
@@ -843,9 +912,10 @@
   }
 
   function renderHistoryView() {
+    syncHistoryChartSelection(false);
     const alerts = state.historyAlerts || {};
-    const cloud = alerts.cloud || { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: 0, eventCount: 0, groups: [] };
-    const local = alerts.local || { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: state.historyCount, eventCount: 0, groups: [] };
+    const cloud = alerts.cloud || emptyHistoryResult();
+    const local = alerts.local || Object.assign(emptyHistoryResult(), { totalSnapshots: state.historyCount });
     return `
       <div class="history-view">
         <section class="history-head">
@@ -862,8 +932,99 @@
         </section>
         ${state.historyError ? `<div class="history-error">历史读取失败：${escapeHtml(state.historyError)}</div>` : ''}
         ${state.historyLoading ? '<div class="history-empty">正在读取历史记录...</div>' : ''}
+        ${renderHistoryChart(cloud, local)}
         ${renderHistorySection('云端已上传历史', '来自 D1 中已被接受的上传快照，可回看你已经上传过的历史价格。', cloud)}
         ${renderHistorySection('本地浏览器历史', '来自当前浏览器 IndexedDB 中保存的导入快照，未上传云端的历史也会在这里参与计算。', local)}
+      </div>
+    `;
+  }
+
+  function renderHistoryChart(cloud, local) {
+    const source = state.historyChartSource === 'local' ? 'local' : 'cloud';
+    const result = source === 'local' ? local : cloud;
+    const series = result.series || [];
+    const selected = series.find((item) => item.seedId === state.historyChartSeedId) || series[0];
+    const seedId = selected ? selected.seedId : '';
+    const eventCount = seedId ? historyEventCount(result, seedId) : 0;
+    return `
+      <section class="history-section history-chart-section">
+        <div class="history-section-head">
+          <div class="history-section-title">
+            <h2>价格趋势</h2>
+            <p class="history-section-note">折线显示历史价格走势，圆点标记相邻记录涨跌幅超过 ${formatNumber(PRICE_CHANGE_ALERT_THRESHOLD, 0)}% 的位置。</p>
+          </div>
+          <div class="history-chart-controls">
+            <select class="field" id="historyChartSource" title="历史来源">
+              <option value="cloud" ${source === 'cloud' ? 'selected' : ''}>云端已上传</option>
+              <option value="local" ${source === 'local' ? 'selected' : ''}>本地浏览器</option>
+            </select>
+            <select class="field" id="historyChartSeed" title="作物">
+              ${series.length ? series.map((item) => {
+                const seed = SEED_BY_ID[item.seedId] || { name: item.seedId };
+                const count = historyEventCount(result, item.seedId);
+                return `<option value="${escapeHtml(item.seedId)}" ${item.seedId === seedId ? 'selected' : ''}>${escapeHtml(seed.name)}${count ? ` (${count})` : ''}</option>`;
+              }).join('') : '<option value="">暂无数据</option>'}
+            </select>
+          </div>
+        </div>
+        ${selected ? renderHistoryChartSvg(selected, result) : '<div class="history-empty">暂无可绘制的历史价格。</div>'}
+        ${selected ? `<div class="history-chart-summary"><span>${escapeHtml((SEED_BY_ID[seedId] || { name: seedId }).name)}</span><span>${selected.points.length} 个价格点</span><span>${eventCount} 条异常</span></div>` : ''}
+      </section>
+    `;
+  }
+
+  function renderHistoryChartSvg(seriesItem, result) {
+    const points = (seriesItem.points || []).filter((point) => Number.isFinite(point.capturedAt) && Number.isFinite(point.price));
+    if (points.length < 2) return '<div class="history-empty">至少需要两条历史价格才能绘制折线。</div>';
+    const width = 960;
+    const height = 320;
+    const pad = { left: 72, right: 22, top: 22, bottom: 42 };
+    const minTime = points[0].capturedAt;
+    const maxTime = points[points.length - 1].capturedAt;
+    const prices = points.map((point) => point.price);
+    let minPrice = Math.min(...prices);
+    let maxPrice = Math.max(...prices);
+    if (minPrice === maxPrice) {
+      minPrice = Math.max(0, minPrice * 0.9);
+      maxPrice = maxPrice * 1.1 + 1;
+    }
+    const pricePad = (maxPrice - minPrice) * 0.08;
+    minPrice = Math.max(0, minPrice - pricePad);
+    maxPrice += pricePad;
+    const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
+    const y = (price) => pad.top + (1 - ((price - minPrice) / Math.max(1, maxPrice - minPrice))) * (height - pad.top - pad.bottom);
+    const path = points.map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`).join(' ');
+    const events = new Map((result.groups || [])
+      .find((group) => group.seedId === seriesItem.seedId)?.events
+      .map((event) => [String(event.capturedAt), event]) || []);
+    const markers = points.map((point) => {
+      const event = events.get(String(point.capturedAt));
+      if (!event) return '';
+      const direction = Number(event.changeRate) > 0 ? 'up' : 'down';
+      const title = `${formatTime(event.previousCapturedAt)} -> ${formatTime(event.capturedAt)} ${formatSignedPercent(event.changeRate)}`;
+      return `<circle class="history-chart-marker ${direction}" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="5"><title>${escapeHtml(title)}</title></circle>`;
+    }).join('');
+    const yTicks = Array.from({ length: 4 }, (_, index) => {
+      const ratio = index / 3;
+      const value = maxPrice - (maxPrice - minPrice) * ratio;
+      const tickY = pad.top + ratio * (height - pad.top - pad.bottom);
+      return `<g><line class="history-chart-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line><text class="history-chart-label" x="${pad.left - 10}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(formatUsd(value))}</text></g>`;
+    }).join('');
+    const startLabel = formatChartDate(minTime);
+    const endLabel = formatChartDate(maxTime);
+    return `
+      <div class="history-chart-wrap">
+        <svg class="history-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="价格历史折线图" preserveAspectRatio="none">
+          <rect class="history-chart-bg" x="0" y="0" width="${width}" height="${height}"></rect>
+          ${yTicks}
+          <line class="history-chart-axis" x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}"></line>
+          <line class="history-chart-axis" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}"></line>
+          <path class="history-chart-line" d="${path}"></path>
+          ${points.map((point) => `<circle class="history-chart-point" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="2.5"><title>${escapeHtml(`${formatTime(point.capturedAt)} ${formatUsd(point.price)}`)}</title></circle>`).join('')}
+          ${markers}
+          <text class="history-chart-label" x="${pad.left}" y="${height - 12}" text-anchor="start">${escapeHtml(startLabel)}</text>
+          <text class="history-chart-label" x="${width - pad.right}" y="${height - 12}" text-anchor="end">${escapeHtml(endLabel)}</text>
+        </svg>
       </div>
     `;
   }
@@ -1151,6 +1312,18 @@
     if (trendWindow) trendWindow.addEventListener('change', () => { state.config.trendWindow = trendWindow.value; saveState(); render(); });
     const viewLevel = document.getElementById('viewLevel');
     if (viewLevel) viewLevel.addEventListener('change', () => { state.config.viewLevel = clampInt(viewLevel.value, 1, 7, 1); saveState(); render(); });
+    const historyChartSource = document.getElementById('historyChartSource');
+    if (historyChartSource) historyChartSource.addEventListener('change', () => {
+      state.historyChartSource = historyChartSource.value === 'local' ? 'local' : 'cloud';
+      state.historyChartSeedId = '';
+      syncHistoryChartSelection(false);
+      render();
+    });
+    const historyChartSeed = document.getElementById('historyChartSeed');
+    if (historyChartSeed) historyChartSeed.addEventListener('change', () => {
+      state.historyChartSeedId = historyChartSeed.value || '';
+      render();
+    });
     document.querySelectorAll('.land-input').forEach((input) => {
       input.addEventListener('change', () => {
         const index = clampInt(input.dataset.level, 1, 7, 1) - 1;
@@ -1355,6 +1528,12 @@
     const date = new Date(raw);
     if (!Number.isFinite(date.getTime())) return '暂无';
     return date.toLocaleString('zh-CN', { hour12: false });
+  }
+
+  function formatChartDate(value) {
+    const date = new Date(Number(value));
+    if (!Number.isFinite(date.getTime())) return '暂无';
+    return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
   }
 
   function escapeHtml(value) {
