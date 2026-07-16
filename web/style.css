@@ -151,8 +151,15 @@ button, a { -webkit-tap-highlight-color: transparent; }
   cursor: pointer;
 }
 .github-link, .theme-toggle { width: 34px; }
-.topbar-link { padding: 0 10px; font-size: 13px; font-weight: 750; white-space: nowrap; }
-.history-link { margin-left: auto; }
+.topbar-link {
+  margin-left: auto;
+  padding: 4px 12px;
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-radius: 6px;
+  border: 1px solid var(--blue);
+  font-weight: 850;
+}
 .topbar-link.active { color: var(--blue); background: var(--blue-soft); }
 .github-link:hover, .theme-toggle:hover, .topbar-link:hover { background: var(--icon-hover); }
 .github-link svg { width: 20px; height: 20px; fill: currentColor; }

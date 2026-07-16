@@ -1078,8 +1078,6 @@
         <button class="btn primary" data-action="settings">导入</button>
         <button class="btn" data-action="refresh-prices" title="通过用户脚本立即获取交易所价格">↻ 立即刷新</button>
         <button class="btn" data-action="upload-cloud" title="上传当前价格到云端校验池">上传云端</button>
-        <button class="btn" data-action="export">导出历史</button>
-        <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
         <span class="field" style="display:inline-flex;align-items:center;border:0;background:transparent;padding:0;color:#475569;">价格来源：交易所售价</span>
         <select class="field" id="trendWindow" title="涨跌幅区间">
           <option value="1h" ${trendWindowLabel() === '1h' ? 'selected' : ''}>涨跌幅 1h</option>
@@ -1275,6 +1273,7 @@
           </div>
           <div class="settings-actions">
             <button class="btn" data-action="export">导出历史</button>
+            <label class="file-label">导入 JSON<input id="importFile" class="hidden-file" type="file" accept="application/json" /></label>
             <button class="btn warn" data-action="clear-history">清空历史</button>
           </div>
         </section>
