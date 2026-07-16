@@ -901,67 +901,40 @@
     `;
   }
 
-  function renderHistorySparkline(seedId, result) {
-    const seriesItem = (result.series || []).find((item) => item.seedId === seedId);
-    const points = seriesItem && Array.isArray(seriesItem.points)
-      ? seriesItem.points.filter((point) => Number.isFinite(point.capturedAt) && Number.isFinite(point.price))
-      : [];
-    if (points.length < 2) {
+  function renderHistoryAnomalyBars(group) {
+    const events = Array.isArray(group && group.events) ? group.events : [];
+    if (!events.length) {
       return `
-        <aside class="history-spark-panel">
-          <div class="history-spark-head"><strong>价格趋势</strong><span>暂无</span></div>
-          <div class="history-spark-empty">趋势数据不足</div>
+        <aside class="history-bars-panel">
+          <div class="history-bars-head"><strong>涨跌分布</strong><span>暂无</span></div>
+          <div class="history-bars-empty">暂无异常记录</div>
         </aside>
       `;
     }
-
-    const width = 420;
-    const height = 210;
-    const pad = { left: 10, right: 10, top: 12, bottom: 24 };
-    const minTime = points[0].capturedAt;
-    const maxTime = points[points.length - 1].capturedAt;
-    const prices = points.map((point) => point.price);
-    let minPrice = Math.min(...prices);
-    let maxPrice = Math.max(...prices);
-    if (minPrice === maxPrice) {
-      minPrice = Math.max(0, minPrice * 0.9);
-      maxPrice = maxPrice * 1.1 + 1;
-    }
-    const pricePad = (maxPrice - minPrice) * 0.12;
-    minPrice = Math.max(0, minPrice - pricePad);
-    maxPrice += pricePad;
-    const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
-    const y = (price) => pad.top + (1 - ((price - minPrice) / Math.max(1, maxPrice - minPrice))) * (height - pad.top - pad.bottom);
-    const path = points.map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`).join(' ');
-    const eventMap = new Map(((result.groups || []).find((group) => group.seedId === seedId)?.events || []).map((event) => [String(event.capturedAt), event]));
-    const markers = points.map((point) => {
-      const event = eventMap.get(String(point.capturedAt));
-      if (!event) return '';
-      const direction = Number(event.changeRate) > 0 ? 'up' : 'down';
-      const title = `${formatTime(event.previousCapturedAt)} -> ${formatTime(event.capturedAt)} ${formatSignedPercent(event.changeRate)}`;
-      return `<circle class="history-spark-marker ${direction}" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="4"><title>${escapeHtml(title)}</title></circle>`;
-    }).join('');
-    const grid = [0.25, 0.5, 0.75].map((ratio) => {
-      const gridY = pad.top + ratio * (height - pad.top - pad.bottom);
-      return `<line class="history-spark-grid" x1="${pad.left}" y1="${formatNumber(gridY, 2)}" x2="${width - pad.right}" y2="${formatNumber(gridY, 2)}"></line>`;
-    }).join('');
-    const first = points[0];
-    const last = points[points.length - 1];
-    const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
+    const maxRate = Math.max(...events.map((event) => Math.abs(Number(event.changeRate)) || 0), PRICE_CHANGE_ALERT_THRESHOLD);
     return `
-      <aside class="history-spark-panel">
-        <div class="history-spark-head"><strong>价格趋势</strong><span>${points.length} 点</span></div>
-        <svg class="history-spark" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(seedId)} 价格趋势" preserveAspectRatio="none">
-          <rect class="history-spark-bg" x="0" y="0" width="${width}" height="${height}"></rect>
-          ${grid}
-          <path class="history-spark-line" d="${path}"></path>
-          ${points.map((point) => `<circle class="history-spark-point" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="2"><title>${escapeHtml(`${formatTime(point.capturedAt)} ${formatUsd(point.price)}`)}</title></circle>`).join('')}
-          ${markers}
-          <text class="history-spark-label" x="${pad.left}" y="${height - 6}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt))}</text>
-          <text class="history-spark-label" x="${width - pad.right}" y="${height - 6}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt))}</text>
-        </svg>
-        <div class="history-spark-meta"><span>${formatUsd(first.price)}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${formatSignedPercent(totalChange)}</span><span>${formatUsd(last.price)}</span></div>
+      <aside class="history-bars-panel">
+        <div class="history-bars-head"><strong>涨跌分布</strong><span>${events.length} 条</span></div>
+        <div class="history-bars-list">
+          ${events.map((event) => renderHistoryAnomalyBar(event, maxRate)).join('')}
+        </div>
       </aside>
+    `;
+  }
+
+  function renderHistoryAnomalyBar(event, maxRate) {
+    const rate = Number(event.changeRate);
+    const direction = rate > 0 ? 'up' : 'down';
+    const width = Math.max(8, Math.min(100, (Math.abs(rate) / Math.max(1, maxRate)) * 100));
+    return `
+      <div class="history-bars-item">
+        <div class="history-bars-top">
+          <span>${formatTime(event.capturedAt)}</span>
+          <strong class="${direction}">${formatSignedPercent(rate)}</strong>
+        </div>
+        <div class="history-bars-track"><span class="history-bars-fill ${direction}" style="width:${formatNumber(width, 2)}%"></span></div>
+        <div class="history-bars-meta"><span>${formatUsd(event.previousPrice)}</span><span>${event.previousCapturedAt ? formatTime(event.previousCapturedAt) : '-'}</span><span>${formatUsd(event.currentPrice)}</span></div>
+      </div>
     `;
   }
 
@@ -1004,7 +977,7 @@
             </div>
             ${group.events.map(renderHistoryEvent).join('')}
           </div>
-          ${renderHistorySparkline(group.seedId, result || emptyHistoryResult())}
+          ${renderHistoryAnomalyBars(group)}
         </div>
       </div>
     `;
