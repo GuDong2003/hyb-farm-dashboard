@@ -915,9 +915,9 @@
       `;
     }
 
-    const width = 320;
-    const height = 132;
-    const pad = { left: 8, right: 8, top: 10, bottom: 22 };
+    const width = 420;
+    const height = 210;
+    const pad = { left: 10, right: 10, top: 12, bottom: 24 };
     const minTime = points[0].capturedAt;
     const maxTime = points[points.length - 1].capturedAt;
     const prices = points.map((point) => point.price);
@@ -1001,7 +1001,6 @@
               <div class="history-price">上一价格</div>
               <div class="history-price">当前价格</div>
               <div class="history-price">涨跌幅</div>
-              <div>来源</div>
             </div>
             ${group.events.map(renderHistoryEvent).join('')}
           </div>
@@ -1013,7 +1012,6 @@
 
   function renderHistoryEvent(event) {
     const direction = Number(event.changeRate) > 0 ? 'up' : 'down';
-    const source = event.submissionId ? `${event.source || 'cloud'} #${event.submissionId}` : (event.source || 'local');
     return `
       <div class="history-row">
         <div>${formatTime(event.capturedAt)}</div>
@@ -1021,7 +1019,6 @@
         <div class="history-price">${formatUsd(event.previousPrice)}</div>
         <div class="history-price">${formatUsd(event.currentPrice)}</div>
         <div class="history-rate ${direction}">${formatSignedPercent(event.changeRate)}</div>
-        <div class="history-source" title="${escapeHtml(source)}">${escapeHtml(source)}</div>
       </div>
     `;
   }
