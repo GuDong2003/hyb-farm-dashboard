@@ -77,6 +77,8 @@
         activeHours: DEFAULT_ACTIVE_HOURS,
         autoRefreshPrices: true,
         autoUploadPrices: false,
+        browserPriceAlerts: false,
+        notifiedPriceAlertKey: '',
         theme: 'system',
         landCounts: [13, 0, 0, 0, 0, 0, 0],
         trendWindow: '24h',
@@ -443,6 +445,7 @@
     snapshot.capturedAt = capturedAt;
     await putSnapshot(snapshot);
     saveState();
+    maybeNotifyPriceRise();
     if (state.config.autoUploadPrices) queueCloudSubmission(snapshot);
   }
 
@@ -472,6 +475,7 @@
         state.config.source = 'shop';
         state.status = `使用云端默认价格：${formatTime(state.lastImportedAt)}。`;
         saveState();
+        maybeNotifyPriceRise();
         changed = true;
       }
     } catch (_) {
@@ -841,13 +845,17 @@
     }, null);
   }
 
-  function topPriceRiseAlert(rows) {
-    const best = rows.reduce((current, row) => {
+  function bestPriceRiseRow(rows) {
+    return rows.reduce((current, row) => {
       const rate = Number(row.priceChangeRate);
       if (!Number.isFinite(rate) || rate < PRICE_CHANGE_ALERT_THRESHOLD) return current;
       if (!current || rate > Number(current.priceChangeRate)) return row;
       return current;
     }, null);
+  }
+
+  function topPriceRiseAlert(rows) {
+    const best = bestPriceRiseRow(rows);
     if (!best) return '';
     return `<div class="top-alert" title="${escapeHtml(priceChangeRateTitle(best))}"><span class="top-alert-label">涨幅异常</span><strong>${escapeHtml(best.seed.name)}</strong><span>${formatSignedPercent(best.priceChangeRate)}</span><span>${formatUsd(best.price)}</span></div>`;
   }
@@ -1226,6 +1234,10 @@
               <span class="toggle-text"><strong>导入后自动上传</strong><small>关闭时只有手动上传才进入云端校验</small></span>
               <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
+            <label class="toggle-row">
+              <span class="toggle-text"><strong>涨幅异常通知</strong><small>发现当前最高涨幅超过 ${formatNumber(PRICE_CHANGE_ALERT_THRESHOLD, 0)}% 时使用浏览器通知提醒</small></span>
+              <span class="toggle-control"><input id="browserPriceAlerts" type="checkbox" ${state.config.browserPriceAlerts ? 'checked' : ''} /><span class="toggle-track"></span></span>
+            </label>
           </div>
         </section>
 
@@ -1324,6 +1336,7 @@
         state.priceOrigin = 'manual';
         state.status = '已手动更新当前价格。';
         saveState();
+        maybeNotifyPriceRise();
         render();
       });
     });
@@ -1350,6 +1363,13 @@
       state.status = state.config.autoUploadPrices ? '已开启导入后自动上传云端。' : '已关闭导入后自动上传云端。';
       saveState();
       render();
+    });
+    const browserPriceAlerts = document.getElementById('browserPriceAlerts');
+    if (browserPriceAlerts) browserPriceAlerts.addEventListener('change', () => {
+      setBrowserPriceAlerts(browserPriceAlerts.checked).then(() => render()).catch((error) => {
+        state.status = `通知设置失败：${String(error && error.message || error)}`;
+        render();
+      });
     });
     const importFile = document.getElementById('importFile');
     if (importFile) importFile.addEventListener('change', importJsonFile);
@@ -1453,6 +1473,56 @@
 
   function sourceLabel() {
     return '交易所售价';
+  }
+
+  async function setBrowserPriceAlerts(enabled) {
+    if (!enabled) {
+      state.config.browserPriceAlerts = false;
+      state.status = '已关闭涨幅异常通知。';
+      saveState();
+      return;
+    }
+    if (!('Notification' in window)) {
+      state.config.browserPriceAlerts = false;
+      state.status = '当前浏览器不支持系统通知。';
+      saveState();
+      return;
+    }
+    let permission = Notification.permission;
+    if (permission === 'default') permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      state.config.browserPriceAlerts = false;
+      state.status = '浏览器未授予通知权限，已关闭涨幅异常通知。';
+      saveState();
+      return;
+    }
+    state.config.browserPriceAlerts = true;
+    state.status = '已开启涨幅异常通知。';
+    saveState();
+    maybeNotifyPriceRise(true);
+  }
+
+  function maybeNotifyPriceRise(force) {
+    if (!state.config.browserPriceAlerts) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const row = bestPriceRiseRow(computeRows());
+    if (!row) return;
+    const rate = Number(row.priceChangeRate);
+    const capturedAt = Number(state.lastImportedAt) || 0;
+    const alertKey = `${row.seed.id}:${capturedAt}:${formatNumber(rate, 2)}:${formatNumber(row.price, 5)}`;
+    if (!force && state.config.notifiedPriceAlertKey === alertKey) return;
+    state.config.notifiedPriceAlertKey = alertKey;
+    saveState();
+    const notification = new Notification('HYB Farm 涨幅异常', {
+      body: `${row.seed.name} 当前涨幅 ${formatSignedPercent(rate)}，价格 ${formatUsd(row.price)}`,
+      tag: `hyb-price-rise-${row.seed.id}`,
+      renotify: true
+    });
+    notification.onclick = () => {
+      window.focus();
+      state.view = 'table';
+      render();
+    };
   }
 
   function clampInt(value, min, max, fallback) {
