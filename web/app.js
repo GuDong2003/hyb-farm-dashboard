@@ -737,7 +737,7 @@
       const singleDaily = hasPrice ? singleNet * stats.dailyCycles : null;
       const totalDaily = hasPrice ? totalDailyForSeed(seed, price) : null;
       const expPerCrop = seed.experienceValue;
-      const expPerHarvest = expPerCrop * seed.harvestQuantity;
+      const expPerHarvest = expPerCrop * stats.grossYield;
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
       const expHourly = expTotalDaily / dailyHourBasis();
@@ -760,7 +760,7 @@
     return state.config.landCounts.reduce((sum, count, index) => {
       if (!count) return sum;
       const stats = levelStats(seed, index + 1);
-      return sum + count * seed.experienceValue * seed.harvestQuantity * stats.dailyCycles;
+      return sum + count * seed.experienceValue * stats.grossYield * stats.dailyCycles;
     }, 0);
   }
 
@@ -1112,11 +1112,11 @@
         </select>
       </section>
       <section class="landbar">
-        <div class="land-title">我的农场：</div>
+        <div class="land-title" title="各等级分别按对应产量和生长时间参与全地汇总">全地等级分布：</div>
         ${state.config.landCounts.map((count, index) => `<label class="land-field">Lv${index + 1}<input class="mini-input land-input" data-level="${index + 1}" type="number" min="0" max="${MAX_LANDS}" value="${count}" /></label>`).join('')}
         <div class="land-title">共 ${totalLands()}/${MAX_LANDS} 块</div>
         <div class="spacer"></div>
-        <label class="land-field">查看等级<select id="viewLevel" class="field">${Array.from({ length: 7 }, (_, index) => `<option value="${index + 1}" ${state.config.viewLevel === index + 1 ? 'selected' : ''}>Lv${index + 1}</option>`).join('')}</select></label>
+        <label class="land-field" title="只切换表格中的单地指标，不会改变全地混合收益和经验">单地指标等级<select id="viewLevel" class="field" aria-label="单地指标等级">${Array.from({ length: 7 }, (_, index) => `<option value="${index + 1}" ${state.config.viewLevel === index + 1 ? 'selected' : ''}>Lv${index + 1}</option>`).join('')}</select></label>
       </section>
       <section class="notice">
         <span><strong>状态</strong> ${escapeHtml(state.status)}</span>
@@ -1127,17 +1127,18 @@
       </section>
       <section class="formula-bar">
         <span class="formula-title">公式</span>
+        <span>全地指标：按左侧 Lv1～Lv7 地块数分别计算后求和；右侧等级只切换单地指标</span>
         <span>收益：Σ(地块数 × (毛产量 - 1) × 售价 × 每天次数（${dailyCycleLabel()}）)</span>
-        <span>单块收获经验：单作物经验 × 作物收获数量</span>
-        <span>每天经验：Σ(地块数 × 单块收获经验 × 每天次数（${dailyCycleLabel()}）)</span>
+        <span>单块收获经验：单作物经验 × 当前等级毛产量</span>
+        <span>每天经验：Σ(地块数 × 单作物经验 × 当前等级毛产量 × 每天次数（${dailyCycleLabel()}）)</span>
         <span>每小时经验：每天经验 ÷ ${state.config.cycleMode === 'full24' ? '24h' : `${state.config.activeHours}h`}</span>
         <span>涨跌幅：当前价 vs 选定区间基准价（${trendWindowLabel()}）</span>
-        <span>等级：收益产量每级 +1/3；生长时间每级 -1/15；经验收获数量固定</span>
+        <span>等级：收益与经验产量每级 +1/3；生长时间每级 -1/15</span>
       </section>
       <section class="summary">
-        <div>收益最优：<span>${bestRevenue ? `${escapeHtml(bestRevenue.row.seed.name)} ${formatUsd(bestRevenue.value)}/天` : '暂无'}</span></div>
-        <div>经验/天最优：<span>${bestExpDay ? `${escapeHtml(bestExpDay.row.seed.name)} ${formatNumber(bestExpDay.value, 2)}` : '暂无'}</span></div>
-        <div>经验/小时最优：<span>${bestExpHour ? `${escapeHtml(bestExpHour.row.seed.name)} ${formatNumber(bestExpHour.value, 2)}` : '暂无'}</span></div>
+        <div>全地收益最优：<span>${bestRevenue ? `${escapeHtml(bestRevenue.row.seed.name)} ${formatUsd(bestRevenue.value)}/天` : '暂无'}</span></div>
+        <div>全地经验/天最优：<span>${bestExpDay ? `${escapeHtml(bestExpDay.row.seed.name)} ${formatNumber(bestExpDay.value, 2)}` : '暂无'}</span></div>
+        <div>全地经验/小时最优：<span>${bestExpHour ? `${escapeHtml(bestExpHour.row.seed.name)} ${formatNumber(bestExpHour.value, 2)}` : '暂无'}</span></div>
       </section>
       <section class="table-wrap">
         ${renderTable(rows, bestRevenue && bestRevenue.row)}
@@ -1162,7 +1163,7 @@
             <th><button data-sort="hourly">每小时收益(单地)${sortMark('hourly')}</button></th>
             <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
             <th><button data-sort="totalDaily">每天收益(全地混合)${sortMark('totalDaily')}</button></th>
-            <th><button data-sort="expPerHarvest">单块收获经验${sortMark('expPerHarvest')}</button></th>
+            <th><button data-sort="expPerHarvest">单块收获经验 Lv${state.config.viewLevel}${sortMark('expPerHarvest')}</button></th>
             <th><button data-sort="expHourly">每小时经验(全地)${sortMark('expHourly')}</button></th>
             <th><button data-sort="expTotalDaily">每天经验(全地)${sortMark('expTotalDaily')}</button></th>
           </tr>
