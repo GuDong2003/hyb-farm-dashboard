@@ -1159,7 +1159,7 @@
             <th><button data-sort="hourly">每小时收益(单地)${sortMark('hourly')}</button></th>
             <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
             <th><button data-sort="totalDaily">每天收益(全地混合)${sortMark('totalDaily')}</button></th>
-            <th><button data-sort="expPerHarvest">单块收获经验 Lv${state.config.viewLevel}${sortMark('expPerHarvest')}</button></th>
+            <th><button data-sort="expPerHarvest">单块经验 Lv${state.config.viewLevel}${sortMark('expPerHarvest')}</button></th>
             <th><button data-sort="expHourly">经验/小时(单地 Lv${state.config.viewLevel})${sortMark('expHourly')}</button></th>
             <th><button data-sort="expTotalDaily">每天经验(全地)${sortMark('expTotalDaily')}</button></th>
           </tr>
