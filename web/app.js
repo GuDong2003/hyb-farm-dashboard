@@ -16,6 +16,7 @@
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const PRICE_CHANGE_ALERT_THRESHOLD = 20;
+  const PRICE_CHANGE_ALERT_WINDOW = '1h';
 
   const SEEDS = [
     { id: 'carrot', name: '胡萝卜', price: '500000', growthTime: 1800, harvestQuantity: 2, harvestValue: '500000', experienceValue: 5, isVipOnly: false, sortOrder: 10 },
@@ -720,6 +721,7 @@
       const previousPrice = Number((state.previousPrices.shop || {})[seed.id]);
       const capturedRate = Number(changeRates[seed.id]);
       const trendChange = trendChangeForSeed(seed.id);
+      const alertTrendChange = trendChangeForSeed(seed.id, PRICE_CHANGE_ALERT_WINDOW, true);
       const hasPrice = Number.isFinite(price);
       const hasPreviousPrice = Number.isFinite(previousPrice);
       const priceDelta = hasPrice && hasPreviousPrice ? price - previousPrice : null;
@@ -739,7 +741,8 @@
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
       const expHourly = expTotalDaily / dailyHourBasis();
-      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, priceChangeRate, priceChangeSource, priceChangeBaseAt: trendChange.baseAt || '', priceTrendUpdatedAt: trendChange.updatedAt || '', stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
+      const priceAlertRate = Number.isFinite(Number(alertTrendChange.rate)) ? alertTrendChange.rate : null;
+      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, priceChangeRate, priceChangeSource, priceChangeBaseAt: trendChange.baseAt || '', priceTrendUpdatedAt: trendChange.updatedAt || '', priceAlertRate, priceAlertBaseAt: alertTrendChange.baseAt || '', priceAlertUpdatedAt: alertTrendChange.updatedAt || '', stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
     });
     const dir = state.config.sortDir === 'asc' ? 1 : -1;
     return rows.sort((a, b) => compareRows(a, b, state.config.sortKey) * dir || a.seed.sortOrder - b.seed.sortOrder);
@@ -773,18 +776,18 @@
     return ['1h', '6h', '12h', '24h', '7d'].includes(state.config.trendWindow) ? state.config.trendWindow : '24h';
   }
 
-  function trendWindowConfig() {
-    const value = trendWindowLabel();
-    if (value === '7d') return { value, source: 'daily', ms: 7 * 24 * 60 * 60 * 1000 };
-    return { value, source: 'hourly', ms: Number(value.replace('h', '')) * 60 * 60 * 1000 };
+  function trendWindowConfig(value) {
+    const normalized = ['1h', '6h', '12h', '24h', '7d'].includes(value) ? value : trendWindowLabel();
+    if (normalized === '7d') return { value: normalized, source: 'daily', ms: 7 * 24 * 60 * 60 * 1000 };
+    return { value: normalized, source: 'hourly', ms: Number(normalized.replace('h', '')) * 60 * 60 * 1000 };
   }
 
-  function trendChangeForSeed(seedId) {
+  function trendChangeForSeed(seedId, windowValue, requireFullWindow) {
     const trend = state.priceTrends && state.priceTrends.shop && state.priceTrends.shop[seedId];
     if (!trend) return {};
-    const config = trendWindowConfig();
+    const config = trendWindowConfig(windowValue);
     const series = Array.isArray(trend[config.source]) ? trend[config.source] : [];
-    const anchor = trendAnchor(series, config.ms, trend.lastRefreshedAt);
+    const anchor = trendAnchor(series, config.ms, trend.lastRefreshedAt, requireFullWindow);
     const current = Number(trend.unitPrice);
     const base = Number(anchor && anchor.avgUnitPrice);
     if (!Number.isFinite(current) || !Number.isFinite(base) || base <= 0) return {};
@@ -796,7 +799,7 @@
     };
   }
 
-  function trendAnchor(series, windowMs, referenceAt) {
+  function trendAnchor(series, windowMs, referenceAt, requireFullWindow) {
     const points = Array.isArray(series) ? series.filter((point) => Number.isFinite(Date.parse(point.bucketStartedAt)) && Number.isFinite(Number(point.avgUnitPrice))) : [];
     if (!points.length) return null;
     const reference = Date.parse(referenceAt) || Date.now();
@@ -807,7 +810,7 @@
       if (time <= target) anchor = point;
       else break;
     }
-    return anchor || points[0];
+    return anchor || (requireFullWindow ? null : points[0]);
   }
 
   function compareRows(a, b, key) {
@@ -847,9 +850,9 @@
 
   function bestPriceRiseRow(rows) {
     return rows.reduce((current, row) => {
-      const rate = Number(row.priceChangeRate);
+      const rate = Number(row.priceAlertRate);
       if (!Number.isFinite(rate) || rate < PRICE_CHANGE_ALERT_THRESHOLD) return current;
-      if (!current || rate > Number(current.priceChangeRate)) return row;
+      if (!current || rate > Number(current.priceAlertRate)) return row;
       return current;
     }, null);
   }
@@ -857,7 +860,7 @@
   function topPriceRiseAlert(rows) {
     const best = bestPriceRiseRow(rows);
     if (!best) return '';
-    return `<div class="top-alert" title="${escapeHtml(priceChangeRateTitle(best))}"><span class="top-alert-label">涨幅异常</span><strong>${escapeHtml(best.seed.name)}</strong><span>${formatSignedPercent(best.priceChangeRate)}</span><span>${formatUsd(best.price)}</span></div>`;
+    return `<div class="top-alert" title="${escapeHtml(priceAlertRateTitle(best))}"><span class="top-alert-label">1h 涨幅异常</span><strong>${escapeHtml(best.seed.name)}</strong><span>${formatSignedPercent(best.priceAlertRate)}</span><span>${formatUsd(best.price)}</span></div>`;
   }
 
   function totalLands() {
@@ -921,15 +924,22 @@
     `;
   }
 
-  function renderHistoryLineChart(group) {
+  function renderHistoryLineChart(group, result) {
     const events = (Array.isArray(group && group.events) ? group.events : [])
       .slice()
       .sort((a, b) => Number(a.previousCapturedAt || a.capturedAt) - Number(b.previousCapturedAt || b.capturedAt));
-    const points = anomalyChartPoints(events);
+    const seriesItem = (Array.isArray(result && result.series) ? result.series : [])
+      .find((item) => item.seedId === group.seedId);
+    const seriesPoints = seriesItem && Array.isArray(seriesItem.points)
+      ? seriesItem.points.filter((point) => Number.isFinite(Number(point.capturedAt)) && Number.isFinite(Number(point.price)))
+        .map((point) => ({ capturedAt: Number(point.capturedAt), price: Number(point.price) }))
+        .sort((a, b) => a.capturedAt - b.capturedAt)
+      : [];
+    const points = seriesPoints.length >= 2 ? seriesPoints : anomalyChartPoints(events);
     if (points.length < 2) {
       return `
         <aside class="history-line-panel">
-          <div class="history-line-head"><strong>异常区间</strong><span>暂无</span></div>
+          <div class="history-line-head"><strong>完整价格趋势</strong><span>暂无</span></div>
           <div class="history-line-empty">趋势数据不足</div>
         </aside>
       `;
@@ -950,37 +960,47 @@
     const pricePad = (maxPrice - minPrice) * 0.12;
     minPrice = Math.max(0, minPrice - pricePad);
     maxPrice += pricePad;
+    const plotHeight = height - pad.top - pad.bottom;
     const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
-    const y = (price) => pad.top + (1 - ((price - minPrice) / Math.max(1, maxPrice - minPrice))) * (height - pad.top - pad.bottom);
+    const y = (price) => pad.top + (1 - ((price - minPrice) / Math.max(1, maxPrice - minPrice))) * plotHeight;
     const path = points.map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`).join(' ');
-    const eventMap = new Map(events.map((event) => [String(event.capturedAt), event]));
-    const markers = points.map((point) => {
-      const event = eventMap.get(String(point.capturedAt));
-      if (!event) return '';
+    const highlights = events.map((event) => {
+      const previousCapturedAt = Number(event.previousCapturedAt);
+      const capturedAt = Number(event.capturedAt);
+      const previousPrice = Number(event.previousPrice);
+      const currentPrice = Number(event.currentPrice);
+      if (![previousCapturedAt, capturedAt, previousPrice, currentPrice].every(Number.isFinite)) return '';
+      if (capturedAt < minTime || previousCapturedAt > maxTime) return '';
       const direction = Number(event.changeRate) > 0 ? 'up' : 'down';
-      const title = `${formatTime(event.previousCapturedAt)} -> ${formatTime(event.capturedAt)} ${formatSignedPercent(event.changeRate)}`;
-      return `<circle class="history-line-marker ${direction}" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="4"><title>${escapeHtml(title)}</title></circle>`;
+      const startX = x(previousCapturedAt);
+      const endX = x(capturedAt);
+      const title = `${formatTime(previousCapturedAt)} → ${formatTime(capturedAt)}，${formatUsd(previousPrice)} → ${formatUsd(currentPrice)}（${formatSignedPercent(event.changeRate)}）`;
+      return `<g class="history-line-anomaly ${direction}"><title>${escapeHtml(title)}</title><rect class="history-line-anomaly-band" x="${formatNumber(Math.min(startX, endX), 2)}" y="${pad.top}" width="${formatNumber(Math.max(2, Math.abs(endX - startX)), 2)}" height="${plotHeight}"></rect><line class="history-line-anomaly-segment" x1="${formatNumber(startX, 2)}" y1="${formatNumber(y(previousPrice), 2)}" x2="${formatNumber(endX, 2)}" y2="${formatNumber(y(currentPrice), 2)}"></line><circle class="history-line-anomaly-start" cx="${formatNumber(startX, 2)}" cy="${formatNumber(y(previousPrice), 2)}" r="3"></circle><circle class="history-line-marker ${direction}" cx="${formatNumber(endX, 2)}" cy="${formatNumber(y(currentPrice), 2)}" r="4"></circle></g>`;
     }).join('');
     const yTicks = [0, 0.5, 1].map((ratio) => {
-      const tickY = pad.top + ratio * (height - pad.top - pad.bottom);
+      const tickY = pad.top + ratio * plotHeight;
       const value = maxPrice - (maxPrice - minPrice) * ratio;
       return `<g><line class="history-line-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line><text class="history-line-label" x="${pad.left - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(formatUsd(value))}</text></g>`;
     }).join('');
+    const pointMarkers = points.length <= 120
+      ? points.map((point) => `<circle class="history-line-point" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="2"><title>${escapeHtml(`${formatTime(point.capturedAt)} ${formatUsd(point.price)}`)}</title></circle>`).join('')
+      : '';
     const first = points[0];
     const last = points[points.length - 1];
     const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
+    const rangeMs = maxTime - minTime;
     return `
       <aside class="history-line-panel">
-        <div class="history-line-head"><strong>异常区间</strong><span>${events.length} 段</span></div>
+        <div class="history-line-head"><strong>完整价格趋势</strong><span>${points.length} 点 · ${events.length} 处异常</span></div>
         <div class="history-line-chart-wrap">
-          <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(group.seedId)} 异常涨跌区间" preserveAspectRatio="xMidYMid meet">
+          <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(group.seedId)} 完整价格趋势及异常区间" preserveAspectRatio="xMidYMid meet">
             <rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>
             ${yTicks}
             <path class="history-line-path" d="${path}"></path>
-            ${points.map((point) => `<circle class="history-line-point" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="2"><title>${escapeHtml(`${formatTime(point.capturedAt)} ${formatUsd(point.price)}`)}</title></circle>`).join('')}
-            ${markers}
-            <text class="history-line-label" x="${pad.left}" y="${height - 8}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt))}</text>
-            <text class="history-line-label" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt))}</text>
+            ${pointMarkers}
+            ${highlights}
+            <text class="history-line-label" x="${pad.left}" y="${height - 8}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt, rangeMs))}</text>
+            <text class="history-line-label" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt, rangeMs))}</text>
           </svg>
         </div>
         <div class="history-line-meta"><span>${formatUsd(first.price)}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${formatSignedPercent(totalChange)}</span><span>${formatUsd(last.price)}</span></div>
@@ -1053,7 +1073,7 @@
             </div>
             ${group.events.map(renderHistoryEvent).join('')}
           </div>
-          ${renderHistoryLineChart(group)}
+          ${renderHistoryLineChart(group, result)}
         </div>
       </div>
     `;
@@ -1179,6 +1199,13 @@
     return `${sourceText}：${formatSignedPercent(row.priceChangeRate)}，当前价格：${formatUsd(row.price)}${baseText}${updatedText}${previousText}${deltaText}`;
   }
 
+  function priceAlertRateTitle(row) {
+    if (!Number.isFinite(Number(row.priceAlertRate))) return '没有完整的一小时涨幅数据';
+    const baseText = row.priceAlertBaseAt ? `，基准时间：${formatTime(row.priceAlertBaseAt)}` : '';
+    const updatedText = row.priceAlertUpdatedAt ? `，刷新：${formatTime(row.priceAlertUpdatedAt)}` : '';
+    return `前后 1 小时涨幅：${formatSignedPercent(row.priceAlertRate)}，当前价格：${formatUsd(row.price)}${baseText}${updatedText}`;
+  }
+
   function renderRow(row, best) {
     return `
       <tr class="${row.seed.isVipOnly ? 'vip' : ''} ${best ? 'best' : ''}">
@@ -1233,7 +1260,7 @@
               <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
             <label class="toggle-row">
-              <span class="toggle-text"><strong>涨幅异常通知</strong><small>发现当前最高涨幅超过 ${formatNumber(PRICE_CHANGE_ALERT_THRESHOLD, 0)}% 时使用浏览器通知提醒</small></span>
+              <span class="toggle-text"><strong>涨幅异常通知</strong><small>仅当前后 1 小时涨幅达到 ${formatNumber(PRICE_CHANGE_ALERT_THRESHOLD, 0)}% 时使用浏览器通知提醒</small></span>
               <span class="toggle-control"><input id="browserPriceAlerts" type="checkbox" ${state.config.browserPriceAlerts ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
           </div>
@@ -1506,14 +1533,14 @@
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     const row = bestPriceRiseRow(computeRows());
     if (!row) return;
-    const rate = Number(row.priceChangeRate);
+    const rate = Number(row.priceAlertRate);
     const capturedAt = Number(state.lastImportedAt) || 0;
     const alertKey = `${row.seed.id}:${capturedAt}:${formatNumber(rate, 2)}:${formatNumber(row.price, 5)}`;
     if (!force && state.config.notifiedPriceAlertKey === alertKey) return;
     state.config.notifiedPriceAlertKey = alertKey;
     saveState();
-    const notification = new Notification('HYB Farm 涨幅异常', {
-      body: `${row.seed.name} 当前涨幅 ${formatSignedPercent(rate)}，价格 ${formatUsd(row.price)}`,
+    const notification = new Notification('HYB Farm 1h 涨幅异常', {
+      body: `${row.seed.name} 前后 1 小时涨幅 ${formatSignedPercent(rate)}，价格 ${formatUsd(row.price)}`,
       tag: `hyb-price-rise-${row.seed.id}`,
       renotify: true
     });
@@ -1564,9 +1591,12 @@
     return date.toLocaleString('zh-CN', { hour12: false });
   }
 
-  function formatChartDate(value) {
+  function formatChartDate(value, rangeMs) {
     const date = new Date(Number(value));
     if (!Number.isFinite(date.getTime())) return '暂无';
+    if (Number(rangeMs) <= 48 * 60 * 60 * 1000) {
+      return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    }
     return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
   }
 
