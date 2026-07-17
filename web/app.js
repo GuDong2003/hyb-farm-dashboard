@@ -738,9 +738,9 @@
       const totalDaily = hasPrice ? totalDailyForSeed(seed, price) : null;
       const expPerCrop = seed.experienceValue;
       const expPerHarvest = expPerCrop * stats.grossYield;
+      const expHourly = expPerHarvest / stats.growthHours;
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
-      const expHourly = totalHourlyExpForSeed(seed);
       const priceAlertRate = Number.isFinite(Number(alertTrendChange.rate)) ? alertTrendChange.rate : null;
       return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, priceChangeRate, priceChangeSource, priceChangeBaseAt: trendChange.baseAt || '', priceTrendUpdatedAt: trendChange.updatedAt || '', priceAlertRate, priceAlertBaseAt: alertTrendChange.baseAt || '', priceAlertUpdatedAt: alertTrendChange.updatedAt || '', stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
     });
@@ -761,14 +761,6 @@
       if (!count) return sum;
       const stats = levelStats(seed, index + 1);
       return sum + count * seed.experienceValue * stats.grossYield * stats.dailyCycles;
-    }, 0);
-  }
-
-  function totalHourlyExpForSeed(seed) {
-    return state.config.landCounts.reduce((sum, count, index) => {
-      if (!count) return sum;
-      const stats = levelStats(seed, index + 1);
-      return sum + count * seed.experienceValue * stats.grossYield / seed.growthHours;
     }, 0);
   }
 
@@ -1135,14 +1127,14 @@
         <span>收益：Σ(地块数 × (毛产量 - 1) × 售价 × 每天次数（${dailyCycleLabel()}）)</span>
         <span>单块收获经验：单作物经验 × 当前等级毛产量</span>
         <span>每天经验：Σ(地块数 × 单作物经验 × 当前等级毛产量 × 每天次数（${dailyCycleLabel()}）)</span>
-        <span>基础每小时经验：Σ(地块数 × 单作物经验 × 当前等级毛产量 ÷ 作物基础生长时间)，缩时只体现在每天次数</span>
+        <span>单地每小时经验：单块收获经验 ÷ 当前等级生长时间（已包含地块缩时）</span>
         <span>涨跌幅：当前价 vs 选定区间基准价（${trendWindowLabel()}）</span>
         <span>等级：收益与经验产量每级 +1/3；生长时间每级 -1/15</span>
       </section>
       <section class="summary">
         <div>全地收益最优：<span>${bestRevenue ? `${escapeHtml(bestRevenue.row.seed.name)} ${formatUsd(bestRevenue.value)}/天` : '暂无'}</span></div>
         <div>全地经验/天最优：<span>${bestExpDay ? `${escapeHtml(bestExpDay.row.seed.name)} ${formatNumber(bestExpDay.value, 2)}` : '暂无'}</span></div>
-        <div>全地基础经验/小时最优：<span>${bestExpHour ? `${escapeHtml(bestExpHour.row.seed.name)} ${formatNumber(bestExpHour.value, 2)}` : '暂无'}</span></div>
+        <div>单地经验/小时最优 Lv${state.config.viewLevel}：<span>${bestExpHour ? `${escapeHtml(bestExpHour.row.seed.name)} ${formatNumber(bestExpHour.value, 2)}` : '暂无'}</span></div>
       </section>
       <section class="table-wrap">
         ${renderTable(rows, bestRevenue && bestRevenue.row)}
@@ -1168,7 +1160,7 @@
             <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
             <th><button data-sort="totalDaily">每天收益(全地混合)${sortMark('totalDaily')}</button></th>
             <th><button data-sort="expPerHarvest">单块收获经验 Lv${state.config.viewLevel}${sortMark('expPerHarvest')}</button></th>
-            <th><button data-sort="expHourly">基础每小时经验(全地)${sortMark('expHourly')}</button></th>
+            <th><button data-sort="expHourly">经验/小时(单地 Lv${state.config.viewLevel})${sortMark('expHourly')}</button></th>
             <th><button data-sort="expTotalDaily">每天经验(全地)${sortMark('expTotalDaily')}</button></th>
           </tr>
         </thead>
