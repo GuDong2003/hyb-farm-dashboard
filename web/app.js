@@ -1156,10 +1156,10 @@
             <th><button data-sort="price">当前售价($)${sortMark('price')}</button></th>
             <th><button data-sort="priceChangeRate">涨跌幅度${sortMark('priceChangeRate')}</button></th>
             <th><button data-sort="singleNet">单次收益${sortMark('singleNet')}</button></th>
-            <th><button data-sort="hourly">每小时收益(单地)${sortMark('hourly')}</button></th>
-            <th><button data-sort="singleDaily">每天收益(单地)${sortMark('singleDaily')}</button></th>
+            <th><button data-sort="hourly">小时收益(单地 Lv${state.config.viewLevel})${sortMark('hourly')}</button></th>
+            <th><button data-sort="singleDaily">每天收益(单地 Lv${state.config.viewLevel})${sortMark('singleDaily')}</button></th>
             <th><button data-sort="totalDaily">每天收益(全地混合)${sortMark('totalDaily')}</button></th>
-            <th><button data-sort="expPerHarvest">单块经验 Lv${state.config.viewLevel}${sortMark('expPerHarvest')}</button></th>
+            <th><button data-sort="expPerHarvest">经验(单地 Lv${state.config.viewLevel})${sortMark('expPerHarvest')}</button></th>
             <th><button data-sort="expHourly">经验/小时(单地 Lv${state.config.viewLevel})${sortMark('expHourly')}</button></th>
             <th><button data-sort="expTotalDaily">每天经验(全地)${sortMark('expTotalDaily')}</button></th>
           </tr>
