@@ -238,7 +238,39 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .mini-input { width: 52px; height: 30px; padding: 0 6px; text-align: center; }
 .land-field { display: grid; justify-items: center; gap: 2px; color: var(--land-text); font-size: 12px; }
 .land-title { padding-bottom: 5px; font-weight: 800; }
-.spacer { flex: 1; min-width: 12px; }
+.experience-calculator {
+  display: flex;
+  flex: 1 1 400px;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 14px;
+  min-width: 390px;
+  margin-left: 20px;
+}
+.experience-input-field {
+  display: grid;
+  flex: none;
+  gap: 2px;
+  color: var(--land-text);
+  font-size: 12px;
+}
+.experience-total-input { width: 132px; text-align: right; font-variant-numeric: tabular-nums; }
+.experience-result {
+  display: flex;
+  flex: 1 1 240px;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  align-items: center;
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--formula-bg);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.experience-result strong { color: var(--text); font-weight: 850; }
 
 .table-wrap { margin-top: 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 table { width: 100%; min-width: 1560px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
@@ -314,6 +346,8 @@ tr:hover td { background: var(--row-hover); }
   font-weight: 750;
 }
 .summary span { color: var(--muted); font-weight: 600; }
+.summary-level-field { display: inline-flex; align-items: center; gap: 6px; color: var(--text); white-space: nowrap; }
+.summary-level-field .field { height: 30px; min-height: 30px; }
 
 .history-view { display: grid; gap: 12px; width: 100%; }
 .history-head, .history-section {
@@ -417,6 +451,11 @@ tr:hover td { background: var(--row-hover); }
   .top-alert { order: 4; width: 100%; max-width: none; justify-content: center; }
   .history-link { margin-left: 0; }
   .main { padding: 10px 10px 18px; }
+  .experience-calculator { flex-basis: 100%; min-width: 0; width: 100%; margin: 4px 0 0; }
+  .experience-input-field { width: 100%; }
+  .experience-total-input { width: 100%; }
+  .experience-result { flex-basis: 100%; }
+  .summary-level-field { width: 100%; justify-content: space-between; }
   .history-head { align-items: flex-start; flex-direction: column; }
   .history-group-body { grid-template-columns: 1fr; }
   .history-row { grid-template-columns: 132px 132px 96px 96px 82px; min-width: 560px; }

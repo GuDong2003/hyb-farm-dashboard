@@ -3,6 +3,9 @@
 
   const UNIT_PER_USD = 500000;
   const MAX_LANDS = 20;
+  const MAX_FARM_LEVEL = 100;
+  const FIRST_LEVEL_EXP = 100;
+  const LEVEL_EXP_GROWTH = 1.5;
   const DEFAULT_ACTIVE_HOURS = 16;
   const STORE_KEY = 'hybFarmDashboard.v1';
   const DB_NAME = 'hybFarmDashboardDB';
@@ -82,6 +85,7 @@
         notifiedPriceAlertKey: '',
         theme: 'system',
         landCounts: [13, 0, 0, 0, 0, 0, 0],
+        currentTotalExp: 0,
         trendWindow: '24h',
         sortKey: 'totalDaily',
         sortDir: 'desc'
@@ -106,6 +110,7 @@
       const merged = Object.assign({}, base, stored);
       merged.config = Object.assign({}, base.config, stored.config || {});
       merged.config.landCounts = normalizeLandCounts(merged.config.landCounts);
+      merged.config.currentTotalExp = normalizeTotalExperience(merged.config.currentTotalExp);
       merged.config.source = 'shop';
       if (!['1h', '6h', '12h', '24h', '7d'].includes(merged.config.trendWindow)) merged.config.trendWindow = base.config.trendWindow;
       delete merged.config.seedMode;
@@ -185,6 +190,11 @@
       remaining -= limited;
       return limited;
     });
+  }
+
+  function normalizeTotalExperience(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : 0;
   }
 
   function toUsd(raw) {
@@ -764,6 +774,65 @@
     }, 0);
   }
 
+  function theoreticalDailyExpForSeed(seed) {
+    return state.config.landCounts.reduce((sum, count, index) => {
+      if (!count) return sum;
+      const stats = levelStats(seed, index + 1);
+      return sum + count * seed.experienceValue * stats.grossYield * (24 / stats.growthHours);
+    }, 0);
+  }
+
+  function bestTheoreticalDailyExperience() {
+    if (!totalLands()) return null;
+    return SEEDS.reduce((best, seed) => {
+      const value = theoreticalDailyExpForSeed(seed);
+      if (!best || value > best.value) return { seed, value };
+      return best;
+    }, null);
+  }
+
+  function farmLevelRequirement(level) {
+    const currentLevel = clampInt(level, 1, MAX_FARM_LEVEL, 1);
+    if (currentLevel >= MAX_FARM_LEVEL) return 0;
+    return FIRST_LEVEL_EXP * Math.pow(LEVEL_EXP_GROWTH, currentLevel - 1);
+  }
+
+  function farmLevelProgress(totalExperience) {
+    const totalExp = normalizeTotalExperience(totalExperience);
+    let level = 1;
+    let levelStartExp = 0;
+
+    while (level < MAX_FARM_LEVEL) {
+      const required = farmLevelRequirement(level);
+      if (totalExp < levelStartExp + required) {
+        return {
+          level,
+          nextLevel: level + 1,
+          remainingExp: levelStartExp + required - totalExp,
+          isMaxLevel: false
+        };
+      }
+      levelStartExp += required;
+      level += 1;
+    }
+
+    return { level: MAX_FARM_LEVEL, nextLevel: null, remainingExp: 0, isMaxLevel: true };
+  }
+
+  function formatUpgradeDuration(days) {
+    const value = Number(days);
+    if (!Number.isFinite(value) || value < 0) return '暂无';
+    const totalMinutes = Math.ceil(value * 24 * 60);
+    if (totalMinutes <= 1) return '< 1 分钟';
+    if (totalMinutes < 60) return `${totalMinutes} 分钟`;
+    const totalHours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (totalHours < 24) return `${totalHours} 小时${minutes ? ` ${minutes} 分钟` : ''}`;
+    const daysPart = Math.floor(totalHours / 24);
+    const hoursPart = totalHours % 24;
+    return `${daysPart} 天${hoursPart ? ` ${hoursPart} 小时` : ''}`;
+  }
+
   function dailyCycleLabel() {
     return state.config.cycleMode === 'full24' ? '24h' : `${state.config.activeHours}h`;
   }
@@ -1088,6 +1157,45 @@
     `;
   }
 
+  function renderFarmExperienceResult() {
+    const progress = farmLevelProgress(state.config.currentTotalExp);
+    const bestDailyExp = bestTheoreticalDailyExperience();
+
+    if (progress.isMaxLevel) {
+      return `
+        <span>当前等级 <strong>Lv${MAX_FARM_LEVEL}</strong></span>
+        <span><strong>已达到等级上限</strong></span>
+        ${bestDailyExp ? `<span>理论经验/天 <strong>${escapeHtml(bestDailyExp.seed.name)} ${formatNumber(bestDailyExp.value, 2)}</strong></span>` : '<span>理论经验/天 <strong>请先设置地块</strong></span>'}
+      `;
+    }
+
+    const upgradeDays = bestDailyExp && bestDailyExp.value > 0 ? progress.remainingExp / bestDailyExp.value : null;
+    return `
+      <span>当前等级 <strong>Lv${progress.level}</strong></span>
+      <span>距 Lv${progress.nextLevel} <strong>${formatNumber(progress.remainingExp, 2)} 经验</strong></span>
+      ${bestDailyExp ? `<span>理论经验/天 <strong>${escapeHtml(bestDailyExp.seed.name)} ${formatNumber(bestDailyExp.value, 2)}</strong></span>` : '<span>理论经验/天 <strong>请先设置地块</strong></span>'}
+      <span>预计升级 <strong>${upgradeDays == null ? '暂无' : formatUpgradeDuration(upgradeDays)}</strong></span>
+    `;
+  }
+
+  function renderFarmExperienceCalculator() {
+    return `
+      <div class="experience-calculator">
+        <label class="experience-input-field">当前总经验
+          <input id="currentTotalExp" class="field experience-total-input" type="number" min="0" step="1" inputmode="numeric" value="${state.config.currentTotalExp}" />
+        </label>
+        <div id="farmExperienceResult" class="experience-result" aria-live="polite">
+          ${renderFarmExperienceResult()}
+        </div>
+      </div>
+    `;
+  }
+
+  function updateFarmExperienceCalculator() {
+    const result = document.getElementById('farmExperienceResult');
+    if (result) result.innerHTML = renderFarmExperienceResult();
+  }
+
   function renderTableView(rows, bestRevenue, bestExpDay, bestExpHour) {
     return `
       <section class="toolbar">
@@ -1111,8 +1219,7 @@
         <div class="land-title" title="各等级分别按对应产量和生长时间参与全地汇总">全地等级分布：</div>
         ${state.config.landCounts.map((count, index) => `<label class="land-field">Lv${index + 1}<input class="mini-input land-input" data-level="${index + 1}" type="number" min="0" max="${MAX_LANDS}" value="${count}" /></label>`).join('')}
         <div class="land-title">共 ${totalLands()}/${MAX_LANDS} 块</div>
-        <div class="spacer"></div>
-        <label class="land-field" title="只切换表格中的单地指标，不会改变全地混合收益和经验">单地指标等级<select id="viewLevel" class="field" aria-label="单地指标等级">${Array.from({ length: 7 }, (_, index) => `<option value="${index + 1}" ${state.config.viewLevel === index + 1 ? 'selected' : ''}>Lv${index + 1}</option>`).join('')}</select></label>
+        ${renderFarmExperienceCalculator()}
       </section>
       <section class="notice">
         <span><strong>状态</strong> ${escapeHtml(state.status)}</span>
@@ -1123,17 +1230,20 @@
       </section>
       <section class="formula-bar">
         <span class="formula-title">公式</span>
-        <span>全地指标：按左侧 Lv1～Lv7 地块数分别计算后求和；右侧等级只切换单地指标</span>
+        <span>全地指标：按左侧 Lv1～Lv7 地块数分别计算后求和；「单地指标等级」只切换表格中的单地指标</span>
         <span>收益：Σ(地块数 × (毛产量 - 1) × 售价 × 每天次数（${dailyCycleLabel()}）)</span>
         <span>单块收获经验：单作物经验 × 当前等级毛产量</span>
         <span>每天经验：Σ(地块数 × 单作物经验 × 当前等级毛产量 × 每天次数（${dailyCycleLabel()}）)</span>
         <span>单地每小时经验：单块收获经验 ÷ 当前等级生长时间（已包含地块缩时）</span>
+        <span>升级时间：距下一级经验 ÷ 当前全地最高的 24h 理论经验/天</span>
         <span>涨跌幅：当前价 vs 选定区间基准价（${trendWindowLabel()}）</span>
-        <span>等级：收益与经验产量每级 +1/3；生长时间每级 -1/15</span>
+        <span>地块等级：收益与经验产量每级 +1/3；生长时间每级 -1/15</span>
+        <span>农场等级：1→2 需 100 经验，之后每级需求 ×1.5</span>
       </section>
       <section class="summary">
         <div>全地收益最优：<span>${bestRevenue ? `${escapeHtml(bestRevenue.row.seed.name)} ${formatUsd(bestRevenue.value)}/天` : '暂无'}</span></div>
         <div>全地经验/天最优：<span>${bestExpDay ? `${escapeHtml(bestExpDay.row.seed.name)} ${formatNumber(bestExpDay.value, 2)}` : '暂无'}</span></div>
+        <label class="summary-level-field" title="只切换表格中的单地指标，不会改变全地混合收益和经验">单地指标等级<select id="viewLevel" class="field" aria-label="单地指标等级">${Array.from({ length: 7 }, (_, index) => `<option value="${index + 1}" ${state.config.viewLevel === index + 1 ? 'selected' : ''}>Lv${index + 1}</option>`).join('')}</select></label>
         <div>单地经验/小时最优 Lv${state.config.viewLevel}：<span>${bestExpHour ? `${escapeHtml(bestExpHour.row.seed.name)} ${formatNumber(bestExpHour.value, 2)}` : '暂无'}</span></div>
       </section>
       <section class="table-wrap">
@@ -1324,6 +1434,14 @@
     if (trendWindow) trendWindow.addEventListener('change', () => { state.config.trendWindow = trendWindow.value; saveState(); render(); });
     const viewLevel = document.getElementById('viewLevel');
     if (viewLevel) viewLevel.addEventListener('change', () => { state.config.viewLevel = clampInt(viewLevel.value, 1, 7, 1); saveState(); render(); });
+    const currentTotalExp = document.getElementById('currentTotalExp');
+    if (currentTotalExp) {
+      currentTotalExp.addEventListener('input', () => {
+        state.config.currentTotalExp = normalizeTotalExperience(currentTotalExp.value);
+        saveState();
+        updateFarmExperienceCalculator();
+      });
+    }
     document.querySelectorAll('.land-input').forEach((input) => {
       input.addEventListener('change', () => {
         const index = clampInt(input.dataset.level, 1, 7, 1) - 1;
