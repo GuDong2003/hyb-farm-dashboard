@@ -240,12 +240,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .land-title { padding-bottom: 5px; font-weight: 800; }
 .experience-calculator {
   display: flex;
-  flex: 1 1 400px;
+  flex: 0 1 560px;
   flex-wrap: wrap;
   align-items: end;
   gap: 8px 14px;
   min-width: 390px;
-  margin-left: 20px;
+  margin-left: auto;
 }
 .experience-input-field {
   display: grid;
@@ -259,18 +259,17 @@ button, a { -webkit-tap-highlight-color: transparent; }
   display: flex;
   flex: 1 1 240px;
   flex-wrap: wrap;
-  gap: 5px 14px;
+  gap: 5px 18px;
   align-items: center;
   min-width: 0;
   min-height: 32px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: var(--formula-bg);
-  color: var(--muted);
-  font-size: 12px;
+  padding: 0 0 5px;
+  color: var(--text);
+  font-weight: 800;
   line-height: 1.35;
 }
 .experience-result strong { color: var(--text); font-weight: 850; }
+.experience-result span { white-space: nowrap; }
 
 .table-wrap { margin-top: 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 table { width: 100%; min-width: 1560px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
@@ -346,7 +345,7 @@ tr:hover td { background: var(--row-hover); }
   font-weight: 750;
 }
 .summary span { color: var(--muted); font-weight: 600; }
-.summary-level-field { display: inline-flex; align-items: center; gap: 6px; color: var(--text); white-space: nowrap; }
+.summary-level-field { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--text); white-space: nowrap; }
 .summary-level-field .field { height: 30px; min-height: 30px; }
 
 .history-view { display: grid; gap: 12px; width: 100%; }
@@ -455,7 +454,7 @@ tr:hover td { background: var(--row-hover); }
   .experience-input-field { width: 100%; }
   .experience-total-input { width: 100%; }
   .experience-result { flex-basis: 100%; }
-  .summary-level-field { width: 100%; justify-content: space-between; }
+  .summary-level-field { width: 100%; margin-left: 0; justify-content: space-between; }
   .history-head { align-items: flex-start; flex-direction: column; }
   .history-group-body { grid-template-columns: 1fr; }
   .history-row { grid-template-columns: 132px 132px 96px 96px 82px; min-width: 560px; }

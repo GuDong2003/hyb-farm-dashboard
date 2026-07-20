@@ -1243,8 +1243,8 @@
       <section class="summary">
         <div>全地收益最优：<span>${bestRevenue ? `${escapeHtml(bestRevenue.row.seed.name)} ${formatUsd(bestRevenue.value)}/天` : '暂无'}</span></div>
         <div>全地经验/天最优：<span>${bestExpDay ? `${escapeHtml(bestExpDay.row.seed.name)} ${formatNumber(bestExpDay.value, 2)}` : '暂无'}</span></div>
-        <label class="summary-level-field" title="只切换表格中的单地指标，不会改变全地混合收益和经验">单地指标等级<select id="viewLevel" class="field" aria-label="单地指标等级">${Array.from({ length: 7 }, (_, index) => `<option value="${index + 1}" ${state.config.viewLevel === index + 1 ? 'selected' : ''}>Lv${index + 1}</option>`).join('')}</select></label>
         <div>单地经验/小时最优 Lv${state.config.viewLevel}：<span>${bestExpHour ? `${escapeHtml(bestExpHour.row.seed.name)} ${formatNumber(bestExpHour.value, 2)}` : '暂无'}</span></div>
+        <label class="summary-level-field" title="只切换表格中的单地指标，不会改变全地混合收益和经验">单地指标等级<select id="viewLevel" class="field" aria-label="单地指标等级">${Array.from({ length: 7 }, (_, index) => `<option value="${index + 1}" ${state.config.viewLevel === index + 1 ? 'selected' : ''}>Lv${index + 1}</option>`).join('')}</select></label>
       </section>
       <section class="table-wrap">
         ${renderTable(rows, bestRevenue && bestRevenue.row)}
