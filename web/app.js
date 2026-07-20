@@ -102,6 +102,7 @@
       historyLoading: false,
       historyLoadedAt: 0,
       historyError: '',
+      trendModalSeedId: '',
       error: ''
     };
 
@@ -960,6 +961,7 @@
         </main>
       </div>
     `;
+    document.body.classList.toggle('modal-open', state.view === 'table' && Boolean(state.trendModalSeedId));
     bindEvents();
   }
 
@@ -1157,6 +1159,103 @@
     `;
   }
 
+  function cropTrendData(seedId) {
+    const alerts = state.historyAlerts || {};
+    const cloud = alerts.cloud || emptyHistoryResult();
+    const local = alerts.local || emptyHistoryResult();
+    const pointMap = new Map();
+    const eventMap = new Map();
+    let cloudPointCount = 0;
+    let localPointCount = 0;
+
+    [
+      { result: local, source: 'local' },
+      { result: cloud, source: 'cloud' }
+    ].forEach(({ result, source }) => {
+      const seriesItem = (Array.isArray(result.series) ? result.series : []).find((item) => item.seedId === seedId);
+      const points = seriesItem && Array.isArray(seriesItem.points) ? seriesItem.points : [];
+      if (source === 'cloud') cloudPointCount = points.length;
+      else localPointCount = points.length;
+      points.forEach((point) => {
+        const capturedAt = Number(point.capturedAt);
+        const price = Number(point.price);
+        if (!Number.isFinite(capturedAt) || !Number.isFinite(price)) return;
+        pointMap.set(capturedAt, Object.assign({}, point, { capturedAt, price, source }));
+      });
+
+      const group = (Array.isArray(result.groups) ? result.groups : []).find((item) => item.seedId === seedId);
+      (group && Array.isArray(group.events) ? group.events : []).forEach((event) => {
+        const key = `${Number(event.previousCapturedAt) || 0}:${Number(event.capturedAt) || 0}:${Number(event.previousPrice)}:${Number(event.currentPrice)}`;
+        eventMap.set(key, event);
+      });
+    });
+
+    const points = Array.from(pointMap.values()).sort((a, b) => a.capturedAt - b.capturedAt);
+    const events = Array.from(eventMap.values()).sort((a, b) => Number(b.capturedAt) - Number(a.capturedAt));
+    const sources = [];
+    if (cloudPointCount) sources.push(`云端 ${cloudPointCount} 点`);
+    if (localPointCount) sources.push(`本地 ${localPointCount} 点`);
+    return {
+      group: { seedId, events },
+      result: { series: [{ seedId, points }] },
+      points,
+      sourceLabel: sources.join(' · ') || '暂无历史数据'
+    };
+  }
+
+  function renderCropTrendModal() {
+    const seedId = String(state.trendModalSeedId || '');
+    const seed = SEED_BY_ID[seedId];
+    if (!seed) return '';
+    const trend = cropTrendData(seedId);
+    const currentPrice = Number((state.prices.shop || {})[seedId]);
+    const hasTrend = trend.points.length >= 2;
+    let content = '';
+    if (state.historyLoading && !hasTrend) {
+      content = '<div class="crop-trend-loading">正在读取历史曲线...</div>';
+    } else if (state.historyError && !hasTrend) {
+      content = `<div class="history-error">曲线读取失败：${escapeHtml(state.historyError)}</div>`;
+    } else {
+      content = renderHistoryLineChart(trend.group, trend.result);
+    }
+    return `
+      <div class="crop-trend-backdrop" data-trend-backdrop>
+        <section class="crop-trend-modal" role="dialog" aria-modal="true" aria-labelledby="cropTrendTitle">
+          <header class="crop-trend-modal-head">
+            <div class="crop-trend-modal-title">
+              <img class="crop-trend-modal-icon" src="./assets/crops/${escapeHtml(seed.id)}.png" alt="" onerror="this.style.display='none'" />
+              <div>
+                <h2 id="cropTrendTitle">${escapeHtml(seed.name)}价格曲线</h2>
+                <p>${trend.sourceLabel}${Number.isFinite(currentPrice) ? ` · 当前 ${formatUsd(currentPrice)}` : ''}</p>
+              </div>
+            </div>
+            <button class="crop-trend-close" type="button" data-trend-close aria-label="关闭价格曲线" title="关闭">×</button>
+          </header>
+          <div class="crop-trend-modal-body">
+            ${content}
+            ${state.historyLoading && hasTrend ? '<div class="crop-trend-refreshing">正在刷新历史数据...</div>' : ''}
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  function closeCropTrendModal() {
+    if (!state.trendModalSeedId) return;
+    state.trendModalSeedId = '';
+    render();
+  }
+
+  function openCropTrendModal(seedId) {
+    if (!SEED_BY_ID[seedId]) return;
+    state.trendModalSeedId = seedId;
+    const historyPromise = loadHistoryAlerts(false);
+    render();
+    historyPromise.finally(() => {
+      if (state.view === 'table' && state.trendModalSeedId === seedId) render();
+    });
+  }
+
   function renderFarmExperienceResult() {
     const progress = farmLevelProgress(state.config.currentTotalExp);
     const bestDailyExp = bestTheoreticalDailyExperience();
@@ -1249,6 +1348,7 @@
       <section class="table-wrap">
         ${renderTable(rows, bestRevenue && bestRevenue.row)}
       </section>
+      ${renderCropTrendModal()}
     `;
   }
 
@@ -1317,7 +1417,7 @@
     return `
       <tr class="${row.seed.isVipOnly ? 'vip' : ''} ${best ? 'best' : ''}">
         <td><span class="seed-vip-badge ${row.seed.isVipOnly ? 'vip' : 'normal'}">${row.seed.isVipOnly ? 'VIP' : '普通'}</span></td>
-        <td title="${escapeHtml(row.seed.id)}"><div class="crop-cell"><img class="crop-icon" src="./assets/crops/${escapeHtml(row.seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'"/><strong class="crop-name">${escapeHtml(row.seed.name)}</strong></div></td>
+        <td title="点击查看 ${escapeHtml(row.seed.name)}价格曲线"><button class="crop-cell crop-trend-trigger" type="button" data-trend-seed="${escapeHtml(row.seed.id)}"><img class="crop-icon" src="./assets/crops/${escapeHtml(row.seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'"/><strong class="crop-name">${escapeHtml(row.seed.name)}</strong><svg class="crop-trend-trigger-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12.5 5.4 9l2.4 1.8L13.8 4.5M10.8 4.5h3v3" /></svg></button></td>
         <td title="毛产量 / 卖出产量（扣 1 留种）">${formatNumber(row.stats.grossYield, 0)}/${formatNumber(row.stats.saleYield, 0)}</td>
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
         <td>${formatNumber(row.stats.dailyCycles, 2)}</td>
@@ -1419,6 +1519,7 @@
     document.querySelectorAll('[data-view]').forEach((button) => {
       button.addEventListener('click', () => {
         state.view = button.dataset.view;
+        if (state.view !== 'table') state.trendModalSeedId = '';
         if (state.view === 'history') {
           loadHistoryAlerts(false).then(() => render()).catch(() => render());
         }
@@ -1480,6 +1581,15 @@
         maybeNotifyPriceRise();
         render();
       });
+    });
+    document.querySelectorAll('[data-trend-seed]').forEach((button) => {
+      button.addEventListener('click', () => openCropTrendModal(button.dataset.trendSeed));
+    });
+    const trendClose = document.querySelector('[data-trend-close]');
+    if (trendClose) trendClose.addEventListener('click', closeCropTrendModal);
+    const trendBackdrop = document.querySelector('[data-trend-backdrop]');
+    if (trendBackdrop) trendBackdrop.addEventListener('click', (event) => {
+      if (event.target === trendBackdrop) closeCropTrendModal();
     });
     document.querySelectorAll('[data-theme-mode]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -1721,6 +1831,9 @@
 
   async function init() {
     installPriceBridgeListener();
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && state.trendModalSeedId) closeCropTrendModal();
+    });
     await importSnapshotFromHash();
     installThemeListener();
     await loadCloudDefaultPrices(false);

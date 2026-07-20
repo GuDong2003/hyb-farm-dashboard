@@ -91,6 +91,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; background: var(--bg); }
+body.modal-open { overflow: hidden; }
 button, input, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 
@@ -308,7 +309,13 @@ tr.best td { background: var(--best-row); }
 tr:hover td { background: var(--row-hover); }
 .crop-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .crop-icon { flex: none; width: 34px; height: 34px; object-fit: contain; image-rendering: auto; }
-.crop-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.crop-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.crop-trend-trigger { width: 100%; padding: 0; border: 0; color: inherit; text-align: left; background: transparent; cursor: pointer; }
+.crop-trend-trigger:hover .crop-name, .crop-trend-trigger:focus-visible .crop-name { color: var(--blue); }
+.crop-trend-trigger:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 4px; }
+.crop-trend-trigger-icon { flex: none; width: 16px; height: 16px; color: var(--muted); }
+.crop-trend-trigger-icon path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.crop-trend-trigger:hover .crop-trend-trigger-icon { color: var(--blue); }
 .seed-vip-badge {
   display: inline-block;
   min-width: 28px;
@@ -409,6 +416,39 @@ tr:hover td { background: var(--row-hover); }
 .history-line-meta .up { color: var(--red); font-weight: 850; }
 .history-line-meta .down { color: var(--green); font-weight: 850; }
 .history-line-empty { display: grid; place-items: center; min-height: 228px; color: var(--muted); font-size: 13px; }
+.crop-trend-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, .58);
+  backdrop-filter: blur(3px);
+}
+.crop-trend-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(820px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 24px 72px rgba(15, 23, 42, .32);
+}
+.crop-trend-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.crop-trend-modal-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.crop-trend-modal-title h2 { margin: 0; color: var(--text); font-size: 17px; }
+.crop-trend-modal-title p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.crop-trend-modal-icon { flex: none; width: 42px; height: 42px; object-fit: contain; }
+.crop-trend-close { flex: none; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line-soft); border-radius: 7px; color: var(--muted); background: var(--formula-bg); cursor: pointer; font-size: 24px; line-height: 1; }
+.crop-trend-close:hover, .crop-trend-close:focus-visible { color: var(--text); border-color: var(--control-border); background: var(--control-hover); }
+.crop-trend-modal-body { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; overflow: auto; padding: 14px; }
+.crop-trend-modal .history-line-panel { min-height: 390px; }
+.crop-trend-modal .history-line-chart { min-height: 320px; }
+.crop-trend-loading { display: grid; place-items: center; min-height: 390px; color: var(--muted); }
+.crop-trend-refreshing { margin-top: 8px; color: var(--muted); font-size: 12px; text-align: center; }
 .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 1120px; }
 .settings-panel { border-radius: 8px; padding: 14px; }
 .settings-wide { grid-column: 1 / -1; }
@@ -465,6 +505,13 @@ tr:hover td { background: var(--row-hover); }
   .history-head { align-items: flex-start; flex-direction: column; }
   .history-group-body { grid-template-columns: 1fr; }
   .history-row { grid-template-columns: 132px 132px 96px 96px 82px; min-width: 560px; }
+  .crop-trend-backdrop { place-items: end stretch; padding: 16px 0 0; }
+  .crop-trend-modal { width: 100%; max-height: calc(100dvh - 16px); border-radius: 14px 14px 0 0; border-bottom: 0; }
+  .crop-trend-modal-head { padding: 10px 12px; }
+  .crop-trend-modal-body { padding: 10px; }
+  .crop-trend-modal .history-line-panel { min-height: 320px; }
+  .crop-trend-modal .history-line-chart { min-height: 250px; }
+  .crop-trend-loading { min-height: 320px; }
   .settings { grid-template-columns: 1fr; }
   .settings-head { align-items: flex-start; flex-direction: column; }
 }
