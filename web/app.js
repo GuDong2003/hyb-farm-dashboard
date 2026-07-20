@@ -1163,18 +1163,18 @@
 
     if (progress.isMaxLevel) {
       return `
-        <span>当前等级 <strong>Lv${MAX_FARM_LEVEL}</strong></span>
-        <span><strong>已达到等级上限</strong></span>
-        ${bestDailyExp ? `<span>理论经验/天 <strong>${escapeHtml(bestDailyExp.seed.name)} ${formatNumber(bestDailyExp.value, 2)}</strong></span>` : '<span>理论经验/天 <strong>请先设置地块</strong></span>'}
+        <span>当前 <strong>Lv${MAX_FARM_LEVEL}</strong></span>
+        <span><strong>已满级</strong></span>
+        ${bestDailyExp ? `<span>理论 <strong>${escapeHtml(bestDailyExp.seed.name)} ${formatNumber(bestDailyExp.value, 2)}/天</strong></span>` : '<span>理论 <strong>请先设置地块</strong></span>'}
       `;
     }
 
     const upgradeDays = bestDailyExp && bestDailyExp.value > 0 ? progress.remainingExp / bestDailyExp.value : null;
     return `
-      <span>当前等级 <strong>Lv${progress.level}</strong></span>
+      <span>当前 <strong>Lv${progress.level}</strong></span>
       <span>距 Lv${progress.nextLevel} <strong>${formatNumber(progress.remainingExp, 2)} 经验</strong></span>
-      ${bestDailyExp ? `<span>理论经验/天 <strong>${escapeHtml(bestDailyExp.seed.name)} ${formatNumber(bestDailyExp.value, 2)}</strong></span>` : '<span>理论经验/天 <strong>请先设置地块</strong></span>'}
-      <span>预计升级 <strong>${upgradeDays == null ? '暂无' : formatUpgradeDuration(upgradeDays)}</strong></span>
+      ${bestDailyExp ? `<span>理论 <strong>${escapeHtml(bestDailyExp.seed.name)} ${formatNumber(bestDailyExp.value, 2)}/天</strong></span>` : '<span>理论 <strong>请先设置地块</strong></span>'}
+      <span>升级约 <strong>${upgradeDays == null ? '暂无' : formatUpgradeDuration(upgradeDays)}</strong></span>
     `;
   }
 
