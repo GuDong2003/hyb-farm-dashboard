@@ -1071,7 +1071,7 @@
       ? `<button class="history-anomaly-toggle ${hiddenAnomalyCount ? 'active' : ''}" type="button" data-trend-anomaly-toggle aria-pressed="${hiddenAnomalyCount ? 'true' : 'false'}">${hiddenAnomalyCount ? '显示异常值' : '隐藏异常值'}</button>`
       : '';
     const chartStats = hiddenAnomalyCount
-      ? `${points.length} 点 · 已隐藏 ${hiddenAnomalyCount} 个异常点`
+      ? `${events.length} 处异常 · 已隐藏 ${hiddenAnomalyCount} 个区间点`
       : `${points.length} 点 · ${events.length} 处异常`;
     return `
       <aside class="history-line-panel">
