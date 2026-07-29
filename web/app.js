@@ -1005,7 +1005,7 @@
         .sort((a, b) => a.capturedAt - b.capturedAt)
       : [];
     const allPoints = seriesPoints.length >= 2 ? seriesPoints : anomalyChartPoints(events);
-    const anomalyTimes = isolatedAnomalyTimestamps(allPoints, Number(result && result.threshold) || PRICE_CHANGE_ALERT_THRESHOLD);
+    const anomalyTimes = thresholdAnomalyTimestamps(allPoints, events, Number(result && result.threshold) || PRICE_CHANGE_ALERT_THRESHOLD);
     const hideAnomalies = Boolean(chartOptions.allowAnomalyToggle && chartOptions.hideAnomalies && anomalyTimes.size);
     const filteredPoints = hideAnomalies ? allPoints.filter((point) => !anomalyTimes.has(point.capturedAt)) : allPoints;
     const points = filteredPoints.length >= 2 ? filteredPoints : allPoints;
@@ -1095,27 +1095,45 @@
     `;
   }
 
-  function isolatedAnomalyTimestamps(points, threshold) {
+  function thresholdAnomalyTimestamps(points, events, threshold) {
     const sortedPoints = Array.isArray(points) ? points : [];
     const limit = Number.isFinite(Number(threshold)) && Number(threshold) > 0 ? Number(threshold) : PRICE_CHANGE_ALERT_THRESHOLD;
-    const outliers = new Set();
-    for (let index = 1; index < sortedPoints.length - 1; index += 1) {
-      const previous = sortedPoints[index - 1];
-      const current = sortedPoints[index];
-      const next = sortedPoints[index + 1];
-      const previousPrice = Number(previous.price);
-      const currentPrice = Number(current.price);
-      const nextPrice = Number(next.price);
-      if (![previousPrice, currentPrice, nextPrice].every((price) => Number.isFinite(price) && price >= 0)) continue;
-      const incomingRate = previousPrice === 0 ? (currentPrice === 0 ? 0 : Infinity) : ((currentPrice - previousPrice) / previousPrice) * 100;
-      const outgoingRate = currentPrice === 0 ? (nextPrice === 0 ? 0 : Infinity) : ((nextPrice - currentPrice) / currentPrice) * 100;
-      const isPeak = currentPrice > previousPrice && currentPrice > nextPrice;
-      const isValley = currentPrice < previousPrice && currentPrice < nextPrice;
-      if (Math.abs(incomingRate) >= limit && Math.abs(outgoingRate) >= limit && (isPeak || isValley)) {
-        outliers.add(Number(current.capturedAt));
+    const thresholdEvents = (Array.isArray(events) ? events : [])
+      .filter((event) => Number.isFinite(Number(event.capturedAt))
+        && Number.isFinite(Number(event.previousCapturedAt))
+        && Number.isFinite(Number(event.changeRate))
+        && Math.abs(Number(event.changeRate)) >= limit)
+      .slice()
+      .sort((a, b) => Number(a.capturedAt) - Number(b.capturedAt));
+    const usedEvents = new Set();
+    const anomalyTimes = new Set();
+
+    thresholdEvents.forEach((event, index) => {
+      if (usedEvents.has(index)) return;
+      const direction = Math.sign(Number(event.changeRate));
+      const pairIndex = thresholdEvents.findIndex((candidate, candidateIndex) => candidateIndex > index
+        && !usedEvents.has(candidateIndex)
+        && Math.sign(Number(candidate.changeRate)) === -direction);
+      if (pairIndex < 0) {
+        anomalyTimes.add(Number(event.capturedAt));
+        usedEvents.add(index);
+        return;
       }
-    }
-    return outliers;
+
+      const pairedEvent = thresholdEvents[pairIndex];
+      const rangeStart = Number(event.capturedAt);
+      const rangeEnd = Math.max(rangeStart, Number(pairedEvent.previousCapturedAt));
+      sortedPoints.forEach((point) => {
+        const capturedAt = Number(point.capturedAt);
+        if (Number.isFinite(capturedAt) && capturedAt >= rangeStart && capturedAt <= rangeEnd) {
+          anomalyTimes.add(capturedAt);
+        }
+      });
+      usedEvents.add(index);
+      usedEvents.add(pairIndex);
+    });
+
+    return anomalyTimes;
   }
 
   function anomalyChartPoints(events) {
