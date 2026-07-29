@@ -1027,9 +1027,10 @@
     const pricePad = (maxPrice - minPrice) * 0.12;
     minPrice = Math.max(0, minPrice - pricePad);
     maxPrice += pricePad;
+    const priceRange = Math.max(Number.EPSILON, maxPrice - minPrice);
     const plotHeight = height - pad.top - pad.bottom;
     const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
-    const y = (price) => pad.top + (1 - ((price - minPrice) / Math.max(1, maxPrice - minPrice))) * plotHeight;
+    const y = (price) => pad.top + (1 - ((price - minPrice) / priceRange)) * plotHeight;
     const path = points.map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`).join(' ');
     const highlights = events.map((event) => {
       const previousCapturedAt = Number(event.previousCapturedAt);
@@ -1046,7 +1047,7 @@
     }).join('');
     const yTicks = [0, 0.5, 1].map((ratio) => {
       const tickY = pad.top + ratio * plotHeight;
-      const value = maxPrice - (maxPrice - minPrice) * ratio;
+      const value = maxPrice - priceRange * ratio;
       return `<g><line class="history-line-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line><text class="history-line-label" x="${pad.left - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(formatUsd(value))}</text></g>`;
     }).join('');
     const pointMarkers = points.length <= 120
