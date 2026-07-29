@@ -103,6 +103,7 @@
       historyLoadedAt: 0,
       historyError: '',
       trendModalSeedId: '',
+      trendHideAnomalies: false,
       error: ''
     };
 
@@ -991,7 +992,8 @@
     `;
   }
 
-  function renderHistoryLineChart(group, result) {
+  function renderHistoryLineChart(group, result, options) {
+    const chartOptions = options || {};
     const events = (Array.isArray(group && group.events) ? group.events : [])
       .slice()
       .sort((a, b) => Number(a.previousCapturedAt || a.capturedAt) - Number(b.previousCapturedAt || b.capturedAt));
@@ -1002,7 +1004,15 @@
         .map((point) => ({ capturedAt: Number(point.capturedAt), price: Number(point.price) }))
         .sort((a, b) => a.capturedAt - b.capturedAt)
       : [];
-    const points = seriesPoints.length >= 2 ? seriesPoints : anomalyChartPoints(events);
+    const allPoints = seriesPoints.length >= 2 ? seriesPoints : anomalyChartPoints(events);
+    const anomalyTimes = isolatedAnomalyTimestamps(allPoints, Number(result && result.threshold) || PRICE_CHANGE_ALERT_THRESHOLD);
+    const hideAnomalies = Boolean(chartOptions.allowAnomalyToggle && chartOptions.hideAnomalies && anomalyTimes.size);
+    const filteredPoints = hideAnomalies ? allPoints.filter((point) => !anomalyTimes.has(point.capturedAt)) : allPoints;
+    const points = filteredPoints.length >= 2 ? filteredPoints : allPoints;
+    const hiddenAnomalyCount = allPoints.length - points.length;
+    const visibleEvents = hiddenAnomalyCount
+      ? events.filter((event) => !anomalyTimes.has(Number(event.previousCapturedAt)) && !anomalyTimes.has(Number(event.capturedAt)))
+      : events;
     if (points.length < 2) {
       return `
         <aside class="history-line-panel">
@@ -1032,7 +1042,7 @@
     const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
     const y = (price) => pad.top + (1 - ((price - minPrice) / priceRange)) * plotHeight;
     const path = points.map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`).join(' ');
-    const highlights = events.map((event) => {
+    const highlights = visibleEvents.map((event) => {
       const previousCapturedAt = Number(event.previousCapturedAt);
       const capturedAt = Number(event.capturedAt);
       const previousPrice = Number(event.previousPrice);
@@ -1057,9 +1067,18 @@
     const last = points[points.length - 1];
     const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
     const rangeMs = maxTime - minTime;
+    const anomalyToggle = chartOptions.allowAnomalyToggle && anomalyTimes.size
+      ? `<button class="history-anomaly-toggle ${hiddenAnomalyCount ? 'active' : ''}" type="button" data-trend-anomaly-toggle aria-pressed="${hiddenAnomalyCount ? 'true' : 'false'}">${hiddenAnomalyCount ? '显示异常值' : '隐藏异常值'}</button>`
+      : '';
+    const chartStats = hiddenAnomalyCount
+      ? `${points.length} 点 · 已隐藏 ${hiddenAnomalyCount} 个异常点`
+      : `${points.length} 点 · ${events.length} 处异常`;
     return `
       <aside class="history-line-panel">
-        <div class="history-line-head"><strong>完整价格趋势</strong><span>${points.length} 点 · ${events.length} 处异常</span></div>
+        <div class="history-line-head">
+          <strong>完整价格趋势</strong>
+          <div class="history-line-head-actions"><span>${chartStats}</span>${anomalyToggle}</div>
+        </div>
         <div class="history-line-chart-wrap">
           <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(group.seedId)} 完整价格趋势及异常区间" preserveAspectRatio="xMidYMid meet">
             <rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>
@@ -1074,6 +1093,29 @@
         <div class="history-line-meta"><span>${formatUsd(first.price)}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${formatSignedPercent(totalChange)}</span><span>${formatUsd(last.price)}</span></div>
       </aside>
     `;
+  }
+
+  function isolatedAnomalyTimestamps(points, threshold) {
+    const sortedPoints = Array.isArray(points) ? points : [];
+    const limit = Number.isFinite(Number(threshold)) && Number(threshold) > 0 ? Number(threshold) : PRICE_CHANGE_ALERT_THRESHOLD;
+    const outliers = new Set();
+    for (let index = 1; index < sortedPoints.length - 1; index += 1) {
+      const previous = sortedPoints[index - 1];
+      const current = sortedPoints[index];
+      const next = sortedPoints[index + 1];
+      const previousPrice = Number(previous.price);
+      const currentPrice = Number(current.price);
+      const nextPrice = Number(next.price);
+      if (![previousPrice, currentPrice, nextPrice].every((price) => Number.isFinite(price) && price >= 0)) continue;
+      const incomingRate = previousPrice === 0 ? (currentPrice === 0 ? 0 : Infinity) : ((currentPrice - previousPrice) / previousPrice) * 100;
+      const outgoingRate = currentPrice === 0 ? (nextPrice === 0 ? 0 : Infinity) : ((nextPrice - currentPrice) / currentPrice) * 100;
+      const isPeak = currentPrice > previousPrice && currentPrice > nextPrice;
+      const isValley = currentPrice < previousPrice && currentPrice < nextPrice;
+      if (Math.abs(incomingRate) >= limit && Math.abs(outgoingRate) >= limit && (isPeak || isValley)) {
+        outliers.add(Number(current.capturedAt));
+      }
+    }
+    return outliers;
   }
 
   function anomalyChartPoints(events) {
@@ -1198,7 +1240,7 @@
     if (localPointCount) sources.push(`本地 ${localPointCount} 点`);
     return {
       group: { seedId, events },
-      result: { series: [{ seedId, points }] },
+      result: { threshold: PRICE_CHANGE_ALERT_THRESHOLD, series: [{ seedId, points }] },
       points,
       sourceLabel: sources.join(' · ') || '暂无历史数据'
     };
@@ -1217,7 +1259,10 @@
     } else if (state.historyError && !hasTrend) {
       content = `<div class="history-error">曲线读取失败：${escapeHtml(state.historyError)}</div>`;
     } else {
-      content = renderHistoryLineChart(trend.group, trend.result);
+      content = renderHistoryLineChart(trend.group, trend.result, {
+        allowAnomalyToggle: true,
+        hideAnomalies: state.trendHideAnomalies
+      });
     }
     return `
       <div class="crop-trend-backdrop" data-trend-backdrop>
@@ -1244,12 +1289,14 @@
   function closeCropTrendModal() {
     if (!state.trendModalSeedId) return;
     state.trendModalSeedId = '';
+    state.trendHideAnomalies = false;
     render();
   }
 
   function openCropTrendModal(seedId) {
     if (!SEED_BY_ID[seedId]) return;
     state.trendModalSeedId = seedId;
+    state.trendHideAnomalies = false;
     const historyPromise = loadHistoryAlerts(false);
     render();
     historyPromise.finally(() => {
@@ -1588,6 +1635,11 @@
     });
     const trendClose = document.querySelector('[data-trend-close]');
     if (trendClose) trendClose.addEventListener('click', closeCropTrendModal);
+    const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
+    if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {
+      state.trendHideAnomalies = !state.trendHideAnomalies;
+      render();
+    });
     const trendBackdrop = document.querySelector('[data-trend-backdrop]');
     if (trendBackdrop) trendBackdrop.addEventListener('click', (event) => {
       if (event.target === trendBackdrop) closeCropTrendModal();
