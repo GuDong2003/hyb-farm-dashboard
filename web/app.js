@@ -1629,9 +1629,29 @@
     const value = Number(rate);
     if (!Number.isFinite(value)) return '<span class="price-delta flat"><span class="price-delta-arrow"></span><span class="price-delta-percent">-</span></span>';
     if (Math.abs(value) < 0.000005) return '<span class="price-delta flat"><span class="price-delta-arrow">→</span><span class="price-delta-percent">0%</span></span>';
-    const direction = value > 0 ? 'up' : 'down';
+    const direction = priceChangeDirection(value);
     const arrow = value > 0 ? '↑' : '↓';
     return `<span class="price-delta ${direction}"><span class="price-delta-arrow">${arrow}</span><span class="price-delta-percent">${formatNumber(Math.abs(value), 2)}%</span></span>`;
+  }
+
+  function priceChangeDirection(rate) {
+    const value = Number(rate);
+    if (!Number.isFinite(value) || Math.abs(value) < 0.000005) return 'flat';
+    return value > 0 ? 'up' : 'down';
+  }
+
+  function renderCropTrendTrigger(row) {
+    const direction = priceChangeDirection(row.priceChangeRate);
+    const directionLabel = !Number.isFinite(Number(row.priceChangeRate))
+      ? '暂无涨跌数据'
+      : direction === 'up' ? '上涨' : direction === 'down' ? '下跌' : '持平';
+    const path = direction === 'up'
+      ? 'M2 12.5 5.4 9l2.4 1.8L13.8 4.5M10.8 4.5h3v3'
+      : direction === 'down'
+        ? 'M2 3.5 5.4 7l2.4-1.8 6 6.3M10.8 11.5h3v-3'
+        : 'M2 8h11.8M11 5l3 3-3 3';
+    const title = `查看${row.seed.name}价格曲线（${directionLabel}）`;
+    return `<button class="crop-trend-trigger ${direction}" type="button" data-trend-seed="${escapeHtml(row.seed.id)}" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}"><svg class="crop-trend-trigger-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="${path}" /></svg></button>`;
   }
 
   function priceChangeRateTitle(row) {
@@ -1666,7 +1686,7 @@
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
         <td>${formatNumber(row.stats.dailyCycles, 2)}</td>
         <td><input class="price-input" data-price="${escapeHtml(row.seed.id)}" type="number" min="0" step="0.00001" value="${row.price == null ? '' : formatNumber(row.price, 5)}" /></td>
-        <td title="${escapeHtml(priceChangeRateTitle(row))}"><div class="price-change-cell">${renderPriceChangeRate(row.priceChangeRate)}<button class="crop-trend-trigger" type="button" data-trend-seed="${escapeHtml(row.seed.id)}" aria-label="查看${escapeHtml(row.seed.name)}价格曲线" title="查看${escapeHtml(row.seed.name)}价格曲线"><svg class="crop-trend-trigger-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12.5 5.4 9l2.4 1.8L13.8 4.5M10.8 4.5h3v3" /></svg></button></div></td>
+        <td title="${escapeHtml(priceChangeRateTitle(row))}"><div class="price-change-cell">${renderPriceChangeRate(row.priceChangeRate)}${renderCropTrendTrigger(row)}</div></td>
         <td>${formatUsd(row.singleNet)}</td>
         <td>${formatUsd(row.hourly)}</td>
         <td>${formatUsd(row.singleDaily)}</td>
