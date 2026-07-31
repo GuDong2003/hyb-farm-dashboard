@@ -1133,6 +1133,19 @@
     `;
   }
 
+  function chartAxisPrecision(values) {
+    for (let digits = 2; digits <= 5; digits += 1) {
+      const labels = values.map((value) => Number(value).toFixed(digits));
+      if (new Set(labels).size === labels.length) return digits;
+    }
+    return 5;
+  }
+
+  function formatChartAxisUsd(value, digits) {
+    const number = Number(value);
+    return Number.isFinite(number) ? `$${number.toFixed(digits)}` : '-';
+  }
+
   function renderHistoryLineChart(group, result, options) {
     const chartOptions = options || {};
     const events = (Array.isArray(group && group.events) ? group.events : [])
@@ -1174,7 +1187,6 @@
 
     const width = 420;
     const height = 250;
-    const pad = { left: 48, right: 14, top: 14, bottom: 30 };
     const minTime = points[0].capturedAt;
     const maxTime = points[points.length - 1].capturedAt;
     const prices = points.map((point) => point.price);
@@ -1188,6 +1200,17 @@
     minPrice = Math.max(0, minPrice - pricePad);
     maxPrice += pricePad;
     const priceRange = Math.max(Number.EPSILON, maxPrice - minPrice);
+    const yTickRatios = [0, 0.25, 0.5, 0.75, 1];
+    const yTickValues = yTickRatios.map((ratio) => maxPrice - priceRange * ratio);
+    const yTickDigits = chartAxisPrecision(yTickValues);
+    const yTickLabels = yTickValues.map((value) => formatChartAxisUsd(value, yTickDigits));
+    const widestYTick = Math.max(...yTickLabels.map((label) => label.length));
+    const pad = {
+      left: Math.min(86, Math.max(48, 14 + widestYTick * 6.5)),
+      right: 14,
+      top: 14,
+      bottom: 30
+    };
     const plotHeight = height - pad.top - pad.bottom;
     const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
     const y = (price) => pad.top + (1 - ((price - minPrice) / priceRange)) * plotHeight;
@@ -1211,10 +1234,9 @@
       const title = `${formatTime(previousCapturedAt)} → ${formatTime(capturedAt)}，${formatUsd(previousPrice)} → ${formatUsd(currentPrice)}（${formatSignedPercent(event.changeRate)}）`;
       return `<g class="history-line-anomaly ${direction}"><title>${escapeHtml(title)}</title><rect class="history-line-anomaly-band" x="${formatNumber(Math.min(startX, endX), 2)}" y="${pad.top}" width="${formatNumber(Math.max(2, Math.abs(endX - startX)), 2)}" height="${plotHeight}"></rect><line class="history-line-anomaly-segment" x1="${formatNumber(startX, 2)}" y1="${formatNumber(y(previousPrice), 2)}" x2="${formatNumber(endX, 2)}" y2="${formatNumber(y(currentPrice), 2)}"></line><circle class="history-line-anomaly-start" cx="${formatNumber(startX, 2)}" cy="${formatNumber(y(previousPrice), 2)}" r="3"></circle><circle class="history-line-marker ${direction}" cx="${formatNumber(endX, 2)}" cy="${formatNumber(y(currentPrice), 2)}" r="4"></circle></g>`;
     }).join('');
-    const yTicks = [0, 0.5, 1].map((ratio) => {
+    const yTicks = yTickRatios.map((ratio, index) => {
       const tickY = pad.top + ratio * plotHeight;
-      const value = maxPrice - priceRange * ratio;
-      return `<g><line class="history-line-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line><text class="history-line-label" x="${pad.left - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(formatUsd(value))}</text></g>`;
+      return `<g><line class="history-line-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line><text class="history-line-label" x="${pad.left - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(yTickLabels[index])}</text></g>`;
     }).join('');
     const pointMarkers = points.length <= 120
       ? points.map((point) => `<circle class="history-line-point" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="2"><title>${escapeHtml(`${formatTime(point.capturedAt)} ${formatUsd(point.price)}`)}</title></circle>`).join('')
