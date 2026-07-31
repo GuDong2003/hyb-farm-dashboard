@@ -1133,10 +1133,62 @@
     `;
   }
 
-  function chartAxisPrecision(values) {
+  function niceChartStep(rawStep) {
+    const value = Number(rawStep);
+    if (!Number.isFinite(value) || value <= 0) return 1;
+    const exponent = Math.floor(Math.log10(value));
+    const magnitude = 10 ** exponent;
+    const fraction = value / magnitude;
+    const niceFraction = [1, 2, 2.5, 5, 10].find((candidate) => fraction <= candidate) || 10;
+    return niceFraction * magnitude;
+  }
+
+  function nextNiceChartStep(step) {
+    const value = Number(step);
+    if (!Number.isFinite(value) || value <= 0) return 1;
+    const exponent = Math.floor(Math.log10(value));
+    const magnitude = 10 ** exponent;
+    const fraction = value / magnitude;
+    const nextFraction = [1, 2, 2.5, 5, 10].find((candidate) => candidate > fraction + 1e-10);
+    return nextFraction ? nextFraction * magnitude : 20 * magnitude;
+  }
+
+  function niceChartAxis(minValue, maxValue, tickCount) {
+    const count = Math.max(2, Math.floor(Number(tickCount)) || 5);
+    const intervals = count - 1;
+    const minimum = Number(minValue);
+    const maximum = Number(maxValue);
+    const range = Math.max(Number.EPSILON, maximum - minimum);
+    let step = Math.max(0.00001, niceChartStep(range / intervals));
+
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const axisMin = Math.floor((minimum + step * 1e-10) / step) * step;
+      const axisMax = axisMin + intervals * step;
+      if (axisMax + step * 1e-9 >= maximum) {
+        const values = Array.from({ length: count }, (_, index) => axisMax - index * step)
+          .map((value) => Math.abs(value) < step * 1e-9 ? 0 : value);
+        return { min: axisMin, max: axisMax, step, values };
+      }
+      step = nextNiceChartStep(step);
+    }
+
+    const axisMin = Math.floor(minimum / step) * step;
+    const axisMax = axisMin + intervals * step;
+    return {
+      min: axisMin,
+      max: axisMax,
+      step,
+      values: Array.from({ length: count }, (_, index) => axisMax - index * step)
+    };
+  }
+
+  function chartAxisPrecision(values, step) {
+    const numericStep = Math.abs(Number(step));
     for (let digits = 2; digits <= 5; digits += 1) {
       const labels = values.map((value) => Number(value).toFixed(digits));
-      if (new Set(labels).size === labels.length) return digits;
+      const scaledStep = numericStep * (10 ** digits);
+      const stepIsExact = Math.abs(scaledStep - Math.round(scaledStep)) <= Math.max(1, scaledStep) * 1e-9;
+      if (stepIsExact && new Set(labels).size === labels.length) return digits;
     }
     return 5;
   }
@@ -1199,10 +1251,13 @@
     const pricePad = (maxPrice - minPrice) * 0.12;
     minPrice = Math.max(0, minPrice - pricePad);
     maxPrice += pricePad;
+    const yAxis = niceChartAxis(minPrice, maxPrice, 5);
+    minPrice = yAxis.min;
+    maxPrice = yAxis.max;
     const priceRange = Math.max(Number.EPSILON, maxPrice - minPrice);
-    const yTickRatios = [0, 0.25, 0.5, 0.75, 1];
-    const yTickValues = yTickRatios.map((ratio) => maxPrice - priceRange * ratio);
-    const yTickDigits = chartAxisPrecision(yTickValues);
+    const yTickValues = yAxis.values;
+    const yTickRatios = yTickValues.map((_, index) => index / Math.max(1, yTickValues.length - 1));
+    const yTickDigits = chartAxisPrecision(yTickValues, yAxis.step);
     const yTickLabels = yTickValues.map((value) => formatChartAxisUsd(value, yTickDigits));
     const widestYTick = Math.max(...yTickLabels.map((label) => label.length));
     const pad = {
