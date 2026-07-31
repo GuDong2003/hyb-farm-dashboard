@@ -12,6 +12,7 @@
   const DB_VERSION = 1;
   const SNAPSHOT_STORE = 'snapshots';
   const PRICE_REFRESH_MS = 60 * 60 * 1000;
+  const HISTORY_PAGE_SIZE = 50;
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
@@ -102,7 +103,10 @@
       historyLoading: false,
       historyLoadedAt: 0,
       historyError: '',
+      historyVisibleCount: HISTORY_PAGE_SIZE,
+      historyExpandedKey: '',
       trendModalSeedId: '',
+      trendModalWindow: '',
       trendHideAnomalies: false,
       error: ''
     };
@@ -425,6 +429,9 @@
       tx.onerror = () => reject(tx.error || new Error('历史清空失败'));
     });
     state.historyCount = 0;
+    state.historyAlerts = null;
+    state.historyVisibleCount = HISTORY_PAGE_SIZE;
+    state.historyExpandedKey = '';
   }
 
   async function importSnapshotFromHash() {
@@ -843,6 +850,40 @@
     return ['1h', '6h', '12h', '24h', '7d'].includes(state.config.trendWindow) ? state.config.trendWindow : '24h';
   }
 
+  function normalizeChartWindow(value) {
+    return ['1h', '6h', '12h', '24h', '7d', 'all'].includes(value) ? value : trendWindowLabel();
+  }
+
+  function chartWindowMilliseconds(value) {
+    const normalized = normalizeChartWindow(value);
+    if (normalized === 'all') return 0;
+    if (normalized === '7d') return 7 * 24 * 60 * 60 * 1000;
+    return Number(normalized.replace('h', '')) * 60 * 60 * 1000;
+  }
+
+  function pointsInChartWindow(points, value) {
+    const sortedPoints = Array.isArray(points) ? points : [];
+    const windowMs = chartWindowMilliseconds(value);
+    if (!windowMs || sortedPoints.length < 2) return sortedPoints;
+    const latestTime = Number(sortedPoints[sortedPoints.length - 1].capturedAt);
+    const cutoffTime = latestTime - windowMs;
+    return sortedPoints.filter((point) => Number(point.capturedAt) >= cutoffTime);
+  }
+
+  function renderChartWindowSelect(value) {
+    const selected = normalizeChartWindow(value);
+    return `
+      <select class="history-window-select" data-trend-window aria-label="曲线时间范围" title="曲线时间范围">
+        <option value="1h" ${selected === '1h' ? 'selected' : ''}>1h</option>
+        <option value="6h" ${selected === '6h' ? 'selected' : ''}>6h</option>
+        <option value="12h" ${selected === '12h' ? 'selected' : ''}>12h</option>
+        <option value="24h" ${selected === '24h' ? 'selected' : ''}>24h</option>
+        <option value="7d" ${selected === '7d' ? 'selected' : ''}>7d</option>
+        <option value="all" ${selected === 'all' ? 'selected' : ''}>全部</option>
+      </select>
+    `;
+  }
+
   function trendWindowConfig(value) {
     const normalized = ['1h', '6h', '12h', '24h', '7d'].includes(value) ? value : trendWindowLabel();
     if (normalized === '7d') return { value: normalized, source: 'daily', ms: 7 * 24 * 60 * 60 * 1000 };
@@ -949,7 +990,7 @@
             <button data-view="settings" class="${state.view === 'settings' ? 'active' : ''}">设置</button>
           </nav>
           ${topPriceRiseAlert(rows)}
-          <button class="topbar-link history-link ${state.view === 'history' ? 'active' : ''}" data-view="history" title="查看历史记录和涨跌异常">历史 ${state.historyCount} 条</button>
+          <button class="topbar-link history-link ${state.view === 'history' ? 'active' : ''}" data-view="history" title="查看价格快照历史">历史 ${historyNavigationCount()} 条</button>
           <button class="theme-toggle" data-action="theme" aria-label="${themeLabel()}" title="${themeLabel()}">${themeIcon()}</button>
           <a class="github-link" href="https://github.com/GuDong2003/hyb-farm-dashboard" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub">
             <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
@@ -970,25 +1011,125 @@
     const alerts = state.historyAlerts || {};
     const cloud = alerts.cloud || emptyHistoryResult();
     const local = alerts.local || Object.assign(emptyHistoryResult(), { totalSnapshots: state.historyCount });
+    const records = historySnapshotRecords(cloud, local);
+    const visibleCount = Math.min(records.length, Math.max(HISTORY_PAGE_SIZE, Number(state.historyVisibleCount) || HISTORY_PAGE_SIZE));
+    const visibleRecords = records.slice(0, visibleCount);
+    const historyContent = state.historyLoading && !records.length
+      ? '<div class="history-empty">正在读取历史记录...</div>'
+      : `
+        <section class="history-section">
+          <div class="history-section-head">
+            <div class="history-section-title">
+              <h2>价格快照</h2>
+              <p class="history-section-note">相同采集时间的本地与云端快照会合并显示，不会重复计数。</p>
+            </div>
+            <span class="history-showing">已显示 ${visibleRecords.length}/${records.length} 条</span>
+          </div>
+          ${visibleRecords.length
+            ? `<div class="history-snapshot-list">${visibleRecords.map(renderHistorySnapshot).join('')}</div>`
+            : '<div class="history-empty">暂无价格快照。</div>'}
+          ${visibleCount < records.length
+            ? `<div class="history-load-more"><button class="btn" data-action="load-more-history">继续加载 ${Math.min(HISTORY_PAGE_SIZE, records.length - visibleCount)} 条</button></div>`
+            : ''}
+        </section>
+      `;
     return `
       <div class="history-view">
         <section class="history-head">
           <div class="history-title">
             <h2>历史记录</h2>
-            <p>按作物显示相邻历史价格中涨跌幅超过 ${formatNumber(PRICE_CHANGE_ALERT_THRESHOLD, 0)}% 的异常记录。</p>
+            <p>按采集时间倒序显示完整价格快照，点击记录可查看当次全部作物价格。</p>
           </div>
           <div class="history-stats">
             <span class="history-stat-chip"><span>本地历史</span><strong>${state.historyCount}</strong><span>条</span></span>
             <span class="history-stat-chip"><span>云端快照</span><strong>${cloud.totalSnapshots}</strong><span>条</span></span>
-            <span class="history-stat-chip"><span>异常</span><strong>${cloud.eventCount + local.eventCount}</strong><span>条</span></span>
+            <span class="history-stat-chip"><span>合并记录</span><strong>${records.length}</strong><span>条</span></span>
             <button class="btn" data-action="refresh-history">刷新历史</button>
           </div>
         </section>
         ${state.historyError ? `<div class="history-error">历史读取失败：${escapeHtml(state.historyError)}</div>` : ''}
-        ${state.historyLoading ? '<div class="history-empty">正在读取历史记录...</div>' : ''}
-        ${renderHistorySection('云端已上传历史', '来自 D1 中已被接受的上传快照，可回看你已经上传过的历史价格。', cloud)}
-        ${renderHistorySection('本地浏览器历史', '来自当前浏览器 IndexedDB 中保存的导入快照，未上传云端的历史也会在这里参与计算。', local)}
+        ${historyContent}
       </div>
+    `;
+  }
+
+  function historySnapshotRecords(cloud, local) {
+    const recordMap = new Map();
+    [
+      { result: local, origin: 'local' },
+      { result: cloud, origin: 'cloud' }
+    ].forEach(({ result, origin }) => {
+      (Array.isArray(result && result.series) ? result.series : []).forEach((seriesItem) => {
+        const seedId = String(seriesItem && seriesItem.seedId || '');
+        if (!seedId) return;
+        (Array.isArray(seriesItem.points) ? seriesItem.points : []).forEach((point) => {
+          const capturedAt = Number(point && point.capturedAt);
+          const price = Number(point && point.price);
+          if (!Number.isFinite(capturedAt) || capturedAt <= 0 || !Number.isFinite(price) || price < 0) return;
+          const key = String(capturedAt);
+          const record = recordMap.get(key) || {
+            key,
+            capturedAt,
+            prices: {},
+            sources: new Set()
+          };
+          record.prices[seedId] = price;
+          record.sources.add(origin);
+          recordMap.set(key, record);
+        });
+      });
+    });
+    return Array.from(recordMap.values())
+      .map((record) => ({
+        key: record.key,
+        capturedAt: record.capturedAt,
+        prices: record.prices,
+        sources: Array.from(record.sources).sort()
+      }))
+      .sort((a, b) => b.capturedAt - a.capturedAt);
+  }
+
+  function historyNavigationCount() {
+    if (!state.historyAlerts) return state.historyCount;
+    const cloud = state.historyAlerts.cloud || emptyHistoryResult();
+    const local = state.historyAlerts.local || emptyHistoryResult();
+    return historySnapshotRecords(cloud, local).length;
+  }
+
+  function renderHistorySnapshot(record) {
+    const expanded = state.historyExpandedKey === record.key;
+    const priceItems = SEEDS
+      .filter((seed) => Number.isFinite(Number(record.prices[seed.id])))
+      .map((seed) => ({
+        seed,
+        price: Number(record.prices[seed.id])
+      }));
+    const sourceLabel = record.sources.length > 1
+      ? '本地 + 云端'
+      : record.sources[0] === 'cloud' ? '云端' : '本地';
+    const sourceClass = record.sources.length > 1
+      ? 'mixed'
+      : record.sources[0] === 'cloud' ? 'cloud' : 'local';
+    return `
+      <article class="history-snapshot ${expanded ? 'expanded' : ''}">
+        <button class="history-snapshot-summary" type="button" data-history-record="${escapeHtml(record.key)}" aria-expanded="${expanded ? 'true' : 'false'}">
+          <span class="history-snapshot-time">${formatTime(record.capturedAt)}</span>
+          <span class="history-source-badge ${sourceClass}">${sourceLabel}</span>
+          <span class="history-snapshot-count">${priceItems.length} 种作物</span>
+          <span class="history-snapshot-chevron" aria-hidden="true">⌄</span>
+        </button>
+        ${expanded ? `
+          <div class="history-snapshot-prices">
+            ${priceItems.map(({ seed, price }) => `
+              <div class="history-snapshot-price">
+                <img src="./assets/crops/${escapeHtml(seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'" />
+                <span>${escapeHtml(seed.name)}</span>
+                <strong>$${formatNumber(price, 5)}</strong>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      </article>
     `;
   }
 
@@ -1005,18 +1146,27 @@
         .sort((a, b) => a.capturedAt - b.capturedAt)
       : [];
     const allPoints = seriesPoints.length >= 2 ? seriesPoints : anomalyChartPoints(events);
-    const anomalyTimes = thresholdAnomalyTimestamps(allPoints, events, Number(result && result.threshold) || PRICE_CHANGE_ALERT_THRESHOLD);
+    const chartWindow = normalizeChartWindow(chartOptions.windowValue);
+    const windowSelect = renderChartWindowSelect(chartWindow);
+    const rangedPoints = pointsInChartWindow(allPoints, chartWindow);
+    const anomalyTimes = thresholdAnomalyTimestamps(rangedPoints, events, Number(result && result.threshold) || PRICE_CHANGE_ALERT_THRESHOLD);
     const hideAnomalies = Boolean(chartOptions.allowAnomalyToggle && chartOptions.hideAnomalies && anomalyTimes.size);
-    const filteredPoints = hideAnomalies ? allPoints.filter((point) => !anomalyTimes.has(point.capturedAt)) : allPoints;
-    const points = filteredPoints.length >= 2 ? filteredPoints : allPoints;
-    const hiddenAnomalyCount = allPoints.length - points.length;
+    const filteredPoints = hideAnomalies ? rangedPoints.filter((point) => !anomalyTimes.has(point.capturedAt)) : rangedPoints;
+    const points = filteredPoints.length >= 2 ? filteredPoints : rangedPoints;
+    const hiddenAnomalyCount = rangedPoints.length - points.length;
+    const windowStart = rangedPoints.length ? Number(rangedPoints[0].capturedAt) : 0;
+    const windowEnd = rangedPoints.length ? Number(rangedPoints[rangedPoints.length - 1].capturedAt) : 0;
+    const windowEvents = events.filter((event) => Number(event.capturedAt) >= windowStart && Number(event.previousCapturedAt) <= windowEnd);
     const visibleEvents = hiddenAnomalyCount
-      ? events.filter((event) => !anomalyTimes.has(Number(event.previousCapturedAt)) && !anomalyTimes.has(Number(event.capturedAt)))
-      : events;
+      ? windowEvents.filter((event) => !anomalyTimes.has(Number(event.previousCapturedAt)) && !anomalyTimes.has(Number(event.capturedAt)))
+      : windowEvents;
     if (points.length < 2) {
       return `
         <aside class="history-line-panel">
-          <div class="history-line-head"><strong>完整价格趋势</strong><span>暂无</span></div>
+          <div class="history-line-head">
+            <div class="history-line-title"><strong>价格趋势</strong>${windowSelect}</div>
+            <span>暂无</span>
+          </div>
           <div class="history-line-empty">趋势数据不足</div>
         </aside>
       `;
@@ -1041,7 +1191,13 @@
     const plotHeight = height - pad.top - pad.bottom;
     const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
     const y = (price) => pad.top + (1 - ((price - minPrice) / priceRange)) * plotHeight;
-    const path = points.map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`).join(' ');
+    const first = points[0];
+    const last = points[points.length - 1];
+    const trendDirection = last.price > first.price ? 'up' : last.price < first.price ? 'down' : 'flat';
+    const trendPath = points
+      .map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`)
+      .join(' ');
+    const trendLine = `<path class="history-line-path ${trendDirection}" d="${trendPath}"></path>`;
     const highlights = visibleEvents.map((event) => {
       const previousCapturedAt = Number(event.previousCapturedAt);
       const capturedAt = Number(event.capturedAt);
@@ -1063,27 +1219,25 @@
     const pointMarkers = points.length <= 120
       ? points.map((point) => `<circle class="history-line-point" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="2"><title>${escapeHtml(`${formatTime(point.capturedAt)} ${formatUsd(point.price)}`)}</title></circle>`).join('')
       : '';
-    const first = points[0];
-    const last = points[points.length - 1];
     const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
     const rangeMs = maxTime - minTime;
     const anomalyToggle = chartOptions.allowAnomalyToggle && anomalyTimes.size
       ? `<button class="history-anomaly-toggle ${hiddenAnomalyCount ? 'active' : ''}" type="button" data-trend-anomaly-toggle aria-pressed="${hiddenAnomalyCount ? 'true' : 'false'}">${hiddenAnomalyCount ? '显示异常值' : '隐藏异常值'}</button>`
       : '';
     const chartStats = hiddenAnomalyCount
-      ? `${events.length} 处异常 · 已隐藏 ${hiddenAnomalyCount} 个区间点`
-      : `${points.length} 点 · ${events.length} 处异常`;
+      ? `${windowEvents.length} 处异常 · 已隐藏 ${hiddenAnomalyCount} 个区间点`
+      : `${points.length} 点 · ${windowEvents.length} 处异常`;
     return `
       <aside class="history-line-panel">
         <div class="history-line-head">
-          <strong>完整价格趋势</strong>
+          <div class="history-line-title"><strong>价格趋势</strong>${windowSelect}</div>
           <div class="history-line-head-actions"><span>${chartStats}</span>${anomalyToggle}</div>
         </div>
         <div class="history-line-chart-wrap">
-          <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(group.seedId)} 完整价格趋势及异常区间" preserveAspectRatio="xMidYMid meet">
+          <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(`${group.seedId} ${chartWindow} 价格趋势`)}" preserveAspectRatio="xMidYMid meet">
             <rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>
             ${yTicks}
-            <path class="history-line-path" d="${path}"></path>
+            ${trendLine}
             ${pointMarkers}
             ${highlights}
             <text class="history-line-label" x="${pad.left}" y="${height - 8}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt, rangeMs))}</text>
@@ -1105,6 +1259,7 @@
         && Math.abs(Number(event.changeRate)) >= limit)
       .slice()
       .sort((a, b) => Number(a.capturedAt) - Number(b.capturedAt));
+    const pointTimes = new Set(sortedPoints.map((point) => Number(point.capturedAt)));
     const usedEvents = new Set();
     const anomalyTimes = new Set();
 
@@ -1115,7 +1270,8 @@
         && !usedEvents.has(candidateIndex)
         && Math.sign(Number(candidate.changeRate)) === -direction);
       if (pairIndex < 0) {
-        anomalyTimes.add(Number(event.capturedAt));
+        const capturedAt = Number(event.capturedAt);
+        if (pointTimes.has(capturedAt)) anomalyTimes.add(capturedAt);
         usedEvents.add(index);
         return;
       }
@@ -1160,64 +1316,6 @@
       }
     });
     return out.sort((a, b) => a.capturedAt - b.capturedAt);
-  }
-
-  function renderHistorySection(title, note, result) {
-    const data = result || { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: 0, eventCount: 0, groups: [] };
-    return `
-      <section class="history-section">
-        <div class="history-section-head">
-          <div class="history-section-title">
-            <h2>${escapeHtml(title)}</h2>
-            <p class="history-section-note">${escapeHtml(note)}</p>
-          </div>
-          <div class="history-stats">
-            <span class="history-stat-chip"><span>快照</span><strong>${data.totalSnapshots}</strong></span>
-            <span class="history-stat-chip"><span>异常</span><strong>${data.eventCount}</strong></span>
-          </div>
-        </div>
-        ${data.eventCount ? `<div class="history-groups">${data.groups.map((group) => renderHistoryGroup(group, data)).join('')}</div>` : '<div class="history-empty">暂无超过阈值的涨跌异常。</div>'}
-      </section>
-    `;
-  }
-
-  function renderHistoryGroup(group, result) {
-    const seed = SEED_BY_ID[group.seedId] || { id: group.seedId, name: group.seedId, isVipOnly: false };
-    return `
-      <div class="history-group">
-        <div class="history-group-head">
-          <img class="history-crop-icon" src="./assets/crops/${escapeHtml(seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'" />
-          <strong>${escapeHtml(seed.name)}</strong>
-          <span>${escapeHtml(seed.id)} · ${group.events.length} 条</span>
-        </div>
-        <div class="history-group-body">
-          <div class="history-rows">
-            <div class="history-row history-row-head">
-              <div>记录时间</div>
-              <div>上一条时间</div>
-              <div class="history-price">上一价格</div>
-              <div class="history-price">当前价格</div>
-              <div class="history-price">涨跌幅</div>
-            </div>
-            ${group.events.map(renderHistoryEvent).join('')}
-          </div>
-          ${renderHistoryLineChart(group, result)}
-        </div>
-      </div>
-    `;
-  }
-
-  function renderHistoryEvent(event) {
-    const direction = Number(event.changeRate) > 0 ? 'up' : 'down';
-    return `
-      <div class="history-row">
-        <div>${formatTime(event.capturedAt)}</div>
-        <div>${event.previousCapturedAt ? formatTime(event.previousCapturedAt) : '-'}</div>
-        <div class="history-price">${formatUsd(event.previousPrice)}</div>
-        <div class="history-price">${formatUsd(event.currentPrice)}</div>
-        <div class="history-rate ${direction}">${formatSignedPercent(event.changeRate)}</div>
-      </div>
-    `;
   }
 
   function cropTrendData(seedId) {
@@ -1279,7 +1377,8 @@
     } else {
       content = renderHistoryLineChart(trend.group, trend.result, {
         allowAnomalyToggle: true,
-        hideAnomalies: state.trendHideAnomalies
+        hideAnomalies: state.trendHideAnomalies,
+        windowValue: state.trendModalWindow
       });
     }
     return `
@@ -1307,6 +1406,7 @@
   function closeCropTrendModal() {
     if (!state.trendModalSeedId) return;
     state.trendModalSeedId = '';
+    state.trendModalWindow = '';
     state.trendHideAnomalies = false;
     render();
   }
@@ -1314,6 +1414,7 @@
   function openCropTrendModal(seedId) {
     if (!SEED_BY_ID[seedId]) return;
     state.trendModalSeedId = seedId;
+    state.trendModalWindow = trendWindowLabel();
     state.trendHideAnomalies = false;
     const historyPromise = loadHistoryAlerts(false);
     render();
@@ -1595,6 +1696,13 @@
     document.querySelectorAll('[data-action]').forEach((button) => {
       button.addEventListener('click', handleAction);
     });
+    document.querySelectorAll('[data-history-record]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const key = String(button.dataset.historyRecord || '');
+        state.historyExpandedKey = state.historyExpandedKey === key ? '' : key;
+        render();
+      });
+    });
     const cycle = document.getElementById('cycleMode');
     if (cycle) cycle.addEventListener('change', () => { state.config.cycleMode = cycle.value; saveState(); render(); });
     const trendWindow = document.getElementById('trendWindow');
@@ -1653,6 +1761,11 @@
     });
     const trendClose = document.querySelector('[data-trend-close]');
     if (trendClose) trendClose.addEventListener('click', closeCropTrendModal);
+    const trendModalWindow = document.querySelector('[data-trend-window]');
+    if (trendModalWindow) trendModalWindow.addEventListener('change', () => {
+      state.trendModalWindow = normalizeChartWindow(trendModalWindow.value);
+      render();
+    });
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
     if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {
       state.trendHideAnomalies = !state.trendHideAnomalies;
@@ -1701,7 +1814,14 @@
     const action = event.currentTarget.dataset.action;
     if (action === 'settings') { state.view = 'settings'; render(); return; }
     if (action === 'refresh-history') {
+      state.historyVisibleCount = HISTORY_PAGE_SIZE;
+      state.historyExpandedKey = '';
       await loadHistoryAlerts(true);
+      render();
+      return;
+    }
+    if (action === 'load-more-history') {
+      state.historyVisibleCount += HISTORY_PAGE_SIZE;
       render();
       return;
     }
