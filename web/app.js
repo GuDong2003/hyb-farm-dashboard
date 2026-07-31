@@ -1661,12 +1661,12 @@
     return `
       <tr class="${row.seed.isVipOnly ? 'vip' : ''} ${best ? 'best' : ''}">
         <td><span class="seed-vip-badge ${row.seed.isVipOnly ? 'vip' : 'normal'}">${row.seed.isVipOnly ? 'VIP' : '普通'}</span></td>
-        <td title="点击查看 ${escapeHtml(row.seed.name)}价格曲线"><button class="crop-cell crop-trend-trigger" type="button" data-trend-seed="${escapeHtml(row.seed.id)}"><img class="crop-icon" src="./assets/crops/${escapeHtml(row.seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'"/><strong class="crop-name">${escapeHtml(row.seed.name)}</strong><svg class="crop-trend-trigger-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12.5 5.4 9l2.4 1.8L13.8 4.5M10.8 4.5h3v3" /></svg></button></td>
+        <td><div class="crop-cell"><img class="crop-icon" src="./assets/crops/${escapeHtml(row.seed.id)}.png" alt="" loading="lazy" onerror="this.style.display='none'"/><strong class="crop-name">${escapeHtml(row.seed.name)}</strong></div></td>
         <td title="毛产量 / 卖出产量（扣 1 留种）">${formatNumber(row.stats.grossYield, 0)}/${formatNumber(row.stats.saleYield, 0)}</td>
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
         <td>${formatNumber(row.stats.dailyCycles, 2)}</td>
         <td><input class="price-input" data-price="${escapeHtml(row.seed.id)}" type="number" min="0" step="0.00001" value="${row.price == null ? '' : formatNumber(row.price, 5)}" /></td>
-        <td title="${escapeHtml(priceChangeRateTitle(row))}">${renderPriceChangeRate(row.priceChangeRate)}</td>
+        <td title="${escapeHtml(priceChangeRateTitle(row))}"><div class="price-change-cell">${renderPriceChangeRate(row.priceChangeRate)}<button class="crop-trend-trigger" type="button" data-trend-seed="${escapeHtml(row.seed.id)}" aria-label="查看${escapeHtml(row.seed.name)}价格曲线" title="查看${escapeHtml(row.seed.name)}价格曲线"><svg class="crop-trend-trigger-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12.5 5.4 9l2.4 1.8L13.8 4.5M10.8 4.5h3v3" /></svg></button></div></td>
         <td>${formatUsd(row.singleNet)}</td>
         <td>${formatUsd(row.hourly)}</td>
         <td>${formatUsd(row.singleDaily)}</td>
