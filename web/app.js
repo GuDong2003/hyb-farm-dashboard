@@ -108,6 +108,7 @@
       trendModalSeedId: '',
       trendModalWindow: '',
       trendHideAnomalies: false,
+      trendHidePoints: false,
       error: ''
     };
 
@@ -1293,7 +1294,8 @@
       const tickY = pad.top + ratio * plotHeight;
       return `<g><line class="history-line-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line><text class="history-line-label" x="${pad.left - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(yTickLabels[index])}</text></g>`;
     }).join('');
-    const pointMarkers = points.map((point) => {
+    const hidePoints = Boolean(chartOptions.allowPointToggle && chartOptions.hidePoints);
+    const pointMarkers = hidePoints ? '' : points.map((point) => {
       const pointX = x(point.capturedAt);
       const pointY = y(point.price);
       const tooltipWidth = 154;
@@ -1318,7 +1320,10 @@
     const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
     const rangeMs = maxTime - minTime;
     const anomalyToggle = chartOptions.allowAnomalyToggle && anomalyTimes.size
-      ? `<button class="history-anomaly-toggle ${hiddenAnomalyCount ? 'active' : ''}" type="button" data-trend-anomaly-toggle aria-pressed="${hiddenAnomalyCount ? 'true' : 'false'}">${hiddenAnomalyCount ? '显示异常值' : '隐藏异常值'}</button>`
+      ? `<button class="history-chart-toggle ${hiddenAnomalyCount ? 'active' : ''}" type="button" data-trend-anomaly-toggle aria-pressed="${hiddenAnomalyCount ? 'true' : 'false'}">${hiddenAnomalyCount ? '显示异常值' : '隐藏异常值'}</button>`
+      : '';
+    const pointToggle = chartOptions.allowPointToggle
+      ? `<button class="history-chart-toggle ${hidePoints ? 'active' : ''}" type="button" data-trend-point-toggle aria-pressed="${hidePoints ? 'true' : 'false'}">${hidePoints ? '显示数据点' : '隐藏数据点'}</button>`
       : '';
     const chartStats = hiddenAnomalyCount
       ? `${windowEvents.length} 处异常 · 已隐藏 ${hiddenAnomalyCount} 个区间点`
@@ -1327,7 +1332,7 @@
       <aside class="history-line-panel">
         <div class="history-line-head">
           <div class="history-line-title"><strong>价格趋势</strong>${windowSelect}</div>
-          <div class="history-line-head-actions"><span>${chartStats}</span>${anomalyToggle}</div>
+          <div class="history-line-head-actions"><span>${chartStats}</span>${pointToggle}${anomalyToggle}</div>
         </div>
         <div class="history-line-chart-wrap">
           <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(`${group.seedId} ${chartWindow} 价格趋势`)}" preserveAspectRatio="xMidYMid meet">
@@ -1473,7 +1478,9 @@
     } else {
       content = renderHistoryLineChart(trend.group, trend.result, {
         allowAnomalyToggle: true,
+        allowPointToggle: true,
         hideAnomalies: state.trendHideAnomalies,
+        hidePoints: state.trendHidePoints,
         windowValue: state.trendModalWindow
       });
     }
@@ -1504,6 +1511,7 @@
     state.trendModalSeedId = '';
     state.trendModalWindow = '';
     state.trendHideAnomalies = false;
+    state.trendHidePoints = false;
     render();
   }
 
@@ -1512,6 +1520,7 @@
     state.trendModalSeedId = seedId;
     state.trendModalWindow = trendWindowLabel();
     state.trendHideAnomalies = false;
+    state.trendHidePoints = false;
     const historyPromise = loadHistoryAlerts(false);
     render();
     historyPromise.finally(() => {
@@ -1885,6 +1894,11 @@
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
     if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {
       state.trendHideAnomalies = !state.trendHideAnomalies;
+      render();
+    });
+    const trendPointToggle = document.querySelector('[data-trend-point-toggle]');
+    if (trendPointToggle) trendPointToggle.addEventListener('click', () => {
+      state.trendHidePoints = !state.trendHidePoints;
       render();
     });
     document.querySelectorAll('[data-history-point]').forEach((point) => {

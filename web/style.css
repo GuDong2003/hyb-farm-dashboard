@@ -425,9 +425,9 @@ tr:hover td { background: var(--row-hover); }
 .history-line-title { display: flex; align-items: center; gap: 8px; }
 .history-window-select { height: 26px; padding: 0 24px 0 8px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--text); background: var(--control-bg); cursor: pointer; font-size: 12px; }
 .history-line-head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.history-anomaly-toggle { flex: none; height: 26px; padding: 0 9px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--muted); background: var(--control-bg); cursor: pointer; font-size: 12px; }
-.history-anomaly-toggle:hover, .history-anomaly-toggle:focus-visible { color: var(--text); background: var(--control-hover); }
-.history-anomaly-toggle.active { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); font-weight: 800; }
+.history-chart-toggle { flex: none; height: 26px; padding: 0 9px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--muted); background: var(--control-bg); cursor: pointer; font-size: 12px; }
+.history-chart-toggle:hover, .history-chart-toggle:focus-visible { color: var(--text); background: var(--control-hover); }
+.history-chart-toggle.active { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); font-weight: 800; }
 .history-line-chart-wrap { display: grid; place-items: stretch; width: 100%; min-height: 0; overflow: hidden; }
 .history-line-chart { display: block; width: 100%; height: 100%; min-height: 228px; }
 .history-line-bg { fill: var(--formula-bg); }
