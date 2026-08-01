@@ -436,7 +436,16 @@ tr:hover td { background: var(--row-hover); }
 .history-line-path.up { stroke: var(--red); }
 .history-line-path.down { stroke: var(--green); }
 .history-line-path.flat { stroke: var(--muted); }
-.history-line-point { fill: var(--surface); stroke: var(--blue); stroke-width: 1.3; }
+.history-line-point-wrap { cursor: pointer; }
+.history-line-point-hit { fill: transparent; stroke: transparent; }
+.history-line-point-hit:focus { outline: none; }
+.history-line-point { fill: var(--surface); stroke: var(--blue); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; transition: transform .12s ease, fill .12s ease, stroke-width .12s ease; pointer-events: none; }
+.history-line-point-wrap:hover .history-line-point, .history-line-point-wrap:focus-within .history-line-point { fill: var(--blue); stroke-width: 2; transform: scale(1.65); }
+.history-line-point-tooltip { opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.history-line-point-wrap:hover .history-line-point-tooltip, .history-line-point-wrap:focus-within .history-line-point-tooltip { opacity: 1; }
+.history-line-point-tooltip-bg { fill: var(--surface); stroke: var(--control-border); stroke-width: 1; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .24)); }
+.history-line-point-tooltip-time { fill: var(--text); font-size: 10px; font-weight: 750; }
+.history-line-point-tooltip-price { fill: var(--blue); font-size: 11px; font-weight: 850; }
 .history-line-anomaly-band { opacity: .08; }
 .history-line-anomaly.up .history-line-anomaly-band { fill: var(--red); }
 .history-line-anomaly.down .history-line-anomaly-band { fill: var(--green); }

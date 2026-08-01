@@ -1293,9 +1293,28 @@
       const tickY = pad.top + ratio * plotHeight;
       return `<g><line class="history-line-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line><text class="history-line-label" x="${pad.left - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(yTickLabels[index])}</text></g>`;
     }).join('');
-    const pointMarkers = points.length <= 120
-      ? points.map((point) => `<circle class="history-line-point" cx="${formatNumber(x(point.capturedAt), 2)}" cy="${formatNumber(y(point.price), 2)}" r="2"><title>${escapeHtml(`${formatTime(point.capturedAt)} ${formatUsd(point.price)}`)}</title></circle>`).join('')
-      : '';
+    const pointMarkers = points.map((point) => {
+      const pointX = x(point.capturedAt);
+      const pointY = y(point.price);
+      const tooltipWidth = 154;
+      const tooltipHeight = 42;
+      const tooltipX = Math.min(width - tooltipWidth - 4, Math.max(4, pointX - tooltipWidth / 2));
+      const tooltipY = pointY - tooltipHeight - 9 >= 4 ? pointY - tooltipHeight - 9 : pointY + 9;
+      const timeText = formatTime(point.capturedAt);
+      const priceText = `$${Number(point.price).toFixed(5)}`;
+      const pointLabel = `${timeText}，价格 ${priceText}`;
+      return `
+        <g class="history-line-point-wrap">
+          <circle class="history-line-point-hit" data-history-point cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="8" tabindex="0" role="img" aria-label="${escapeHtml(pointLabel)}"></circle>
+          <circle class="history-line-point" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="2.5" aria-hidden="true"></circle>
+          <g class="history-line-point-tooltip" aria-hidden="true">
+            <rect class="history-line-point-tooltip-bg" x="${formatNumber(tooltipX, 2)}" y="${formatNumber(tooltipY, 2)}" width="${tooltipWidth}" height="${tooltipHeight}" rx="6"></rect>
+            <text class="history-line-point-tooltip-time" x="${formatNumber(tooltipX + 9, 2)}" y="${formatNumber(tooltipY + 16, 2)}">${escapeHtml(timeText)}</text>
+            <text class="history-line-point-tooltip-price" x="${formatNumber(tooltipX + 9, 2)}" y="${formatNumber(tooltipY + 33, 2)}">价格：${escapeHtml(priceText)}</text>
+          </g>
+        </g>
+      `;
+    }).join('');
     const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
     const rangeMs = maxTime - minTime;
     const anomalyToggle = chartOptions.allowAnomalyToggle && anomalyTimes.size
@@ -1315,8 +1334,8 @@
             <rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>
             ${yTicks}
             ${trendLine}
-            ${pointMarkers}
             ${highlights}
+            ${pointMarkers}
             <text class="history-line-label" x="${pad.left}" y="${height - 8}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt, rangeMs))}</text>
             <text class="history-line-label" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt, rangeMs))}</text>
           </svg>
@@ -1867,6 +1886,12 @@
     if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {
       state.trendHideAnomalies = !state.trendHideAnomalies;
       render();
+    });
+    document.querySelectorAll('[data-history-point]').forEach((point) => {
+      point.addEventListener('click', (event) => {
+        event.stopPropagation();
+        point.focus();
+      });
     });
     const trendBackdrop = document.querySelector('[data-trend-backdrop]');
     if (trendBackdrop) trendBackdrop.addEventListener('click', (event) => {
