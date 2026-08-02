@@ -272,6 +272,16 @@
     }
   }
 
+  async function refreshCachedLocalHistory() {
+    if (!state.historyAlerts) return;
+    const localSnapshots = await allSnapshots();
+    state.historyAlerts = {
+      cloud: state.historyAlerts.cloud || emptyHistoryResult(),
+      local: buildSnapshotChangeHistory(localSnapshots, PRICE_CHANGE_ALERT_THRESHOLD)
+    };
+    state.historyLoadedAt = Date.now();
+  }
+
   async function fetchCloudHistoryAlerts(force) {
     const endpoint = `${CLOUD_HISTORY_ENDPOINT}?threshold=${encodeURIComponent(PRICE_CHANGE_ALERT_THRESHOLD)}`;
     const response = await fetch(endpoint, {
@@ -465,6 +475,7 @@
     snapshot.id = snapshot.id || `snapshot:${capturedAt}`;
     snapshot.capturedAt = capturedAt;
     await putSnapshot(snapshot);
+    await refreshCachedLocalHistory();
     saveState();
     maybeNotifyPriceRise();
     if (state.config.autoUploadPrices) queueCloudSubmission(snapshot);
@@ -735,22 +746,12 @@
 
   function computeRows() {
     const prices = priceMap();
-    const changeRates = (state.priceChangeRates && state.priceChangeRates.shop) || {};
     const rows = SEEDS.map((seed) => {
       const price = Number(prices[seed.id]);
-      const previousPrice = Number((state.previousPrices.shop || {})[seed.id]);
-      const capturedRate = Number(changeRates[seed.id]);
-      const trendChange = trendChangeForSeed(seed.id);
+      const historyChange = historyWindowChangeForSeed(seed.id, trendWindowLabel());
       const alertTrendChange = trendChangeForSeed(seed.id, PRICE_CHANGE_ALERT_WINDOW, true);
       const hasPrice = Number.isFinite(price);
-      const hasPreviousPrice = Number.isFinite(previousPrice);
-      const priceDelta = hasPrice && hasPreviousPrice ? price - previousPrice : null;
-      const computedRate = priceDelta != null && previousPrice > 0 ? (priceDelta / previousPrice) * 100 : null;
-      const hasTrendRate = Number.isFinite(Number(trendChange.rate));
-      const hasCapturedRate = Number.isFinite(capturedRate);
-      const hasComputedRate = Number.isFinite(computedRate);
-      const priceChangeRate = hasTrendRate ? trendChange.rate : (hasCapturedRate ? capturedRate : (hasComputedRate ? computedRate : null));
-      const priceChangeSource = hasTrendRate ? trendChange.source : (hasCapturedRate ? 'exchange' : (hasComputedRate ? 'computed' : 'none'));
+      const priceChangeRate = hasFiniteNumber(historyChange.rate) ? historyChange.rate : null;
       const stats = levelStats(seed, state.config.viewLevel);
       const singleNet = hasPrice ? stats.saleYield * price : null;
       const hourly = hasPrice ? singleNet / stats.growthHours : null;
@@ -762,7 +763,7 @@
       const expSingleDaily = expPerHarvest * stats.dailyCycles;
       const expTotalDaily = totalDailyExpForSeed(seed);
       const priceAlertRate = Number.isFinite(Number(alertTrendChange.rate)) ? alertTrendChange.rate : null;
-      return { seed, price: hasPrice ? price : null, previousPrice: hasPreviousPrice ? previousPrice : null, priceDelta, priceChangeRate, priceChangeSource, priceChangeBaseAt: trendChange.baseAt || '', priceTrendUpdatedAt: trendChange.updatedAt || '', priceAlertRate, priceAlertBaseAt: alertTrendChange.baseAt || '', priceAlertUpdatedAt: alertTrendChange.updatedAt || '', stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
+      return { seed, price: hasPrice ? price : null, priceChangeRate, priceChangeBaseAt: historyChange.baseAt || 0, priceChangeEndAt: historyChange.endAt || 0, priceChangeBasePrice: historyChange.basePrice, priceChangeEndPrice: historyChange.endPrice, priceAlertRate, priceAlertBaseAt: alertTrendChange.baseAt || '', priceAlertUpdatedAt: alertTrendChange.updatedAt || '', stats, singleNet, hourly, singleDaily, totalDaily, expPerHarvest, expHourly, expSingleDaily, expTotalDaily };
     });
     const dir = state.config.sortDir === 'asc' ? 1 : -1;
     return rows.sort((a, b) => compareRows(a, b, state.config.sortKey) * dir || a.seed.sortOrder - b.seed.sortOrder);
@@ -871,6 +872,34 @@
     return sortedPoints.filter((point) => Number(point.capturedAt) >= cutoffTime);
   }
 
+  function historyWindowChange(points, value) {
+    const rangedPoints = pointsInChartWindow(points, value);
+    if (rangedPoints.length < 2) return { points: rangedPoints };
+    const first = rangedPoints[0];
+    const last = rangedPoints[rangedPoints.length - 1];
+    const baseAt = Number(first.capturedAt);
+    const endAt = Number(last.capturedAt);
+    const basePrice = Number(first.price);
+    const endPrice = Number(last.price);
+    if (!Number.isFinite(baseAt) || !Number.isFinite(endAt) || endAt <= baseAt || !Number.isFinite(basePrice) || basePrice <= 0 || !Number.isFinite(endPrice)) {
+      return { points: rangedPoints };
+    }
+    return {
+      points: rangedPoints,
+      rate: ((endPrice - basePrice) / basePrice) * 100,
+      baseAt,
+      endAt,
+      basePrice,
+      endPrice
+    };
+  }
+
+  function historyWindowChangeForSeed(seedId, value) {
+    const trend = cropTrendData(seedId);
+    const points = trend.points.length >= 2 ? trend.points : anomalyChartPoints(trend.group.events);
+    return historyWindowChange(points, value);
+  }
+
   function renderChartWindowSelect(value) {
     const selected = normalizeChartWindow(value);
     return `
@@ -940,12 +969,16 @@
   function nullableCompare(a, b) {
     const av = Number(a);
     const bv = Number(b);
-    const aOk = Number.isFinite(av);
-    const bOk = Number.isFinite(bv);
+    const aOk = hasFiniteNumber(a);
+    const bOk = hasFiniteNumber(b);
     if (aOk && bOk) return av - bv;
     if (aOk) return 1;
     if (bOk) return -1;
     return 0;
+  }
+
+  function hasFiniteNumber(value) {
+    return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
   }
 
   function bestBy(rows, key) {
@@ -1214,7 +1247,8 @@
     const allPoints = seriesPoints.length >= 2 ? seriesPoints : anomalyChartPoints(events);
     const chartWindow = normalizeChartWindow(chartOptions.windowValue);
     const windowSelect = renderChartWindowSelect(chartWindow);
-    const rangedPoints = pointsInChartWindow(allPoints, chartWindow);
+    const windowChange = historyWindowChange(allPoints, chartWindow);
+    const rangedPoints = windowChange.points;
     const anomalyTimes = thresholdAnomalyTimestamps(rangedPoints, events, Number(result && result.threshold) || PRICE_CHANGE_ALERT_THRESHOLD);
     const hideAnomalies = Boolean(chartOptions.allowAnomalyToggle && chartOptions.hideAnomalies && anomalyTimes.size);
     const filteredPoints = hideAnomalies ? rangedPoints.filter((point) => !anomalyTimes.has(point.capturedAt)) : rangedPoints;
@@ -1607,7 +1641,7 @@
         <span>每天经验：Σ(地块数 × 单作物经验 × 当前等级毛产量 × 每天次数（${dailyCycleLabel()}）)</span>
         <span>单地每小时经验：单块收获经验 ÷ 当前等级生长时间（已包含地块缩时）</span>
         <span>升级时间：距下一级经验 ÷ 当前全地最高的 24h 理论经验/天</span>
-        <span>涨跌幅：当前价 vs 选定区间基准价（${trendWindowLabel()}）</span>
+        <span>涨跌幅：所选区间内曲线最早历史价 vs 最新历史价（${trendWindowLabel()}）；不足 2 个时间点不计算</span>
         <span>地块等级：收益与经验产量每级 +1/3；生长时间每级 -1/15</span>
         <span>农场等级：1→2 需 100 经验，之后每级需求 ×1.5</span>
       </section>
@@ -1655,7 +1689,7 @@
 
   function renderPriceChangeRate(rate) {
     const value = Number(rate);
-    if (!Number.isFinite(value)) return '<span class="price-delta flat"><span class="price-delta-arrow"></span><span class="price-delta-percent">-</span></span>';
+    if (!hasFiniteNumber(rate)) return '<span class="price-delta flat"><span class="price-delta-arrow"></span><span class="price-delta-percent">-</span></span>';
     if (Math.abs(value) < 0.000005) return '<span class="price-delta flat"><span class="price-delta-arrow">→</span><span class="price-delta-percent">0%</span></span>';
     const direction = priceChangeDirection(value);
     const arrow = value > 0 ? '↑' : '↓';
@@ -1664,13 +1698,13 @@
 
   function priceChangeDirection(rate) {
     const value = Number(rate);
-    if (!Number.isFinite(value) || Math.abs(value) < 0.000005) return 'flat';
+    if (!hasFiniteNumber(rate) || Math.abs(value) < 0.000005) return 'flat';
     return value > 0 ? 'up' : 'down';
   }
 
   function renderCropTrendTrigger(row) {
     const direction = priceChangeDirection(row.priceChangeRate);
-    const directionLabel = !Number.isFinite(Number(row.priceChangeRate))
+    const directionLabel = !hasFiniteNumber(row.priceChangeRate)
       ? '暂无涨跌数据'
       : direction === 'up' ? '上涨' : direction === 'down' ? '下跌' : '持平';
     const path = direction === 'up'
@@ -1683,19 +1717,12 @@
   }
 
   function priceChangeRateTitle(row) {
-    if (!Number.isFinite(Number(row.priceChangeRate))) return '没有涨跌幅数据';
-    const sourceText = row.priceChangeSource === 'trend-hourly'
-      ? `按 ${trendWindowLabel()} 小时趋势计算`
-      : row.priceChangeSource === 'trend-daily'
-        ? `按 ${trendWindowLabel()} 日线趋势计算`
-        : row.priceChangeSource === 'exchange'
-          ? '交易所涨跌幅度'
-          : '按上次价格计算的涨跌幅度';
-    const baseText = row.priceChangeBaseAt ? `，基准时间：${formatTime(row.priceChangeBaseAt)}` : '';
-    const updatedText = row.priceTrendUpdatedAt ? `，刷新：${formatTime(row.priceTrendUpdatedAt)}` : '';
-    const deltaText = Number.isFinite(Number(row.priceDelta)) ? `，价差：${formatSignedUsd(row.priceDelta)}` : '';
-    const previousText = Number.isFinite(Number(row.previousPrice)) ? `，上次价格：${formatUsd(row.previousPrice)}` : '';
-    return `${sourceText}：${formatSignedPercent(row.priceChangeRate)}，当前价格：${formatUsd(row.price)}${baseText}${updatedText}${previousText}${deltaText}`;
+    if (!hasFiniteNumber(row.priceChangeRate)) {
+      return state.historyLoading
+        ? '正在读取价格历史'
+        : `${trendWindowLabel()} 区间内历史数据不足，至少需要 2 个不同时间点`;
+    }
+    return `${trendWindowLabel()} 曲线首末涨跌：${formatSignedPercent(row.priceChangeRate)}，${formatTime(row.priceChangeBaseAt)} ${formatUsd(row.priceChangeBasePrice)} → ${formatTime(row.priceChangeEndAt)} ${formatUsd(row.priceChangeEndPrice)}`;
   }
 
   function priceAlertRateTitle(row) {
@@ -2021,6 +2048,7 @@
       const json = JSON.parse(await file.text());
       if (Array.isArray(json.snapshots)) {
         for (const snapshot of json.snapshots) await putSnapshot(snapshot);
+        await refreshCachedLocalHistory();
       }
       if (json.state) {
         state.config = Object.assign(state.config, json.state.config || {});
@@ -2165,6 +2193,9 @@
     installThemeListener();
     await loadCloudDefaultPrices(false);
     await refreshHistoryCount();
+    const historyPromise = loadHistoryAlerts(false);
+    render();
+    await historyPromise;
     render();
     appReady = true;
     window.setTimeout(runAutoRefresh, 600);
