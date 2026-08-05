@@ -139,7 +139,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .top-alert strong, .top-alert span { overflow: hidden; text-overflow: ellipsis; }
 .top-alert strong { color: var(--text); }
 .top-alert-label { flex: none; font-weight: 850; }
-.github-link, .theme-toggle, .topbar-link {
+.card-link, .github-link, .theme-toggle, .topbar-link {
   display: inline-grid;
   place-items: center;
   flex: none;
@@ -151,7 +151,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   text-decoration: none;
   cursor: pointer;
 }
-.github-link, .theme-toggle { width: 34px; }
+.card-link, .github-link, .theme-toggle { width: 34px; }
 .topbar-link {
   margin-left: auto;
   padding: 4px 12px;
@@ -162,7 +162,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   font-weight: 850;
 }
 .topbar-link.active { color: var(--blue); background: var(--blue-soft); }
-.github-link:hover, .theme-toggle:hover, .topbar-link:hover { background: var(--icon-hover); }
+.card-link:hover, .github-link:hover, .theme-toggle:hover, .topbar-link:hover { background: var(--icon-hover); }
+.card-link img { display: block; width: 20px; height: 20px; border-radius: 5px; }
 .github-link svg { width: 20px; height: 20px; fill: currentColor; }
 .theme-toggle { font-size: 18px; line-height: 1; }
 

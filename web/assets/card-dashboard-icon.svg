@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="传说卡收益计算">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="4" x2="58" y2="62" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#24164f"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="card" x1="16" y1="10" x2="49" y2="55" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe7a3"/>
+      <stop offset="0.48" stop-color="#f7b84b"/>
+      <stop offset="1" stop-color="#d97706"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-color="#020617" flood-opacity="0.65"/>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <circle cx="49" cy="14" r="9" fill="#a78bfa" opacity="0.24"/>
+  <circle cx="49" cy="14" r="3" fill="#fef3c7"/>
+  <g transform="rotate(-8 32 32)" filter="url(#shadow)">
+    <rect x="15" y="9" width="34" height="46" rx="5" fill="url(#card)" stroke="#fff1bd" stroke-width="1.5"/>
+    <rect x="19" y="13" width="26" height="38" rx="3" fill="none" stroke="#fff5d6" stroke-opacity="0.65"/>
+    <path d="m32 17 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L32 17Z" fill="#fff8db"/>
+    <path d="m24 42 8-5 8 5-8 5-8-5Z" fill="#7c3aed" opacity="0.9"/>
+    <path d="M27 40.5h10" stroke="#fef3c7" stroke-width="1.5" stroke-linecap="round"/>
+  </g>
+  <path d="M9 50h4M51 50h4M11 46v8M53 46v8" stroke="#fef3c7" stroke-width="1.5" stroke-linecap="round" opacity="0.75"/>
+</svg>

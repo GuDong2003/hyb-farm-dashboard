@@ -1025,6 +1025,9 @@
           </nav>
           ${topPriceRiseAlert(rows)}
           <button class="topbar-link history-link ${state.view === 'history' ? 'active' : ''}" data-view="history" title="查看价格快照历史">历史 ${historyNavigationCount()} 条</button>
+          <a class="card-link" href="https://card.gudong226.com/" target="_blank" rel="noopener noreferrer" aria-label="打开 HYB 卡牌收益计算" title="HYB 卡牌收益计算">
+            <img src="./assets/card-dashboard-icon.svg" alt="" width="20" height="20" />
+          </a>
           <button class="theme-toggle" data-action="theme" aria-label="${themeLabel()}" title="${themeLabel()}">${themeIcon()}</button>
           <a class="github-link" href="https://github.com/GuDong2003/hyb-farm-dashboard" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub">
             <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
