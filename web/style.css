@@ -121,6 +121,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   cursor: pointer;
 }
 .nav button.active { color: var(--blue); background: var(--blue-soft); font-weight: 750; }
+.topbar-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .top-alert {
   display: inline-flex;
   align-items: center;
@@ -153,7 +154,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .card-link, .github-link, .theme-toggle { width: 34px; }
 .topbar-link {
-  margin-left: auto;
   padding: 4px 12px;
   color: var(--blue);
   background: var(--blue-soft);
