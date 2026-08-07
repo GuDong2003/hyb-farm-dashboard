@@ -1,5 +1,7 @@
 # Scrollable Daily Price Chart Implementation Plan
 
+> 本计划记录的是第一版“每日固定宽度”实现；该宽度逻辑已由 `2026-08-07-visible-window-price-chart.md` 的“一屏等于所选时长、完整历史可滚动”方案取代。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a 30-day price range and make multi-day crop-price charts horizontally scrollable with one labeled Beijing-calendar-day slot per day.

@@ -53,6 +53,11 @@
   let appReady = false;
   let priceBridgeRequest = null;
   let autoRefreshTimer = null;
+  let trendChartUpdateFrame = 0;
+  let trendChartDrag = null;
+  let trendChartWheelDelta = 0;
+  let trendChartWheelResetTimer = null;
+  let suppressTrendPointClick = false;
 
   function normalizeSeed(seed) {
     return {
@@ -110,7 +115,7 @@
       trendModalWindow: '',
       trendHideAnomalies: false,
       trendHidePoints: false,
-      trendModalScrollLeft: null,
+      trendModalVisibleEnd: null,
       error: ''
     };
 
@@ -1010,6 +1015,12 @@
   }
 
   function render() {
+    if (trendChartUpdateFrame) {
+      window.cancelAnimationFrame(trendChartUpdateFrame);
+      trendChartUpdateFrame = 0;
+    }
+    trendChartDrag = null;
+    suppressTrendPointClick = false;
     const app = document.getElementById('app');
     const rows = computeRows();
     const bestRevenue = bestBy(rows, 'totalDaily');
@@ -1237,7 +1248,7 @@
     return Number.isFinite(number) ? `$${number.toFixed(digits)}` : '-';
   }
 
-  function renderHistoryLineChart(group, result, options) {
+  function historyLineChartModel(group, result, options) {
     const chartOptions = options || {};
     const events = (Array.isArray(group && group.events) ? group.events : [])
       .slice()
@@ -1251,40 +1262,43 @@
       : [];
     const allPoints = seriesPoints.length >= 2 ? seriesPoints : anomalyChartPoints(events);
     const chartWindow = normalizeChartWindow(chartOptions.windowValue);
-    const windowSelect = renderChartWindowSelect(chartWindow);
-    const windowChange = historyWindowChange(allPoints, chartWindow);
-    const rangedPoints = windowChange.points;
-    const anomalyTimes = thresholdAnomalyTimestamps(rangedPoints, events, Number(result && result.threshold) || PRICE_CHANGE_ALERT_THRESHOLD);
+    const anomalyTimes = thresholdAnomalyTimestamps(allPoints, events, Number(result && result.threshold) || PRICE_CHANGE_ALERT_THRESHOLD);
     const hideAnomalies = Boolean(chartOptions.allowAnomalyToggle && chartOptions.hideAnomalies && anomalyTimes.size);
-    const filteredPoints = hideAnomalies ? rangedPoints.filter((point) => !anomalyTimes.has(point.capturedAt)) : rangedPoints;
-    const points = filteredPoints.length >= 2 ? filteredPoints : rangedPoints;
-    const hiddenAnomalyCount = rangedPoints.length - points.length;
-    const windowStart = rangedPoints.length ? Number(rangedPoints[0].capturedAt) : 0;
-    const windowEnd = rangedPoints.length ? Number(rangedPoints[rangedPoints.length - 1].capturedAt) : 0;
-    const windowEvents = events.filter((event) => Number(event.capturedAt) >= windowStart && Number(event.previousCapturedAt) <= windowEnd);
-    const visibleEvents = hiddenAnomalyCount
-      ? windowEvents.filter((event) => !anomalyTimes.has(Number(event.previousCapturedAt)) && !anomalyTimes.has(Number(event.capturedAt)))
-      : windowEvents;
-    if (points.length < 2) {
-      return `
-        <aside class="history-line-panel">
-          <div class="history-line-head">
-            <div class="history-line-title"><strong>价格趋势</strong>${windowSelect}</div>
-            <span>暂无</span>
-          </div>
-          <div class="history-line-empty">趋势数据不足</div>
-        </aside>
-      `;
-    }
+    return {
+      chartWindow,
+      events,
+      timelinePoints: allPoints,
+      anomalyTimes,
+      hideAnomalies,
+      minTime: allPoints.length ? Number(allPoints[0].capturedAt) : 0,
+      maxTime: allPoints.length ? Number(allPoints[allPoints.length - 1].capturedAt) : 0
+    };
+  }
 
-    const minTime = points[0].capturedAt;
-    const maxTime = points[points.length - 1].capturedAt;
-    const scrollableChart = CHART_TIME.isScrollableWindow(chartWindow);
-    const width = CHART_TIME.plotWidth(chartWindow, minTime, maxTime, 420);
-    const height = 250;
+  function historyChartRange(model, visibleEndHint) {
+    return CHART_TIME.visibleRange(
+      model.minTime,
+      model.maxTime,
+      chartWindowMilliseconds(model.chartWindow),
+      visibleEndHint
+    );
+  }
+
+  function historyPointsInRange(points, range) {
+    return (Array.isArray(points) ? points : []).filter((point) => point.capturedAt >= range.start && point.capturedAt <= range.end);
+  }
+
+  function renderHistoryLineChartFrame(model, options, range, width, height) {
+    const chartOptions = options || {};
+    const visibleTimelinePoints = historyPointsInRange(model.timelinePoints, range);
+    const filteredPoints = model.hideAnomalies
+      ? visibleTimelinePoints.filter((point) => !model.anomalyTimes.has(point.capturedAt))
+      : visibleTimelinePoints;
+    const points = filteredPoints.length >= 2 ? filteredPoints : visibleTimelinePoints;
+    const hiddenVisibleCount = visibleTimelinePoints.length - points.length;
     const prices = points.map((point) => point.price);
-    let minPrice = Math.min(...prices);
-    let maxPrice = Math.max(...prices);
+    let minPrice = prices.length ? Math.min(...prices) : 0;
+    let maxPrice = prices.length ? Math.max(...prices) : 1;
     if (minPrice === maxPrice) {
       minPrice = Math.max(0, minPrice * 0.9);
       maxPrice = maxPrice * 1.1 + 1;
@@ -1302,34 +1316,55 @@
     const yTickLabels = yTickValues.map((value) => formatChartAxisUsd(value, yTickDigits));
     const widestYTick = Math.max(...yTickLabels.map((label) => label.length));
     const axisWidth = Math.min(86, Math.max(48, 14 + widestYTick * 6.5));
+    const showDailySlots = ['7d', '30d', 'all'].includes(model.chartWindow)
+      && range.end - range.start >= CHART_TIME.DAY_MS;
+    const dailySlots = showDailySlots ? CHART_TIME.beijingDaySlots(range.start, range.end) : [];
+    const visibleDailySlots = model.chartWindow === 'all'
+      ? CHART_TIME.sampleSlots(dailySlots, 8)
+      : dailySlots;
+    const dailySlotWidth = visibleDailySlots.length > 1
+      ? width / (visibleDailySlots.length - 1)
+      : width;
+    const denseDailyLabels = dailySlotWidth < 42;
     const pad = {
       left: 10,
       right: 14,
       top: 14,
-      bottom: 36
+      bottom: denseDailyLabels ? 52 : 36
     };
     const plotHeight = height - pad.top - pad.bottom;
-    const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
+    const x = (time) => pad.left
+      + ((time - range.start) / Math.max(1, range.end - range.start))
+      * (width - pad.left - pad.right);
     const y = (price) => pad.top + (1 - ((price - minPrice) / priceRange)) * plotHeight;
-    const first = points[0];
-    const last = points[points.length - 1];
-    const trendDirection = last.price > first.price ? 'up' : last.price < first.price ? 'down' : 'flat';
-    const trendPath = points
-      .map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`)
-      .join(' ');
-    const trendLine = `<path class="history-line-path ${trendDirection}" d="${trendPath}"></path>`;
+    const first = points[0] || null;
+    const last = points[points.length - 1] || null;
+    const hasEnoughPoints = points.length >= 2;
+    const hasChange = hasEnoughPoints && first.price > 0;
+    const totalChange = hasChange ? ((last.price - first.price) / first.price) * 100 : null;
+    const trendDirection = !hasChange ? 'flat' : last.price > first.price ? 'up' : last.price < first.price ? 'down' : 'flat';
+    const trendPath = hasEnoughPoints
+      ? points.map((point, index) => `${index ? 'L' : 'M'} ${formatNumber(x(point.capturedAt), 2)} ${formatNumber(y(point.price), 2)}`).join(' ')
+      : '';
+    const trendLine = hasEnoughPoints
+      ? `<path class="history-line-path ${trendDirection}" d="${trendPath}"></path>`
+      : `<text class="history-line-label" x="${formatNumber(width / 2, 2)}" y="${formatNumber(height / 2, 2)}" text-anchor="middle">当前区间数据不足</text>`;
+    const windowEvents = model.events.filter((event) => Number(event.capturedAt) >= range.start && Number(event.previousCapturedAt) <= range.end);
+    const visibleEvents = model.hideAnomalies
+      ? windowEvents.filter((event) => !model.anomalyTimes.has(Number(event.previousCapturedAt)) && !model.anomalyTimes.has(Number(event.capturedAt)))
+      : windowEvents;
     const highlights = visibleEvents.map((event) => {
       const previousCapturedAt = Number(event.previousCapturedAt);
       const capturedAt = Number(event.capturedAt);
       const previousPrice = Number(event.previousPrice);
       const currentPrice = Number(event.currentPrice);
       if (![previousCapturedAt, capturedAt, previousPrice, currentPrice].every(Number.isFinite)) return '';
-      if (capturedAt < minTime || previousCapturedAt > maxTime) return '';
+      if (capturedAt < range.start || previousCapturedAt > range.end) return '';
       const direction = Number(event.changeRate) > 0 ? 'up' : 'down';
       const startX = x(previousCapturedAt);
       const endX = x(capturedAt);
       const title = `${formatTime(previousCapturedAt)} → ${formatTime(capturedAt)}，${formatUsd(previousPrice)} → ${formatUsd(currentPrice)}（${formatSignedPercent(event.changeRate)}）`;
-      return `<g class="history-line-anomaly ${direction}"><title>${escapeHtml(title)}</title><rect class="history-line-anomaly-band" x="${formatNumber(Math.min(startX, endX), 2)}" y="${pad.top}" width="${formatNumber(Math.max(2, Math.abs(endX - startX)), 2)}" height="${plotHeight}"></rect><line class="history-line-anomaly-segment" x1="${formatNumber(startX, 2)}" y1="${formatNumber(y(previousPrice), 2)}" x2="${formatNumber(endX, 2)}" y2="${formatNumber(y(currentPrice), 2)}"></line><circle class="history-line-anomaly-start" cx="${formatNumber(startX, 2)}" cy="${formatNumber(y(previousPrice), 2)}" r="3"></circle><circle class="history-line-marker ${direction}" cx="${formatNumber(endX, 2)}" cy="${formatNumber(y(currentPrice), 2)}" r="4"></circle></g>`;
+      return `<g class="history-line-anomaly ${direction}"><title>${escapeHtml(title)}</title><rect class="history-line-anomaly-band" x="${formatNumber(Math.min(startX, endX), 2)}" y="${pad.top}" width="${formatNumber(Math.max(2, Math.abs(endX - startX)), 2)}" height="${plotHeight}"></rect><circle class="history-line-marker ${direction}" cx="${formatNumber(endX, 2)}" cy="${formatNumber(y(currentPrice), 2)}" r="4"></circle></g>`;
     }).join('');
     const yGridLines = yTickRatios.map((ratio) => {
       const tickY = pad.top + ratio * plotHeight;
@@ -1337,79 +1372,322 @@
     }).join('');
     const yAxisTicks = yTickRatios.map((ratio, index) => {
       const tickY = pad.top + ratio * plotHeight;
-      return `<text class="history-line-label" x="${axisWidth - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(yTickLabels[index])}</text>`;
+      const tickTop = (tickY / height) * 100;
+      return `<span class="history-line-y-label" style="top:${formatNumber(tickTop, 4)}%">${escapeHtml(yTickLabels[index])}</span>`;
     }).join('');
-    const dailySlots = scrollableChart ? CHART_TIME.beijingDaySlots(minTime, maxTime) : [];
-    const xTicks = scrollableChart
-      ? dailySlots.map((slot) => {
+    const xTicks = visibleDailySlots.length
+      ? visibleDailySlots.map((slot) => {
         const boundary = slot.boundaryAt == null ? null : Number(slot.boundaryAt);
+        const labelX = x(slot.labelAt);
+        const labelY = height - 8;
         const boundaryLine = boundary != null && Number.isFinite(boundary)
           ? `<line class="history-line-grid history-line-grid-vertical" x1="${formatNumber(x(boundary), 2)}" y1="${pad.top}" x2="${formatNumber(x(boundary), 2)}" y2="${height - pad.bottom}"></line>`
           : '';
-        return `<g>${boundaryLine}<text class="history-line-label history-line-day-label" x="${formatNumber(x(slot.labelAt), 2)}" y="${height - 9}" text-anchor="middle">${escapeHtml(slot.label)}</text></g>`;
+        const labelAttributes = denseDailyLabels
+          ? `class="history-line-label history-line-day-label dense" x="${formatNumber(labelX, 2)}" y="${labelY}" text-anchor="end" transform="rotate(55 ${formatNumber(labelX, 2)} ${labelY})"`
+          : `class="history-line-label history-line-day-label" x="${formatNumber(labelX, 2)}" y="${height - 9}" text-anchor="middle"`;
+        return `<g>${boundaryLine}<text ${labelAttributes}>${escapeHtml(slot.label)}</text></g>`;
       }).join('')
-      : `
-        <text class="history-line-label" x="${pad.left}" y="${height - 8}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt, maxTime - minTime))}</text>
-        <text class="history-line-label" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt, maxTime - minTime))}</text>
-      `;
+      : first && last
+        ? `
+          <text class="history-line-label" x="${formatNumber(x(first.capturedAt), 2)}" y="${height - 8}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt, range.end - range.start))}</text>
+          <text class="history-line-label" x="${formatNumber(x(last.capturedAt), 2)}" y="${height - 8}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt, range.end - range.start))}</text>
+        `
+        : '';
     const hidePoints = Boolean(chartOptions.allowPointToggle && chartOptions.hidePoints);
     const pointMarkers = hidePoints ? '' : points.map((point) => {
       const pointX = x(point.capturedAt);
       const pointY = y(point.price);
-      const tooltipWidth = 154;
-      const tooltipHeight = 42;
-      const tooltipX = Math.min(width - tooltipWidth - 4, Math.max(4, pointX - tooltipWidth / 2));
-      const tooltipY = pointY - tooltipHeight - 9 >= 4 ? pointY - tooltipHeight - 9 : pointY + 9;
       const timeText = formatTime(point.capturedAt);
       const priceText = `$${Number(point.price).toFixed(5)}`;
       const pointLabel = `${timeText}，价格 ${priceText}`;
       return `
         <g class="history-line-point-wrap">
-          <circle class="history-line-point-hit" data-history-point cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="8" tabindex="0" role="img" aria-label="${escapeHtml(pointLabel)}"></circle>
+          <circle class="history-line-point-hit" data-history-point data-history-point-time="${escapeHtml(timeText)}" data-history-point-price="${escapeHtml(priceText)}" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="8" tabindex="0" role="img" aria-label="${escapeHtml(pointLabel)}"></circle>
           <circle class="history-line-point" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="2.5" aria-hidden="true"></circle>
-          <g class="history-line-point-tooltip" aria-hidden="true">
-            <rect class="history-line-point-tooltip-bg" x="${formatNumber(tooltipX, 2)}" y="${formatNumber(tooltipY, 2)}" width="${tooltipWidth}" height="${tooltipHeight}" rx="6"></rect>
-            <text class="history-line-point-tooltip-time" x="${formatNumber(tooltipX + 9, 2)}" y="${formatNumber(tooltipY + 16, 2)}">${escapeHtml(timeText)}</text>
-            <text class="history-line-point-tooltip-price" x="${formatNumber(tooltipX + 9, 2)}" y="${formatNumber(tooltipY + 33, 2)}">价格：${escapeHtml(priceText)}</text>
-          </g>
         </g>
       `;
     }).join('');
-    const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
-    const anomalyToggle = chartOptions.allowAnomalyToggle && anomalyTimes.size
-      ? `<button class="history-chart-toggle ${hiddenAnomalyCount ? 'active' : ''}" type="button" data-trend-anomaly-toggle aria-pressed="${hiddenAnomalyCount ? 'true' : 'false'}">${hiddenAnomalyCount ? '显示异常值' : '隐藏异常值'}</button>`
+    const chartStats = hiddenVisibleCount
+      ? `${windowEvents.length} 处异常 · 已隐藏 ${hiddenVisibleCount} 个区间点`
+      : `${points.length} 点 · ${windowEvents.length} 处异常`;
+    const firstPrice = first ? formatUsd(first.price) : '-';
+    const lastPrice = last ? formatUsd(last.price) : '-';
+    return {
+      axisWidth,
+      axisContent: yAxisTicks,
+      plotContent: `<rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>${yGridLines}${xTicks}${trendLine}${highlights}${pointMarkers}`,
+      chartStats,
+      metaContent: `<span>${firstPrice}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${hasChange ? formatSignedPercent(totalChange) : '-'}</span><span>${lastPrice}</span>`,
+      hasEnoughPoints
+    };
+  }
+
+  function renderHistoryLineChart(group, result, options) {
+    const chartOptions = options || {};
+    const model = historyLineChartModel(group, result, chartOptions);
+    const windowSelect = renderChartWindowSelect(model.chartWindow);
+    if (model.timelinePoints.length < 2) {
+      return `
+        <aside class="history-line-panel">
+          <div class="history-line-head">
+            <div class="history-line-title"><strong>价格趋势</strong>${windowSelect}</div>
+            <span>暂无</span>
+          </div>
+          <div class="history-line-empty">趋势数据不足</div>
+        </aside>
+      `;
+    }
+
+    const width = 420;
+    const height = 250;
+    const range = historyChartRange(model, chartOptions.visibleEnd);
+    const frame = renderHistoryLineChartFrame(model, chartOptions, range, width, height);
+    const windowMs = chartWindowMilliseconds(model.chartWindow);
+    const draggable = Boolean(windowMs && model.maxTime - model.minTime > windowMs);
+    const anomalyToggle = chartOptions.allowAnomalyToggle && model.anomalyTimes.size
+      ? `<button class="history-chart-toggle ${model.hideAnomalies ? 'active' : ''}" type="button" data-trend-anomaly-toggle aria-pressed="${model.hideAnomalies ? 'true' : 'false'}">${model.hideAnomalies ? '显示异常值' : '隐藏异常值'}</button>`
       : '';
+    const hidePoints = Boolean(chartOptions.allowPointToggle && chartOptions.hidePoints);
     const pointToggle = chartOptions.allowPointToggle
       ? `<button class="history-chart-toggle ${hidePoints ? 'active' : ''}" type="button" data-trend-point-toggle aria-pressed="${hidePoints ? 'true' : 'false'}">${hidePoints ? '显示数据点' : '隐藏数据点'}</button>`
       : '';
-    const chartStats = hiddenAnomalyCount
-      ? `${windowEvents.length} 处异常 · 已隐藏 ${hiddenAnomalyCount} 个区间点`
-      : `${points.length} 点 · ${windowEvents.length} 处异常`;
     return `
-      <aside class="history-line-panel">
+      <aside class="history-line-panel" data-history-line-panel>
         <div class="history-line-head">
           <div class="history-line-title"><strong>价格趋势</strong>${windowSelect}</div>
-          <div class="history-line-head-actions"><span>${chartStats}</span>${pointToggle}${anomalyToggle}</div>
+          <div class="history-line-head-actions"><span data-history-chart-stats>${frame.chartStats}</span>${pointToggle}${anomalyToggle}</div>
         </div>
-        <div class="history-line-chart-layout" style="--history-axis-width:${axisWidth}px">
-          <svg class="history-line-y-axis" viewBox="0 0 ${axisWidth} ${height}" aria-hidden="true" preserveAspectRatio="none">
-            <rect class="history-line-bg" x="0" y="0" width="${axisWidth}" height="${height}"></rect>
-            ${yAxisTicks}
-          </svg>
-          <div class="history-line-chart-wrap ${scrollableChart ? 'scrollable' : ''}" ${scrollableChart ? 'data-history-chart-scroll' : ''}>
-            <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(`${group.seedId} ${chartWindow} 价格趋势`)}" preserveAspectRatio="none" ${scrollableChart ? `style="width:${width}px;min-width:${width}px"` : ''}>
-              <rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>
-              ${yGridLines}
-              ${xTicks}
-              ${trendLine}
-              ${highlights}
-              ${pointMarkers}
+        <div class="history-line-chart-layout" data-history-chart-layout style="--history-axis-width:${frame.axisWidth}px">
+          <div class="history-line-y-axis" data-history-y-axis aria-hidden="true">
+            ${frame.axisContent}
+          </div>
+          <div class="history-line-chart-wrap ${draggable ? 'draggable' : ''}" data-history-chart-wrap ${draggable ? 'data-history-chart-drag' : ''}>
+            <svg class="history-line-chart" data-history-plot viewBox="0 0 420 250" role="img" aria-label="${escapeHtml(`${group.seedId} ${model.chartWindow} 价格趋势`)}" preserveAspectRatio="none">
+              ${frame.plotContent}
             </svg>
+            <div class="history-line-point-tooltip" data-history-point-tooltip role="tooltip" aria-hidden="true">
+              <strong data-history-point-tooltip-time></strong>
+              <span data-history-point-tooltip-price></span>
+            </div>
           </div>
         </div>
-        <div class="history-line-meta"><span>${formatUsd(first.price)}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${formatSignedPercent(totalChange)}</span><span>${formatUsd(last.price)}</span></div>
+        <div class="history-line-meta" data-history-chart-meta>${frame.metaContent}</div>
       </aside>
     `;
+  }
+
+  function activeTrendChartOptions() {
+    return {
+      allowAnomalyToggle: true,
+      allowPointToggle: true,
+      hideAnomalies: state.trendHideAnomalies,
+      hidePoints: state.trendHidePoints,
+      windowValue: state.trendModalWindow,
+      visibleEnd: state.trendModalVisibleEnd
+    };
+  }
+
+  function activeTrendChartBounds() {
+    const trend = cropTrendData(state.trendModalSeedId);
+    const model = historyLineChartModel(trend.group, trend.result, activeTrendChartOptions());
+    return { model, minTime: model.minTime, maxTime: model.maxTime };
+  }
+
+  function resetTrendChartWheel() {
+    trendChartWheelDelta = 0;
+    if (trendChartWheelResetTimer) window.clearTimeout(trendChartWheelResetTimer);
+    trendChartWheelResetTimer = null;
+  }
+
+  function hideTrendPointTooltip(chartWrap) {
+    const tooltip = chartWrap && chartWrap.querySelector('[data-history-point-tooltip]');
+    if (!tooltip) return;
+    tooltip.classList.remove('visible');
+    tooltip.setAttribute('aria-hidden', 'true');
+  }
+
+  function showTrendPointTooltip(chartWrap, point) {
+    const tooltip = chartWrap && chartWrap.querySelector('[data-history-point-tooltip]');
+    const time = point && point.dataset.historyPointTime;
+    const price = point && point.dataset.historyPointPrice;
+    if (!tooltip || !time || !price) {
+      hideTrendPointTooltip(chartWrap);
+      return;
+    }
+
+    const timeNode = tooltip.querySelector('[data-history-point-tooltip-time]');
+    const priceNode = tooltip.querySelector('[data-history-point-tooltip-price]');
+    if (!timeNode || !priceNode) return;
+    timeNode.textContent = time;
+    priceNode.textContent = `价格：${price}`;
+
+    const pointRect = point.getBoundingClientRect();
+    const wrapRect = chartWrap.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth || 154;
+    const tooltipHeight = tooltip.offsetHeight || 42;
+    const pointX = pointRect.left - wrapRect.left + pointRect.width / 2;
+    const pointY = pointRect.top - wrapRect.top + pointRect.height / 2;
+    const maxLeft = Math.max(4, wrapRect.width - tooltipWidth - 4);
+    const maxTop = Math.max(4, wrapRect.height - tooltipHeight - 4);
+    const left = Math.min(maxLeft, Math.max(4, pointX - tooltipWidth / 2));
+    const above = pointY - tooltipHeight - 9;
+    const top = above >= 4 ? above : Math.min(maxTop, pointY + 9);
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+    tooltip.classList.add('visible');
+    tooltip.setAttribute('aria-hidden', 'false');
+  }
+
+  function bindTrendChartGestures(chartWrap) {
+    chartWrap.addEventListener('pointerover', (event) => {
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) showTrendPointTooltip(chartWrap, point);
+    });
+    chartWrap.addEventListener('pointerout', (event) => {
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) hideTrendPointTooltip(chartWrap);
+    });
+    chartWrap.addEventListener('focusin', (event) => {
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) showTrendPointTooltip(chartWrap, point);
+    });
+    chartWrap.addEventListener('focusout', (event) => {
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) hideTrendPointTooltip(chartWrap);
+    });
+
+    chartWrap.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || !chartWrap.hasAttribute('data-history-chart-drag')) return;
+      const { model } = activeTrendChartBounds();
+      const range = historyChartRange(model, state.trendModalVisibleEnd);
+      suppressTrendPointClick = false;
+      trendChartDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startVisibleEnd: range.end,
+        dragged: false
+      };
+      chartWrap.setPointerCapture(event.pointerId);
+    });
+
+    chartWrap.addEventListener('pointermove', (event) => {
+      if (!trendChartDrag || trendChartDrag.pointerId !== event.pointerId) return;
+      const deltaX = event.clientX - trendChartDrag.startX;
+      if (!trendChartDrag.dragged && Math.abs(deltaX) < 4) return;
+      trendChartDrag.dragged = true;
+      const { model } = activeTrendChartBounds();
+      state.trendModalVisibleEnd = CHART_TIME.shiftVisibleEnd(
+        trendChartDrag.startVisibleEnd,
+        -deltaX,
+        chartWrap.clientWidth,
+        chartWindowMilliseconds(model.chartWindow),
+        model.minTime,
+        model.maxTime
+      );
+      chartWrap.classList.add('dragging');
+      if (event.cancelable) event.preventDefault();
+      scheduleTrendChartViewportRefresh();
+    });
+
+    const finishTrendChartDrag = (event) => {
+      if (!trendChartDrag || trendChartDrag.pointerId !== event.pointerId) return;
+      suppressTrendPointClick = trendChartDrag.dragged;
+      if (chartWrap.hasPointerCapture(event.pointerId)) chartWrap.releasePointerCapture(event.pointerId);
+      chartWrap.classList.remove('dragging');
+      if (trendChartDrag.dragged) {
+        const { model } = activeTrendChartBounds();
+        state.trendModalVisibleEnd = CHART_TIME.snapVisibleEnd(
+          state.trendModalVisibleEnd,
+          CHART_TIME.navigationStepMilliseconds(model.chartWindow, trendWindowLabel()),
+          chartWindowMilliseconds(model.chartWindow),
+          model.minTime,
+          model.maxTime
+        );
+        scheduleTrendChartViewportRefresh();
+      }
+      trendChartDrag = null;
+    };
+    chartWrap.addEventListener('pointerup', finishTrendChartDrag);
+    chartWrap.addEventListener('pointercancel', finishTrendChartDrag);
+
+    chartWrap.addEventListener('wheel', (event) => {
+      if (!chartWrap.hasAttribute('data-history-chart-drag')) return;
+      const deltaScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? chartWrap.clientWidth : 1;
+      const navigationDelta = CHART_TIME.wheelNavigationDelta(event.deltaX, event.deltaY) * deltaScale;
+      if (!navigationDelta) return;
+      trendChartWheelDelta = Math.sign(trendChartWheelDelta) === Math.sign(navigationDelta)
+        ? trendChartWheelDelta + navigationDelta
+        : navigationDelta;
+      if (trendChartWheelResetTimer) window.clearTimeout(trendChartWheelResetTimer);
+      trendChartWheelResetTimer = window.setTimeout(resetTrendChartWheel, 160);
+      event.preventDefault();
+      if (Math.abs(trendChartWheelDelta) < 40) return;
+      const stepCount = Math.sign(trendChartWheelDelta);
+      trendChartWheelDelta = 0;
+      const { model } = activeTrendChartBounds();
+      const range = historyChartRange(model, state.trendModalVisibleEnd);
+      state.trendModalVisibleEnd = CHART_TIME.shiftVisibleEndBySteps(
+        range.end,
+        stepCount,
+        CHART_TIME.navigationStepMilliseconds(model.chartWindow, trendWindowLabel()),
+        chartWindowMilliseconds(model.chartWindow),
+        model.minTime,
+        model.maxTime
+      );
+      scheduleTrendChartViewportRefresh();
+    }, { passive: false });
+
+    chartWrap.addEventListener('click', (event) => {
+      if (suppressTrendPointClick) {
+        suppressTrendPointClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) {
+        event.stopPropagation();
+        point.focus();
+      }
+    }, true);
+  }
+
+  function updateTrendChartViewport(chartWrap) {
+    if (!chartWrap || !state.trendModalSeedId) return;
+    hideTrendPointTooltip(chartWrap);
+    const panel = chartWrap.closest('[data-history-line-panel]');
+    const plot = panel && panel.querySelector('[data-history-plot]');
+    const axis = panel && panel.querySelector('[data-history-y-axis]');
+    const layout = panel && panel.querySelector('[data-history-chart-layout]');
+    const stats = panel && panel.querySelector('[data-history-chart-stats]');
+    const meta = panel && panel.querySelector('[data-history-chart-meta]');
+    if (!panel || !plot || !axis || !layout || !stats || !meta) return;
+
+    const trend = cropTrendData(state.trendModalSeedId);
+    const chartOptions = activeTrendChartOptions();
+    const model = historyLineChartModel(trend.group, trend.result, chartOptions);
+    if (model.timelinePoints.length < 2) return;
+
+    const height = 250;
+    const width = 420;
+    const range = historyChartRange(model, state.trendModalVisibleEnd);
+    const frame = renderHistoryLineChartFrame(model, chartOptions, range, width, height);
+    state.trendModalVisibleEnd = range.end;
+    layout.style.setProperty('--history-axis-width', `${frame.axisWidth}px`);
+    axis.innerHTML = frame.axisContent;
+    plot.innerHTML = frame.plotContent;
+    stats.textContent = frame.chartStats;
+    meta.innerHTML = frame.metaContent;
+  }
+
+  function scheduleTrendChartViewportRefresh() {
+    if (trendChartUpdateFrame) window.cancelAnimationFrame(trendChartUpdateFrame);
+    trendChartUpdateFrame = window.requestAnimationFrame(() => {
+      trendChartUpdateFrame = 0;
+      const chartWrap = document.querySelector('[data-history-chart-wrap]');
+      if (chartWrap) updateTrendChartViewport(chartWrap);
+    });
   }
 
   function thresholdAnomalyTimestamps(points, events, threshold) {
@@ -1538,13 +1816,7 @@
     } else if (state.historyError && !hasTrend) {
       content = `<div class="history-error">曲线读取失败：${escapeHtml(state.historyError)}</div>`;
     } else {
-      content = renderHistoryLineChart(trend.group, trend.result, {
-        allowAnomalyToggle: true,
-        allowPointToggle: true,
-        hideAnomalies: state.trendHideAnomalies,
-        hidePoints: state.trendHidePoints,
-        windowValue: state.trendModalWindow
-      });
+      content = renderHistoryLineChart(trend.group, trend.result, activeTrendChartOptions());
     }
     return `
       <div class="crop-trend-backdrop" data-trend-backdrop>
@@ -1570,21 +1842,23 @@
 
   function closeCropTrendModal() {
     if (!state.trendModalSeedId) return;
+    resetTrendChartWheel();
     state.trendModalSeedId = '';
     state.trendModalWindow = '';
     state.trendHideAnomalies = false;
     state.trendHidePoints = false;
-    state.trendModalScrollLeft = null;
+    state.trendModalVisibleEnd = null;
     render();
   }
 
   function openCropTrendModal(seedId) {
     if (!SEED_BY_ID[seedId]) return;
+    resetTrendChartWheel();
     state.trendModalSeedId = seedId;
     state.trendModalWindow = trendWindowLabel();
     state.trendHideAnomalies = false;
     state.trendHidePoints = false;
-    state.trendModalScrollLeft = null;
+    state.trendModalVisibleEnd = null;
     const historyPromise = loadHistoryAlerts(false);
     render();
     historyPromise.finally(() => {
@@ -1946,22 +2220,11 @@
     if (trendClose) trendClose.addEventListener('click', closeCropTrendModal);
     const trendModalWindow = document.querySelector('[data-trend-window]');
     if (trendModalWindow) trendModalWindow.addEventListener('change', () => {
+      resetTrendChartWheel();
       state.trendModalWindow = normalizeChartWindow(trendModalWindow.value);
-      state.trendModalScrollLeft = null;
+      state.trendModalVisibleEnd = null;
       render();
     });
-    const trendChartScroll = document.querySelector('[data-history-chart-scroll]');
-    if (trendChartScroll) {
-      window.requestAnimationFrame(() => {
-        const savedScrollLeft = Number(state.trendModalScrollLeft);
-        trendChartScroll.scrollLeft = state.trendModalScrollLeft == null || !Number.isFinite(savedScrollLeft)
-          ? trendChartScroll.scrollWidth
-          : savedScrollLeft;
-      });
-      trendChartScroll.addEventListener('scroll', () => {
-        state.trendModalScrollLeft = trendChartScroll.scrollLeft;
-      }, { passive: true });
-    }
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
     if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {
       state.trendHideAnomalies = !state.trendHideAnomalies;
@@ -1972,12 +2235,8 @@
       state.trendHidePoints = !state.trendHidePoints;
       render();
     });
-    document.querySelectorAll('[data-history-point]').forEach((point) => {
-      point.addEventListener('click', (event) => {
-        event.stopPropagation();
-        point.focus();
-      });
-    });
+    const trendChartWrap = document.querySelector('[data-history-chart-wrap]');
+    if (trendChartWrap) bindTrendChartGestures(trendChartWrap);
     const trendBackdrop = document.querySelector('[data-trend-backdrop]');
     if (trendBackdrop) trendBackdrop.addEventListener('click', (event) => {
       if (event.target === trendBackdrop) closeCropTrendModal();
@@ -2230,6 +2489,7 @@
 
   async function init() {
     installPriceBridgeListener();
+    window.addEventListener('resize', scheduleTrendChartViewportRefresh, { passive: true });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && state.trendModalSeedId) closeCropTrendModal();
     });

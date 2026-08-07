@@ -4,7 +4,6 @@
   const HOUR_MS = 60 * 60 * 1000;
   const DAY_MS = 24 * HOUR_MS;
   const BEIJING_OFFSET_MS = 8 * HOUR_MS;
-  const DAY_WIDTH = 120;
   const WINDOWS = ['1h', '6h', '12h', '24h', '7d', '30d', 'all'];
 
   function normalizeWindow(value, fallback) {
@@ -20,8 +19,10 @@
     return Number(normalized.replace('h', '')) * HOUR_MS;
   }
 
-  function isScrollableWindow(value) {
-    return ['7d', '30d', 'all'].includes(value);
+  function navigationStepMilliseconds(value, fallback) {
+    const normalized = normalizeWindow(value, fallback);
+    if (normalized === 'all') return 0;
+    return normalized === '7d' || normalized === '30d' ? DAY_MS : HOUR_MS;
   }
 
   function formatBeijingDay(dayStartedAt) {
@@ -51,20 +52,88 @@
     return slots;
   }
 
-  function plotWidth(value, minTime, maxTime, minimumWidth) {
-    const baseWidth = Math.max(1, Number(minimumWidth) || 420);
-    if (!isScrollableWindow(value)) return baseWidth;
-    return Math.max(baseWidth, beijingDaySlots(minTime, maxTime).length * DAY_WIDTH);
+  function sampleSlots(slotsValue, maxCountValue) {
+    const slots = Array.isArray(slotsValue) ? slotsValue : [];
+    const maxCount = Math.max(2, Math.floor(Number(maxCountValue) || 2));
+    if (slots.length <= maxCount) return slots.slice();
+    return Array.from(
+      { length: maxCount },
+      (_, index) => slots[Math.round(index * (slots.length - 1) / (maxCount - 1))]
+    );
+  }
+
+  function clampVisibleEnd(minValue, maxValue, windowValue, visibleEndValue) {
+    const minTime = Number(minValue);
+    const maxTime = Number(maxValue);
+    const windowMs = Number(windowValue);
+    if (!Number.isFinite(minTime) || !Number.isFinite(maxTime) || maxTime <= minTime) return maxTime;
+    if (!Number.isFinite(windowMs) || windowMs <= 0 || maxTime - minTime <= windowMs) return maxTime;
+    const earliestEnd = minTime + windowMs;
+    const hintedEnd = visibleEndValue == null ? maxTime : Number(visibleEndValue);
+    const visibleEnd = Number.isFinite(hintedEnd) ? hintedEnd : maxTime;
+    return Math.min(maxTime, Math.max(earliestEnd, visibleEnd));
+  }
+
+  function visibleRange(minValue, maxValue, windowValue, visibleEndValue) {
+    const minTime = Number(minValue);
+    const maxTime = Number(maxValue);
+    const windowMs = Number(windowValue);
+    if (!Number.isFinite(minTime) || !Number.isFinite(maxTime) || maxTime <= minTime) {
+      return { start: minTime, end: maxTime };
+    }
+    if (!Number.isFinite(windowMs) || windowMs <= 0 || maxTime - minTime <= windowMs) {
+      return { start: minTime, end: maxTime };
+    }
+    const end = clampVisibleEnd(minTime, maxTime, windowMs, visibleEndValue);
+    return { start: end - windowMs, end };
+  }
+
+  function shiftVisibleEnd(currentEndValue, pixelDeltaValue, viewportWidthValue, windowValue, minValue, maxValue) {
+    const currentEnd = Number(currentEndValue);
+    const pixelDelta = Number(pixelDeltaValue);
+    const viewportWidth = Math.max(1, Number(viewportWidthValue) || 1);
+    const windowMs = Number(windowValue);
+    const nextEnd = currentEnd + ((Number.isFinite(pixelDelta) ? pixelDelta : 0) / viewportWidth) * windowMs;
+    return clampVisibleEnd(minValue, maxValue, windowMs, nextEnd);
+  }
+
+  function shiftVisibleEndBySteps(currentEnd, stepCount, stepMs, windowMs, minTime, maxTime) {
+    return clampVisibleEnd(
+      minTime,
+      maxTime,
+      windowMs,
+      Number(currentEnd) + Number(stepCount) * Number(stepMs)
+    );
+  }
+
+  function wheelNavigationDelta(deltaXValue, deltaYValue) {
+    const deltaX = Number(deltaXValue) || 0;
+    const deltaY = Number(deltaYValue) || 0;
+    return Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : -deltaY;
+  }
+
+  function snapVisibleEnd(value, stepMsValue, windowMs, minTime, maxTime) {
+    const stepMs = Number(stepMsValue);
+    if (!Number.isFinite(stepMs) || stepMs <= 0) {
+      return clampVisibleEnd(minTime, maxTime, windowMs, value);
+    }
+    const stepsFromLatest = Math.round((Number(maxTime) - Number(value)) / stepMs);
+    return clampVisibleEnd(minTime, maxTime, windowMs, Number(maxTime) - stepsFromLatest * stepMs);
   }
 
   root.HYBChartTime = Object.freeze({
     HOUR_MS,
     DAY_MS,
-    DAY_WIDTH,
     normalizeWindow,
     windowMilliseconds,
-    isScrollableWindow,
+    navigationStepMilliseconds,
     beijingDaySlots,
-    plotWidth
+    sampleSlots,
+    clampVisibleEnd,
+    visibleRange,
+    shiftVisibleEnd,
+    shiftVisibleEndBySteps,
+    wheelNavigationDelta,
+    snapVisibleEnd
   });
 })(typeof globalThis === 'object' ? globalThis : this);
