@@ -2201,11 +2201,10 @@
 
   function renderPriceChangeRate(rate) {
     const value = Number(rate);
-    if (!hasFiniteNumber(rate)) return '<span class="price-delta flat"><span class="price-delta-arrow"></span><span class="price-delta-percent">-</span></span>';
-    if (Math.abs(value) < 0.000005) return '<span class="price-delta flat"><span class="price-delta-arrow">→</span><span class="price-delta-percent">0%</span></span>';
+    if (!hasFiniteNumber(rate)) return '<span class="price-delta flat"><span class="price-delta-percent">-</span></span>';
+    if (Math.abs(value) < 0.000005) return '<span class="price-delta flat"><span class="price-delta-percent">0%</span></span>';
     const direction = priceChangeDirection(value);
-    const arrow = value > 0 ? '↑' : '↓';
-    return `<span class="price-delta ${direction}"><span class="price-delta-arrow">${arrow}</span><span class="price-delta-percent">${formatNumber(Math.abs(value), 2)}%</span></span>`;
+    return `<span class="price-delta ${direction}"><span class="price-delta-percent">${formatNumber(Math.abs(value), 2)}%</span></span>`;
   }
 
   function priceChangeDirection(rate) {
@@ -2253,7 +2252,7 @@
         <td>${formatNumber(row.stats.growthHours, 2)}</td>
         <td>${formatNumber(row.stats.dailyCycles, 2)}</td>
         <td><input class="price-input" data-price="${escapeHtml(row.seed.id)}" type="number" min="0" step="0.00001" value="${row.price == null ? '' : formatNumber(row.price, 5)}" /></td>
-        <td title="${escapeHtml(priceChangeRateTitle(row))}"><div class="price-change-cell">${renderPriceChangeRate(row.priceChangeRate)}${renderCropTrendTrigger(row)}</div></td>
+        <td title="${escapeHtml(priceChangeRateTitle(row))}"><div class="price-change-cell">${renderCropTrendTrigger(row)}${renderPriceChangeRate(row.priceChangeRate)}</div></td>
         <td>${formatUsd(row.singleNet)}</td>
         <td>${formatUsd(row.hourly)}</td>
         <td>${formatUsd(row.singleDaily)}</td>
