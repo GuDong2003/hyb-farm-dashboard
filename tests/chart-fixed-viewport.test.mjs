@@ -88,6 +88,26 @@ test('tooltip is populated and positioned from the active SVG point', () => {
   assert.match(appSource, /function hideTrendPointTooltip\(chartWrap\)/);
 });
 
-test('price input reserves space for native increment controls', () => {
-  assert.match(styleSource, /\.price-input\s*\{[^}]*padding:\s*0 24px 0 7px;/s);
+test('price input hides native steppers and gives the value its full width', () => {
+  assert.match(styleSource, /\.price-input\s*\{[^}]*padding:\s*0 7px;[^}]*appearance:\s*textfield;/s);
+  assert.match(
+    styleSource,
+    /\.price-input::-webkit-outer-spin-button,\s*\.price-input::-webkit-inner-spin-button\s*\{[^}]*-webkit-appearance:\s*none;[^}]*margin:\s*0;/s,
+  );
+});
+
+test('trend trigger replaces the direction glyph on the percentage left', () => {
+  const renderRowSource = appSource.slice(
+    appSource.indexOf('function renderRow'),
+    appSource.indexOf('function renderSettings'),
+  );
+
+  assert.doesNotMatch(appSource, /price-delta-arrow/);
+  assert.doesNotMatch(styleSource, /\.price-delta-arrow/);
+  assert.doesNotMatch(appSource, /const arrow = value > 0/);
+  assert.match(
+    renderRowSource,
+    /<div class="price-change-cell">\$\{renderCropTrendTrigger\(row\)\}\$\{renderPriceChangeRate\(row\.priceChangeRate\)\}<\/div>/,
+  );
+  assert.equal((renderRowSource.match(/renderCropTrendTrigger\(row\)/g) ?? []).length, 1);
 });
