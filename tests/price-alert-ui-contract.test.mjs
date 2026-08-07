@@ -10,12 +10,18 @@ const [app, html, userscript, style, readme] = await Promise.all([
   readFile(new URL('../README.md', import.meta.url), 'utf8')
 ]);
 
-test('page loads price-alert utilities before the application', () => {
-  const priceAlertIndex = html.indexOf('./price-alert-utils.js');
-  const appIndex = html.indexOf('./app.js');
+test('page versions critical assets and loads price-alert utilities before the application', () => {
+  const criticalAssets = [...html.matchAll(/(?:href|src)="(\.\/(?:style\.css|chart-time-utils\.js|price-alert-utils\.js|app\.js)[^"]*)"/g)]
+    .map((match) => match[1]);
+  assert.deepEqual(criticalAssets, [
+    './style.css?v=20260807-alert2',
+    './chart-time-utils.js?v=20260807-alert2',
+    './price-alert-utils.js?v=20260807-alert2',
+    './app.js?v=20260807-alert2'
+  ]);
 
-  assert.ok(priceAlertIndex >= 0, 'index.html loads price-alert-utils.js');
-  assert.ok(appIndex >= 0, 'index.html loads app.js');
+  const priceAlertIndex = html.indexOf('./price-alert-utils.js?v=20260807-alert2');
+  const appIndex = html.indexOf('./app.js?v=20260807-alert2');
   assert.ok(priceAlertIndex < appIndex, 'price-alert-utils.js loads before app.js');
 });
 
