@@ -19,6 +19,12 @@
     return Number(normalized.replace('h', '')) * HOUR_MS;
   }
 
+  function navigationStepMilliseconds(value, fallback) {
+    const normalized = normalizeWindow(value, fallback);
+    if (normalized === 'all') return 0;
+    return normalized === '7d' || normalized === '30d' ? DAY_MS : HOUR_MS;
+  }
+
   function formatBeijingDay(dayStartedAt) {
     const shifted = new Date(dayStartedAt + BEIJING_OFFSET_MS);
     const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
@@ -44,6 +50,16 @@
       });
     }
     return slots;
+  }
+
+  function sampleSlots(slotsValue, maxCountValue) {
+    const slots = Array.isArray(slotsValue) ? slotsValue : [];
+    const maxCount = Math.max(2, Math.floor(Number(maxCountValue) || 2));
+    if (slots.length <= maxCount) return slots.slice();
+    return Array.from(
+      { length: maxCount },
+      (_, index) => slots[Math.round(index * (slots.length - 1) / (maxCount - 1))]
+    );
   }
 
   function clampVisibleEnd(minValue, maxValue, windowValue, visibleEndValue) {
@@ -81,14 +97,43 @@
     return clampVisibleEnd(minValue, maxValue, windowMs, nextEnd);
   }
 
+  function shiftVisibleEndBySteps(currentEnd, stepCount, stepMs, windowMs, minTime, maxTime) {
+    return clampVisibleEnd(
+      minTime,
+      maxTime,
+      windowMs,
+      Number(currentEnd) + Number(stepCount) * Number(stepMs)
+    );
+  }
+
+  function wheelNavigationDelta(deltaXValue, deltaYValue) {
+    const deltaX = Number(deltaXValue) || 0;
+    const deltaY = Number(deltaYValue) || 0;
+    return Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : -deltaY;
+  }
+
+  function snapVisibleEnd(value, stepMsValue, windowMs, minTime, maxTime) {
+    const stepMs = Number(stepMsValue);
+    if (!Number.isFinite(stepMs) || stepMs <= 0) {
+      return clampVisibleEnd(minTime, maxTime, windowMs, value);
+    }
+    const stepsFromLatest = Math.round((Number(maxTime) - Number(value)) / stepMs);
+    return clampVisibleEnd(minTime, maxTime, windowMs, Number(maxTime) - stepsFromLatest * stepMs);
+  }
+
   root.HYBChartTime = Object.freeze({
     HOUR_MS,
     DAY_MS,
     normalizeWindow,
     windowMilliseconds,
+    navigationStepMilliseconds,
     beijingDaySlots,
+    sampleSlots,
     clampVisibleEnd,
     visibleRange,
-    shiftVisibleEnd
+    shiftVisibleEnd,
+    shiftVisibleEndBySteps,
+    wheelNavigationDelta,
+    snapVisibleEnd
   });
 })(typeof globalThis === 'object' ? globalThis : this);
