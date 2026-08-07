@@ -259,6 +259,59 @@ function validIsoLike(value) {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
 }
 
+export function trendMapNeedsHydration(existingTrends, currentPrices) {
+  for (const id of SEED_IDS) {
+    if (!Object.prototype.hasOwnProperty.call(currentPrices || {}, id)) continue;
+    const trend = existingTrends && existingTrends[id];
+    const refreshedAt = trend && validIsoLike(trend.lastRefreshedAt)
+      ? Date.parse(trend.lastRefreshedAt)
+      : Number.NaN;
+    const hasHourlyAnchor = trend && Array.isArray(trend.hourly) && trend.hourly.some((point) => (
+      validIsoLike(point && point.bucketStartedAt)
+      && Date.parse(point.bucketStartedAt) <= refreshedAt - 24 * REFRESH_INTERVAL_MS
+    ));
+    if (
+      !Number.isFinite(refreshedAt)
+      || !Number.isFinite(trend && trend.unitPrice)
+      || !trend
+      || !Array.isArray(trend.daily)
+      || !trend.daily.length
+      || !hasHourlyAnchor
+    ) return true;
+  }
+  return false;
+}
+
+export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
+  const merged = {};
+  for (const id of SEED_IDS) {
+    const fallback = fallbackTrends && fallbackTrends[id];
+    const existing = existingTrends && existingTrends[id];
+    if ((!fallback || typeof fallback !== 'object') && (!existing || typeof existing !== 'object')) continue;
+
+    const trend = {};
+    for (const seriesKey of ['hourly', 'daily']) {
+      const existingSeries = existing && existing[seriesKey];
+      const fallbackSeries = fallback && fallback[seriesKey];
+      const series = Array.isArray(existingSeries) && existingSeries.length ? existingSeries : fallbackSeries;
+      if (Array.isArray(series)) trend[seriesKey] = series.slice();
+    }
+
+    const unitPrice = existing && Number.isFinite(existing.unitPrice)
+      ? existing.unitPrice
+      : fallback && fallback.unitPrice;
+    if (Number.isFinite(unitPrice)) trend.unitPrice = unitPrice;
+
+    const lastRefreshedAt = existing && validIsoLike(existing.lastRefreshedAt)
+      ? existing.lastRefreshedAt
+      : fallback && fallback.lastRefreshedAt;
+    if (validIsoLike(lastRefreshedAt)) trend.lastRefreshedAt = lastRefreshedAt;
+
+    merged[id] = trend;
+  }
+  return merged;
+}
+
 async function acceptSubmission(env, normalized, submissionId, now) {
   await env.PRICE_DB.batch([
     env.PRICE_DB.prepare(`
@@ -353,7 +406,7 @@ function snapshotFromNormalized(normalized, updatedAt) {
 async function hydrateSnapshotTrends(env, snapshot) {
   if (!snapshot || !snapshot.prices || !snapshot.prices.shop) return;
   const existingTrends = snapshot.priceTrends && snapshot.priceTrends.shop ? snapshot.priceTrends.shop : {};
-  if (Object.keys(existingTrends).length >= MIN_MATCHED_PRICES) return;
+  if (!trendMapNeedsHydration(existingTrends, snapshot.prices.shop)) return;
 
   const rows = await env.PRICE_DB.prepare(`
     SELECT captured_at, prices_json
@@ -363,7 +416,7 @@ async function hydrateSnapshotTrends(env, snapshot) {
     LIMIT 500
   `).all();
   const trendMap = buildTrendMapFromRows((rows && rows.results) || [], snapshot.prices.shop, Number(snapshot.capturedAt) || Date.now());
-  if (Object.keys(trendMap).length) snapshot.priceTrends = { shop: Object.assign({}, trendMap, existingTrends) };
+  if (Object.keys(trendMap).length) snapshot.priceTrends = { shop: mergePriceTrendMaps(trendMap, existingTrends) };
 }
 
 function buildTrendMapFromRows(rows, currentPrices, fallbackCapturedAt) {
