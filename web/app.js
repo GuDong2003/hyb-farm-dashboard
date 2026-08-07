@@ -55,6 +55,8 @@
   let autoRefreshTimer = null;
   let trendChartUpdateFrame = 0;
   let trendChartDrag = null;
+  let trendChartWheelDelta = 0;
+  let trendChartWheelResetTimer = null;
   let suppressTrendPointClick = false;
 
   function normalizeSeed(seed) {
@@ -1492,6 +1494,12 @@
     return { model, minTime: model.minTime, maxTime: model.maxTime };
   }
 
+  function resetTrendChartWheel() {
+    trendChartWheelDelta = 0;
+    if (trendChartWheelResetTimer) window.clearTimeout(trendChartWheelResetTimer);
+    trendChartWheelResetTimer = null;
+  }
+
   function hideTrendPointTooltip(chartWrap) {
     const tooltip = chartWrap && chartWrap.querySelector('[data-history-point-tooltip]');
     if (!tooltip) return;
@@ -1587,27 +1595,46 @@
       suppressTrendPointClick = trendChartDrag.dragged;
       if (chartWrap.hasPointerCapture(event.pointerId)) chartWrap.releasePointerCapture(event.pointerId);
       chartWrap.classList.remove('dragging');
+      if (trendChartDrag.dragged) {
+        const { model } = activeTrendChartBounds();
+        state.trendModalVisibleEnd = CHART_TIME.snapVisibleEnd(
+          state.trendModalVisibleEnd,
+          CHART_TIME.navigationStepMilliseconds(model.chartWindow, trendWindowLabel()),
+          chartWindowMilliseconds(model.chartWindow),
+          model.minTime,
+          model.maxTime
+        );
+        scheduleTrendChartViewportRefresh();
+      }
       trendChartDrag = null;
     };
     chartWrap.addEventListener('pointerup', finishTrendChartDrag);
     chartWrap.addEventListener('pointercancel', finishTrendChartDrag);
 
     chartWrap.addEventListener('wheel', (event) => {
-      const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
-        ? event.deltaX
-        : event.shiftKey ? event.deltaY : 0;
-      if (!horizontalDelta || !chartWrap.hasAttribute('data-history-chart-drag')) return;
+      if (!chartWrap.hasAttribute('data-history-chart-drag')) return;
+      const deltaScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? chartWrap.clientWidth : 1;
+      const navigationDelta = CHART_TIME.wheelNavigationDelta(event.deltaX, event.deltaY) * deltaScale;
+      if (!navigationDelta) return;
+      trendChartWheelDelta = Math.sign(trendChartWheelDelta) === Math.sign(navigationDelta)
+        ? trendChartWheelDelta + navigationDelta
+        : navigationDelta;
+      if (trendChartWheelResetTimer) window.clearTimeout(trendChartWheelResetTimer);
+      trendChartWheelResetTimer = window.setTimeout(resetTrendChartWheel, 160);
+      event.preventDefault();
+      if (Math.abs(trendChartWheelDelta) < 40) return;
+      const stepCount = Math.sign(trendChartWheelDelta);
+      trendChartWheelDelta = 0;
       const { model } = activeTrendChartBounds();
       const range = historyChartRange(model, state.trendModalVisibleEnd);
-      state.trendModalVisibleEnd = CHART_TIME.shiftVisibleEnd(
+      state.trendModalVisibleEnd = CHART_TIME.shiftVisibleEndBySteps(
         range.end,
-        horizontalDelta,
-        chartWrap.clientWidth,
+        stepCount,
+        CHART_TIME.navigationStepMilliseconds(model.chartWindow, trendWindowLabel()),
         chartWindowMilliseconds(model.chartWindow),
         model.minTime,
         model.maxTime
       );
-      event.preventDefault();
       scheduleTrendChartViewportRefresh();
     }, { passive: false });
 
@@ -1815,6 +1842,7 @@
 
   function closeCropTrendModal() {
     if (!state.trendModalSeedId) return;
+    resetTrendChartWheel();
     state.trendModalSeedId = '';
     state.trendModalWindow = '';
     state.trendHideAnomalies = false;
@@ -1825,6 +1853,7 @@
 
   function openCropTrendModal(seedId) {
     if (!SEED_BY_ID[seedId]) return;
+    resetTrendChartWheel();
     state.trendModalSeedId = seedId;
     state.trendModalWindow = trendWindowLabel();
     state.trendHideAnomalies = false;
@@ -2191,6 +2220,7 @@
     if (trendClose) trendClose.addEventListener('click', closeCropTrendModal);
     const trendModalWindow = document.querySelector('[data-trend-window]');
     if (trendModalWindow) trendModalWindow.addEventListener('change', () => {
+      resetTrendChartWheel();
       state.trendModalWindow = normalizeChartWindow(trendModalWindow.value);
       state.trendModalVisibleEnd = null;
       render();

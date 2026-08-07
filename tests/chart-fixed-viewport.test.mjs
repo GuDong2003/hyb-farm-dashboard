@@ -30,10 +30,17 @@ test('mouse and touch pointer dragging shift the fixed time anchor', () => {
   assert.match(appSource, /setPointerCapture\(event\.pointerId\)/);
 });
 
-test('horizontal wheel gestures move the anchor while vertical scrolling remains native', () => {
-  assert.match(appSource, /const horizontalDelta = Math\.abs\(event\.deltaX\) > Math\.abs\(event\.deltaY\)/);
-  assert.match(appSource, /event\.shiftKey \? event\.deltaY : 0/);
+test('wheel gestures navigate finite windows in time units', () => {
+  assert.match(appSource, /CHART_TIME\.wheelNavigationDelta\(event\.deltaX, event\.deltaY\)/);
+  assert.match(appSource, /CHART_TIME\.navigationStepMilliseconds\(model\.chartWindow/);
+  assert.match(appSource, /CHART_TIME\.shiftVisibleEndBySteps\(/);
+  assert.match(appSource, /if \(!chartWrap\.hasAttribute\('data-history-chart-drag'\)\) return;/);
   assert.match(appSource, /addEventListener\('wheel',[\s\S]*?\{ passive: false \}\)/);
+});
+
+test('drag release snaps the visible end to the active time unit', () => {
+  assert.match(appSource, /CHART_TIME\.snapVisibleEnd\(/);
+  assert.match(appSource, /finishTrendChartDrag/);
 });
 
 test('dragging uses grab affordances without exposing a native scrollbar', () => {
