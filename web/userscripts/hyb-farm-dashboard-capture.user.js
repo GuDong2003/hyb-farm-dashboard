@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong226.com/
-// @version      0.3.6
+// @version      0.3.7
 // @description  为 HYB Farm Dashboard 自动导入黑与白农场实时价格。
 // @match        https://hyb.gudong.ccwu.cc/*
 // @match        https://hyb.gudong226.com/*
@@ -21,7 +21,7 @@
   ]);
   const CDK_ORIGIN = 'https://cdk.hybgzs.com';
   const UNIT_PER_USD = 500000;
-  const TREND_HOUR_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=hour&trendRange=24';
+  const TREND_HOUR_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=hour&trendRange=25';
   const TREND_DAY_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=day&trendRange=7';
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';

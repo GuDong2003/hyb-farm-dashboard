@@ -19,8 +19,9 @@
   const CLOUD_DEFAULT_ENDPOINT = '/api/default-prices';
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
-  const PRICE_CHANGE_ALERT_THRESHOLD = 20;
-  const PRICE_CHANGE_ALERT_WINDOW = '1h';
+  const HISTORY_ANOMALY_THRESHOLD = 20;
+  const PRICE_ALERT = window.HYBPriceAlert;
+  const PRICE_CHANGE_ALERT_WINDOW = PRICE_ALERT.WINDOW;
   const CHART_TIME = window.HYBChartTime;
 
   const SEEDS = [
@@ -83,8 +84,13 @@
         activeHours: DEFAULT_ACTIVE_HOURS,
         autoRefreshPrices: true,
         autoUploadPrices: false,
+        priceAlertNormalThreshold: PRICE_ALERT.DEFAULT_NORMAL_THRESHOLD,
+        priceAlertAnomalyThreshold: PRICE_ALERT.DEFAULT_ANOMALY_THRESHOLD,
         browserPriceAlerts: false,
+        inAppPriceAlerts: false,
         notifiedPriceAlertKey: '',
+        inAppPriceAlertKey: '',
+        suppressedPriceAlerts: { date: '', seedIds: [] },
         theme: 'system',
         landCounts: [13, 0, 0, 0, 0, 0, 0],
         currentTotalExp: 0,
@@ -106,6 +112,9 @@
       historyError: '',
       historyVisibleCount: HISTORY_PAGE_SIZE,
       historyExpandedKey: '',
+      priceAlertModalSeedIds: [],
+      priceAlertModalManual: false,
+      priceAlertMuteOnClose: false,
       trendModalSeedId: '',
       trendModalWindow: '',
       trendHideAnomalies: false,
@@ -118,6 +127,7 @@
       const stored = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {};
       const merged = Object.assign({}, base, stored);
       merged.config = Object.assign({}, base.config, stored.config || {});
+      merged.config = normalizePriceAlertConfig(merged.config);
       merged.config.landCounts = normalizeLandCounts(merged.config.landCounts);
       merged.config.currentTotalExp = normalizeTotalExperience(merged.config.currentTotalExp);
       merged.config.source = 'shop';
@@ -134,6 +144,33 @@
     } catch (_) {
       return base;
     }
+  }
+
+  function normalizePriceAlertConfig(config) {
+    const normalized = config && typeof config === 'object' ? config : {};
+    const thresholds = PRICE_ALERT.validateThresholds(
+      normalized.priceAlertNormalThreshold,
+      normalized.priceAlertAnomalyThreshold
+    );
+    normalized.priceAlertNormalThreshold = thresholds.ok
+      ? thresholds.normalThreshold
+      : PRICE_ALERT.DEFAULT_NORMAL_THRESHOLD;
+    normalized.priceAlertAnomalyThreshold = thresholds.ok
+      ? thresholds.anomalyThreshold
+      : PRICE_ALERT.DEFAULT_ANOMALY_THRESHOLD;
+    normalized.browserPriceAlerts = Boolean(normalized.browserPriceAlerts);
+    normalized.inAppPriceAlerts = Boolean(normalized.inAppPriceAlerts);
+    normalized.notifiedPriceAlertKey = typeof normalized.notifiedPriceAlertKey === 'string'
+      ? normalized.notifiedPriceAlertKey
+      : '';
+    normalized.inAppPriceAlertKey = typeof normalized.inAppPriceAlertKey === 'string'
+      ? normalized.inAppPriceAlertKey
+      : '';
+    normalized.suppressedPriceAlerts = PRICE_ALERT.normalizeSuppression(
+      normalized.suppressedPriceAlerts,
+      Date.now()
+    );
+    return normalized;
   }
 
   function themeMode() {
@@ -262,7 +299,7 @@
       const cloud = cloudResult.status === 'fulfilled'
         ? cloudResult.value
         : emptyHistoryResult();
-      const local = buildSnapshotChangeHistory(localSnapshots.status === 'fulfilled' ? localSnapshots.value : [], PRICE_CHANGE_ALERT_THRESHOLD);
+      const local = buildSnapshotChangeHistory(localSnapshots.status === 'fulfilled' ? localSnapshots.value : [], HISTORY_ANOMALY_THRESHOLD);
       state.historyAlerts = { cloud, local };
       state.historyLoadedAt = Date.now();
       const errors = [];
@@ -279,13 +316,13 @@
     const localSnapshots = await allSnapshots();
     state.historyAlerts = {
       cloud: state.historyAlerts.cloud || emptyHistoryResult(),
-      local: buildSnapshotChangeHistory(localSnapshots, PRICE_CHANGE_ALERT_THRESHOLD)
+      local: buildSnapshotChangeHistory(localSnapshots, HISTORY_ANOMALY_THRESHOLD)
     };
     state.historyLoadedAt = Date.now();
   }
 
   async function fetchCloudHistoryAlerts(force) {
-    const endpoint = `${CLOUD_HISTORY_ENDPOINT}?threshold=${encodeURIComponent(PRICE_CHANGE_ALERT_THRESHOLD)}`;
+    const endpoint = `${CLOUD_HISTORY_ENDPOINT}?threshold=${encodeURIComponent(HISTORY_ANOMALY_THRESHOLD)}`;
     const response = await fetch(endpoint, {
       headers: { accept: 'application/json' },
       cache: force ? 'reload' : 'no-store'
@@ -349,7 +386,7 @@
   }
 
   function normalizeHistoryResult(data) {
-    const threshold = Number(data && data.threshold) || PRICE_CHANGE_ALERT_THRESHOLD;
+    const threshold = Number(data && data.threshold) || HISTORY_ANOMALY_THRESHOLD;
     const totalSnapshots = Number(data && data.totalSnapshots) || 0;
     const groups = Array.isArray(data && data.groups) ? data.groups : [];
     let eventCount = 0;
@@ -392,7 +429,7 @@
   }
 
   function emptyHistoryResult() {
-    return { threshold: PRICE_CHANGE_ALERT_THRESHOLD, totalSnapshots: 0, eventCount: 0, groups: [], series: [] };
+    return { threshold: HISTORY_ANOMALY_THRESHOLD, totalSnapshots: 0, eventCount: 0, groups: [], series: [] };
   }
 
   function normalizeHistoryEvent(event) {
@@ -991,18 +1028,18 @@
   }
 
   function bestPriceRiseRow(rows) {
-    return rows.reduce((current, row) => {
-      const rate = Number(row.priceAlertRate);
-      if (!Number.isFinite(rate) || rate < PRICE_CHANGE_ALERT_THRESHOLD) return current;
-      if (!current || rate > Number(current.priceAlertRate)) return row;
-      return current;
-    }, null);
+    const highest = PRICE_ALERT.evaluate(
+      rows,
+      state.config.priceAlertNormalThreshold,
+      state.config.priceAlertAnomalyThreshold
+    ).highest;
+    return highest ? highest.row : null;
   }
 
   function topPriceRiseAlert(rows) {
     const best = bestPriceRiseRow(rows);
     if (!best) return '';
-    return `<div class="top-alert" title="${escapeHtml(priceAlertRateTitle(best))}"><span class="top-alert-label">1h 涨幅异常</span><strong>${escapeHtml(best.seed.name)}</strong><span>${formatSignedPercent(best.priceAlertRate)}</span><span>${formatUsd(best.price)}</span></div>`;
+    return `<div class="top-alert" title="${escapeHtml(priceAlertRateTitle(best))}"><span class="top-alert-label">24h 涨幅提醒</span><strong>${escapeHtml(best.seed.name)}</strong><span>${formatSignedPercent(best.priceAlertRate)}</span><span>${formatUsd(best.price)}</span></div>`;
   }
 
   function totalLands() {
@@ -1254,7 +1291,7 @@
     const windowSelect = renderChartWindowSelect(chartWindow);
     const windowChange = historyWindowChange(allPoints, chartWindow);
     const rangedPoints = windowChange.points;
-    const anomalyTimes = thresholdAnomalyTimestamps(rangedPoints, events, Number(result && result.threshold) || PRICE_CHANGE_ALERT_THRESHOLD);
+    const anomalyTimes = thresholdAnomalyTimestamps(rangedPoints, events, Number(result && result.threshold) || HISTORY_ANOMALY_THRESHOLD);
     const hideAnomalies = Boolean(chartOptions.allowAnomalyToggle && chartOptions.hideAnomalies && anomalyTimes.size);
     const filteredPoints = hideAnomalies ? rangedPoints.filter((point) => !anomalyTimes.has(point.capturedAt)) : rangedPoints;
     const points = filteredPoints.length >= 2 ? filteredPoints : rangedPoints;
@@ -1414,7 +1451,7 @@
 
   function thresholdAnomalyTimestamps(points, events, threshold) {
     const sortedPoints = Array.isArray(points) ? points : [];
-    const limit = Number.isFinite(Number(threshold)) && Number(threshold) > 0 ? Number(threshold) : PRICE_CHANGE_ALERT_THRESHOLD;
+    const limit = Number.isFinite(Number(threshold)) && Number(threshold) > 0 ? Number(threshold) : HISTORY_ANOMALY_THRESHOLD;
     const thresholdEvents = (Array.isArray(events) ? events : [])
       .filter((event) => Number.isFinite(Number(event.capturedAt))
         && Number.isFinite(Number(event.previousCapturedAt))
@@ -1519,7 +1556,7 @@
     if (localPointCount) sources.push(`本地 ${localPointCount} 点`);
     return {
       group: { seedId, events },
-      result: { threshold: PRICE_CHANGE_ALERT_THRESHOLD, series: [{ seedId, points }] },
+      result: { threshold: HISTORY_ANOMALY_THRESHOLD, series: [{ seedId, points }] },
       points,
       sourceLabel: sources.join(' · ') || '暂无历史数据'
     };
@@ -1757,10 +1794,10 @@
   }
 
   function priceAlertRateTitle(row) {
-    if (!Number.isFinite(Number(row.priceAlertRate))) return '没有完整的一小时涨幅数据';
+    if (!Number.isFinite(Number(row.priceAlertRate))) return '没有完整的 24 小时涨幅数据';
     const baseText = row.priceAlertBaseAt ? `，基准时间：${formatTime(row.priceAlertBaseAt)}` : '';
     const updatedText = row.priceAlertUpdatedAt ? `，刷新：${formatTime(row.priceAlertUpdatedAt)}` : '';
-    return `前后 1 小时涨幅：${formatSignedPercent(row.priceAlertRate)}，当前价格：${formatUsd(row.price)}${baseText}${updatedText}`;
+    return `前后 24 小时涨幅：${formatSignedPercent(row.priceAlertRate)}，当前价格：${formatUsd(row.price)}${baseText}${updatedText}`;
   }
 
   function renderRow(row, best) {
@@ -1817,7 +1854,7 @@
               <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
             <label class="toggle-row">
-              <span class="toggle-text"><strong>涨幅异常通知</strong><small>仅当前后 1 小时涨幅达到 ${formatNumber(PRICE_CHANGE_ALERT_THRESHOLD, 0)}% 时使用浏览器通知提醒</small></span>
+              <span class="toggle-text"><strong>涨幅通知</strong><small>仅当前后 24 小时涨幅达到 ${formatNumber(state.config.priceAlertNormalThreshold, 0)}% 时使用浏览器通知提醒</small></span>
               <span class="toggle-control"><input id="browserPriceAlerts" type="checkbox" ${state.config.browserPriceAlerts ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
           </div>
@@ -2096,6 +2133,7 @@
       }
       if (json.state) {
         state.config = Object.assign(state.config, json.state.config || {});
+        state.config = normalizePriceAlertConfig(state.config);
         state.prices = Object.assign(state.prices, json.state.prices || {});
         state.priceChangeRates = Object.assign(state.priceChangeRates || { shop: {} }, json.state.priceChangeRates || {});
         state.priceChangeRates.shop = cleanSignedNumberMap((state.priceChangeRates && state.priceChangeRates.shop) || {});
@@ -2163,8 +2201,8 @@
     if (!force && state.config.notifiedPriceAlertKey === alertKey) return;
     state.config.notifiedPriceAlertKey = alertKey;
     saveState();
-    const notification = new Notification('HYB Farm 1h 涨幅异常', {
-      body: `${row.seed.name} 前后 1 小时涨幅 ${formatSignedPercent(rate)}，价格 ${formatUsd(row.price)}`,
+    const notification = new Notification('HYB Farm 24h 涨幅提醒', {
+      body: `${row.seed.name} 前后 24 小时涨幅 ${formatSignedPercent(rate)}，价格 ${formatUsd(row.price)}`,
       tag: `hyb-price-rise-${row.seed.id}`,
       renotify: true
     });
