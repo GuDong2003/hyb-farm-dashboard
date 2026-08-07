@@ -292,13 +292,14 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
     if ((!fallback || typeof fallback !== 'object') && (!existing || typeof existing !== 'object')) continue;
 
     const trend = {};
-    const lastRefreshedAt = existing && validIsoLike(existing.lastRefreshedAt)
-      ? existing.lastRefreshedAt
-      : fallback && fallback.lastRefreshedAt;
     const existingHourly = existing && existing.hourly;
-    const hourly = hasCompleteHourlyAnchor(existingHourly, lastRefreshedAt)
+    const useExistingHourly = hasCompleteHourlyAnchor(existingHourly, existing && existing.lastRefreshedAt);
+    const hourly = useExistingHourly
       ? existingHourly
       : fallback && fallback.hourly;
+    const lastRefreshedAt = useExistingHourly
+      ? existing && existing.lastRefreshedAt
+      : fallback && fallback.lastRefreshedAt;
     const existingDaily = existing && existing.daily;
     const daily = Array.isArray(existingDaily) && existingDaily.length
       ? existingDaily
@@ -409,7 +410,7 @@ function snapshotFromNormalized(normalized, updatedAt) {
   return snapshot;
 }
 
-async function hydrateSnapshotTrends(env, snapshot) {
+export async function hydrateSnapshotTrends(env, snapshot) {
   if (!snapshot || !snapshot.prices || !snapshot.prices.shop) return;
   const existingTrends = snapshot.priceTrends && snapshot.priceTrends.shop ? snapshot.priceTrends.shop : {};
   if (!trendMapNeedsHydration(existingTrends, snapshot.prices.shop)) return;

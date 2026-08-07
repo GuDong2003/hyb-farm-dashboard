@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  hydrateSnapshotTrends,
   mergePriceTrendMaps,
   trendMapNeedsHydration
 } from '../worker/index.js';
@@ -113,6 +114,7 @@ test('merge preserves usable existing fields and fills missing fields from fallb
 });
 
 test('merge replaces recent-only existing hourly history with a complete fallback', () => {
+  const existingRefreshedAt = '2026-08-07T13:00:00.000Z';
   const existingDaily = [{ bucketStartedAt: '2026-08-06T00:00:00.000Z', avgUnitPrice: 9 }];
   const merged = mergePriceTrendMaps({
     carrot: {
@@ -126,7 +128,7 @@ test('merge replaces recent-only existing hourly history with a complete fallbac
       hourly: [RECENT_HOURLY_POINT],
       daily: existingDaily,
       unitPrice: 7,
-      lastRefreshedAt: REFRESHED_AT
+      lastRefreshedAt: existingRefreshedAt
     }
   });
 
@@ -140,8 +142,9 @@ test('merge replaces recent-only existing hourly history with a complete fallbac
 });
 
 test('merge preserves complete existing hourly history', () => {
+  const existingRefreshedAt = '2026-08-07T13:00:00.000Z';
   const existingHourly = [{
-    bucketStartedAt: '2026-08-06T11:00:00.000Z',
+    bucketStartedAt: '2026-08-06T13:00:00.000Z',
     avgUnitPrice: 8
   }];
   const merged = mergePriceTrendMaps({
@@ -149,12 +152,14 @@ test('merge preserves complete existing hourly history', () => {
   }, {
     carrot: {
       ...completeTrend(7),
-      hourly: existingHourly
+      hourly: existingHourly,
+      lastRefreshedAt: existingRefreshedAt
     }
   });
 
   assert.deepEqual(merged.carrot.hourly, existingHourly);
   assert.notEqual(merged.carrot.hourly, existingHourly);
+  assert.equal(merged.carrot.lastRefreshedAt, existingRefreshedAt);
 });
 
 test('merge replaces empty uploaded arrays with fallback series', () => {
@@ -182,4 +187,80 @@ test('merge replaces empty uploaded arrays with fallback series', () => {
   assert.notEqual(merged.carrot.daily, fallbackDaily);
   assert.equal(merged.carrot.unitPrice, 4);
   assert.equal(merged.carrot.lastRefreshedAt, REFRESHED_AT);
+});
+
+test('hydration skips the history query for a complete trend map', async () => {
+  let queryCount = 0;
+  const snapshot = {
+    capturedAt: Date.parse(REFRESHED_AT),
+    prices: { shop: { carrot: 4 } },
+    priceTrends: { shop: { carrot: completeTrend() } }
+  };
+  const env = {
+    PRICE_DB: {
+      prepare() {
+        queryCount += 1;
+        throw new Error('complete trends must not query history');
+      }
+    }
+  };
+
+  await hydrateSnapshotTrends(env, snapshot);
+
+  assert.equal(queryCount, 0);
+  assert.equal(trendMapNeedsHydration(snapshot.priceTrends.shop, snapshot.prices.shop), false);
+});
+
+test('hydration queries history once and completes unit-only and recent-only trends', async () => {
+  const capturedAt = Date.parse(REFRESHED_AT);
+  const rows = [
+    { captured_at: capturedAt - 24 * 60 * 60 * 1000, prices_json: JSON.stringify({ carrot: 3 }) },
+    { captured_at: capturedAt, prices_json: JSON.stringify({ carrot: 7 }) }
+  ];
+  const scenarios = [
+    { name: 'unit-only', trend: { unitPrice: 7 } },
+    {
+      name: 'recent-only',
+      trend: {
+        hourly: [RECENT_HOURLY_POINT],
+        daily: [DAILY_POINT],
+        unitPrice: 7,
+        lastRefreshedAt: '2026-08-07T13:00:00.000Z'
+      }
+    }
+  ];
+
+  for (const scenario of scenarios) {
+    let queryCount = 0;
+    const snapshot = {
+      capturedAt,
+      prices: { shop: { carrot: 7 } },
+      priceTrends: { shop: { carrot: scenario.trend } }
+    };
+    const env = {
+      PRICE_DB: {
+        prepare(sql) {
+          queryCount += 1;
+          assert.match(sql, /WHERE accepted = 1/);
+          assert.match(sql, /ORDER BY captured_at DESC/);
+          assert.match(sql, /LIMIT 500/);
+          return {
+            async all() {
+              return { results: rows };
+            }
+          };
+        }
+      }
+    };
+
+    await hydrateSnapshotTrends(env, snapshot);
+
+    assert.equal(queryCount, 1, `${scenario.name} queries history exactly once`);
+    assert.equal(snapshot.priceTrends.shop.carrot.lastRefreshedAt, REFRESHED_AT);
+    assert.equal(
+      trendMapNeedsHydration(snapshot.priceTrends.shop, snapshot.prices.shop),
+      false,
+      `${scenario.name} is hydrated to a complete 24-hour trend`
+    );
+  }
 });
