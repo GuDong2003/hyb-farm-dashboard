@@ -1396,22 +1396,13 @@
     const pointMarkers = hidePoints ? '' : points.map((point) => {
       const pointX = x(point.capturedAt);
       const pointY = y(point.price);
-      const tooltipWidth = 154;
-      const tooltipHeight = 42;
-      const tooltipX = Math.min(width - tooltipWidth - 4, Math.max(4, pointX - tooltipWidth / 2));
-      const tooltipY = pointY - tooltipHeight - 9 >= 4 ? pointY - tooltipHeight - 9 : pointY + 9;
       const timeText = formatTime(point.capturedAt);
       const priceText = `$${Number(point.price).toFixed(5)}`;
       const pointLabel = `${timeText}，价格 ${priceText}`;
       return `
         <g class="history-line-point-wrap">
-          <circle class="history-line-point-hit" data-history-point cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="8" tabindex="0" role="img" aria-label="${escapeHtml(pointLabel)}"></circle>
+          <circle class="history-line-point-hit" data-history-point data-history-point-time="${escapeHtml(timeText)}" data-history-point-price="${escapeHtml(priceText)}" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="8" tabindex="0" role="img" aria-label="${escapeHtml(pointLabel)}"></circle>
           <circle class="history-line-point" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="2.5" aria-hidden="true"></circle>
-          <g class="history-line-point-tooltip" aria-hidden="true">
-            <rect class="history-line-point-tooltip-bg" x="${formatNumber(tooltipX, 2)}" y="${formatNumber(tooltipY, 2)}" width="${tooltipWidth}" height="${tooltipHeight}" rx="6"></rect>
-            <text class="history-line-point-tooltip-time" x="${formatNumber(tooltipX + 9, 2)}" y="${formatNumber(tooltipY + 16, 2)}">${escapeHtml(timeText)}</text>
-            <text class="history-line-point-tooltip-price" x="${formatNumber(tooltipX + 9, 2)}" y="${formatNumber(tooltipY + 33, 2)}">价格：${escapeHtml(priceText)}</text>
-          </g>
         </g>
       `;
     }).join('');
@@ -1473,6 +1464,10 @@
             <svg class="history-line-chart" data-history-plot viewBox="0 0 420 250" role="img" aria-label="${escapeHtml(`${group.seedId} ${model.chartWindow} 价格趋势`)}" preserveAspectRatio="none">
               ${frame.plotContent}
             </svg>
+            <div class="history-line-point-tooltip" data-history-point-tooltip role="tooltip" aria-hidden="true">
+              <strong data-history-point-tooltip-time></strong>
+              <span data-history-point-tooltip-price></span>
+            </div>
           </div>
         </div>
         <div class="history-line-meta" data-history-chart-meta>${frame.metaContent}</div>
@@ -1497,7 +1492,63 @@
     return { model, minTime: model.minTime, maxTime: model.maxTime };
   }
 
+  function hideTrendPointTooltip(chartWrap) {
+    const tooltip = chartWrap && chartWrap.querySelector('[data-history-point-tooltip]');
+    if (!tooltip) return;
+    tooltip.classList.remove('visible');
+    tooltip.setAttribute('aria-hidden', 'true');
+  }
+
+  function showTrendPointTooltip(chartWrap, point) {
+    const tooltip = chartWrap && chartWrap.querySelector('[data-history-point-tooltip]');
+    const time = point && point.dataset.historyPointTime;
+    const price = point && point.dataset.historyPointPrice;
+    if (!tooltip || !time || !price) {
+      hideTrendPointTooltip(chartWrap);
+      return;
+    }
+
+    const timeNode = tooltip.querySelector('[data-history-point-tooltip-time]');
+    const priceNode = tooltip.querySelector('[data-history-point-tooltip-price]');
+    if (!timeNode || !priceNode) return;
+    timeNode.textContent = time;
+    priceNode.textContent = `价格：${price}`;
+
+    const pointRect = point.getBoundingClientRect();
+    const wrapRect = chartWrap.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth || 154;
+    const tooltipHeight = tooltip.offsetHeight || 42;
+    const pointX = pointRect.left - wrapRect.left + pointRect.width / 2;
+    const pointY = pointRect.top - wrapRect.top + pointRect.height / 2;
+    const maxLeft = Math.max(4, wrapRect.width - tooltipWidth - 4);
+    const maxTop = Math.max(4, wrapRect.height - tooltipHeight - 4);
+    const left = Math.min(maxLeft, Math.max(4, pointX - tooltipWidth / 2));
+    const above = pointY - tooltipHeight - 9;
+    const top = above >= 4 ? above : Math.min(maxTop, pointY + 9);
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+    tooltip.classList.add('visible');
+    tooltip.setAttribute('aria-hidden', 'false');
+  }
+
   function bindTrendChartGestures(chartWrap) {
+    chartWrap.addEventListener('pointerover', (event) => {
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) showTrendPointTooltip(chartWrap, point);
+    });
+    chartWrap.addEventListener('pointerout', (event) => {
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) hideTrendPointTooltip(chartWrap);
+    });
+    chartWrap.addEventListener('focusin', (event) => {
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) showTrendPointTooltip(chartWrap, point);
+    });
+    chartWrap.addEventListener('focusout', (event) => {
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) hideTrendPointTooltip(chartWrap);
+    });
+
     chartWrap.addEventListener('pointerdown', (event) => {
       if (event.button !== 0 || !chartWrap.hasAttribute('data-history-chart-drag')) return;
       const { model } = activeTrendChartBounds();
@@ -1577,6 +1628,7 @@
 
   function updateTrendChartViewport(chartWrap) {
     if (!chartWrap || !state.trendModalSeedId) return;
+    hideTrendPointTooltip(chartWrap);
     const panel = chartWrap.closest('[data-history-line-panel]');
     const plot = panel && panel.querySelector('[data-history-plot]');
     const axis = panel && panel.querySelector('[data-history-y-axis]');

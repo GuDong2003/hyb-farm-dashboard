@@ -64,3 +64,19 @@ test('full history samples date ticks without sampling trend data', () => {
 test('all history never advertises drag navigation', () => {
   assert.match(appSource, /const draggable = Boolean\(windowMs && model\.maxTime - model\.minTime > windowMs\);/);
 });
+
+test('point tooltip is one fixed-size HTML overlay outside the SVG', () => {
+  assert.match(appSource, /<div class="history-line-point-tooltip" data-history-point-tooltip/);
+  assert.match(appSource, /data-history-point-time=/);
+  assert.match(appSource, /data-history-point-price=/);
+  assert.doesNotMatch(appSource, /<g class="history-line-point-tooltip"/);
+  assert.match(styleSource, /\.history-line-point-tooltip\s*\{[^}]*position:\s*absolute;[^}]*width:\s*154px;[^}]*height:\s*42px;/s);
+});
+
+test('tooltip is populated and positioned from the active SVG point', () => {
+  assert.match(appSource, /function showTrendPointTooltip\(chartWrap, point\)/);
+  assert.match(appSource, /point\.getBoundingClientRect\(\)/);
+  assert.match(appSource, /tooltip\.style\.left/);
+  assert.match(appSource, /tooltip\.style\.top/);
+  assert.match(appSource, /function hideTrendPointTooltip\(chartWrap\)/);
+});
