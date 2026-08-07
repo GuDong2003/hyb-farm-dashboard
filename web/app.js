@@ -536,17 +536,26 @@
       const prices = snapshot && snapshot.prices && snapshot.prices.shop;
       const priceChangeRates = snapshot && (snapshot.priceChangeRates || snapshot.changeRates || snapshot.priceRates);
       const priceTrends = snapshot && (snapshot.priceTrends || snapshot.trends);
+      const cleanCloudTrends = cleanTrendMap((priceTrends && priceTrends.shop) || {});
       const cloudCapturedAt = Number(snapshot && snapshot.capturedAt) || 0;
       if (cloudCapturedAt && state.cloudDefaultAt !== cloudCapturedAt) {
         state.cloudDefaultAt = cloudCapturedAt;
         changed = true;
       }
       const isNewerCloud = cloudCapturedAt && cloudCapturedAt > (Number(state.lastImportedAt) || 0);
-      if (prices && (!hasShopPrices() || isNewerCloud)) {
+      const sameCaptureHasImprovedTrends = cloudCapturedAt === (Number(state.lastImportedAt) || 0)
+        && PRICE_ALERT.shouldUseCloudTrendMap(state.priceTrends.shop, cleanCloudTrends, Object.keys(prices || {}));
+      if (prices && sameCaptureHasImprovedTrends) {
+        state.priceTrends.shop = cleanCloudTrends;
+        state.status = `已补全云端 24h 价格趋势：${formatTime(cloudCapturedAt)}。`;
+        saveState();
+        handlePriceAlertsForNewData();
+        changed = true;
+      } else if (prices && (!hasShopPrices() || isNewerCloud)) {
         state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
         state.prices.shop = cleanPriceMap(prices);
         state.priceChangeRates.shop = cleanSignedNumberMap((priceChangeRates && priceChangeRates.shop) || {});
-        state.priceTrends.shop = cleanTrendMap((priceTrends && priceTrends.shop) || {});
+        state.priceTrends.shop = cleanCloudTrends;
         state.lastImportedAt = cloudCapturedAt;
         state.priceOrigin = 'cloud';
         state.config.source = 'shop';

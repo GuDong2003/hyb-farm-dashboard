@@ -14,14 +14,14 @@ test('page versions critical assets and loads price-alert utilities before the a
   const criticalAssets = [...html.matchAll(/(?:href|src)="(\.\/(?:style\.css|chart-time-utils\.js|price-alert-utils\.js|app\.js)[^"]*)"/g)]
     .map((match) => match[1]);
   assert.deepEqual(criticalAssets, [
-    './style.css?v=20260807-alert2',
-    './chart-time-utils.js?v=20260807-alert2',
-    './price-alert-utils.js?v=20260807-alert2',
-    './app.js?v=20260807-alert2'
+    './style.css?v=20260808-alert3',
+    './chart-time-utils.js?v=20260808-alert3',
+    './price-alert-utils.js?v=20260808-alert3',
+    './app.js?v=20260808-alert3'
   ]);
 
-  const priceAlertIndex = html.indexOf('./price-alert-utils.js?v=20260807-alert2');
-  const appIndex = html.indexOf('./app.js?v=20260807-alert2');
+  const priceAlertIndex = html.indexOf('./price-alert-utils.js?v=20260808-alert3');
+  const appIndex = html.indexOf('./app.js?v=20260808-alert3');
   assert.ok(priceAlertIndex < appIndex, 'price-alert-utils.js loads before app.js');
 });
 
@@ -30,6 +30,18 @@ test('application keeps history anomalies fixed while live alerts use shared uti
   assert.match(app, /const PRICE_ALERT = window\.HYBPriceAlert;/);
   assert.match(app, /const PRICE_CHANGE_ALERT_WINDOW = PRICE_ALERT\.WINDOW;/);
   assert.match(app, /function priceAlertSummary\(rows\)\s*\{[\s\S]*?PRICE_ALERT\.evaluate\(\s*rows \|\| computeRows\(\),\s*state\.config\.priceAlertNormalThreshold,\s*state\.config\.priceAlertAnomalyThreshold\s*\)/);
+});
+
+test('same-capture cloud defaults can repair incomplete local alert trends', () => {
+  const cloudLoadSource = app.match(/async function loadCloudDefaultPrices\(renderAfter\)\s*\{[\s\S]*?(?=\n  function hasShopPrices)/)?.[0] || '';
+
+  assert.match(cloudLoadSource, /const sameCaptureHasImprovedTrends = cloudCapturedAt === \(Number\(state\.lastImportedAt\) \|\| 0\)/);
+  assert.match(cloudLoadSource, /PRICE_ALERT\.shouldUseCloudTrendMap\(state\.priceTrends\.shop, cleanCloudTrends, Object\.keys\(prices \|\| \{\}\)\)/);
+  const sameCaptureBranch = cloudLoadSource.match(/if \(prices && sameCaptureHasImprovedTrends\)\s*\{[\s\S]*?\n      \} else if/)?.[0] || '';
+  assert.match(sameCaptureBranch, /state\.priceTrends\.shop = cleanCloudTrends;/);
+  assert.match(sameCaptureBranch, /handlePriceAlertsForNewData\(\);/);
+  assert.doesNotMatch(sameCaptureBranch, /state\.(?:previousPrices|prices|priceChangeRates|lastImportedAt|priceOrigin)/);
+  assert.match(cloudLoadSource, /else if \(prices && \(!hasShopPrices\(\) \|\| isNewerCloud\)\)/);
 });
 
 test('application persists alert configuration and transient modal state', () => {

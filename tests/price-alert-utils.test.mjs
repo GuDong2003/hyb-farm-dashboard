@@ -162,3 +162,33 @@ test('batch keys retain order independence for locale-equivalent seed IDs', () =
     priceAlert.batchKey('2026-08-07T12:00:00Z', [...items].reverse())
   );
 });
+
+test('complete cloud trends replace incomplete local trends for the same crop set', () => {
+  const complete = {
+    carrot: {
+      hourly: [{ bucketStartedAt: '2026-08-06T12:00:00.000Z', avgUnitPrice: 3 }],
+      unitPrice: 7,
+      lastRefreshedAt: '2026-08-07T12:00:00.000Z'
+    }
+  };
+  const recentOnly = {
+    carrot: {
+      hourly: [{ bucketStartedAt: '2026-08-07T11:00:00.000Z', avgUnitPrice: 6 }],
+      unitPrice: 7,
+      lastRefreshedAt: '2026-08-07T12:00:00.000Z'
+    }
+  };
+  const zeroAnchor = {
+    carrot: {
+      hourly: [{ bucketStartedAt: '2026-08-06T12:00:00.000Z', avgUnitPrice: 0 }],
+      unitPrice: 7,
+      lastRefreshedAt: '2026-08-07T12:00:00.000Z'
+    }
+  };
+
+  assert.equal(priceAlert.shouldUseCloudTrendMap({ carrot: { unitPrice: 7 } }, complete, ['carrot']), true);
+  assert.equal(priceAlert.shouldUseCloudTrendMap(complete, complete, ['carrot']), false);
+  assert.equal(priceAlert.shouldUseCloudTrendMap({ carrot: { unitPrice: 7 } }, recentOnly, ['carrot']), false);
+  assert.equal(priceAlert.shouldUseCloudTrendMap({ carrot: { unitPrice: 7 } }, zeroAnchor, ['carrot']), false);
+  assert.equal(priceAlert.shouldUseCloudTrendMap({}, complete, []), false);
+});

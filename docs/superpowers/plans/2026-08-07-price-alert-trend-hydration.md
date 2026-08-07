@@ -293,13 +293,13 @@ Expected: FAIL because the current URLs have no `?v=` token.
 
 - [ ] **Step 3: Add one version token to all four references**
 
-Use `v=20260807-alert2` consistently:
+Use `v=20260808-alert3` consistently:
 
 ```html
-<link rel="stylesheet" href="./style.css?v=20260807-alert2" />
-<script src="./chart-time-utils.js?v=20260807-alert2"></script>
-<script src="./price-alert-utils.js?v=20260807-alert2"></script>
-<script src="./app.js?v=20260807-alert2"></script>
+<link rel="stylesheet" href="./style.css?v=20260808-alert3" />
+<script src="./chart-time-utils.js?v=20260808-alert3"></script>
+<script src="./price-alert-utils.js?v=20260808-alert3"></script>
+<script src="./app.js?v=20260808-alert3"></script>
 ```
 
 - [ ] **Step 4: Run targeted and full tests and verify GREEN**
@@ -369,6 +369,7 @@ The main-branch GitHub Actions workflow must enforce the same order with separat
 
 - Confirm `/api/default-prices` returns non-empty hourly arrays for current crops.
 - Confirm those hourly arrays contain a point at or before `lastRefreshedAt - 24 hours`.
+- Confirm an existing browser with the same `capturedAt` replaces its incomplete local trend map and renders the top announcement.
 - Confirm custom-domain `index.html` includes the shared version token.
 - Confirm key online asset bodies match the deployed local files.
 - Load the custom domain in Chrome and verify the new 8%/20% settings plus a top announcement for qualifying complete 24-hour positive changes.

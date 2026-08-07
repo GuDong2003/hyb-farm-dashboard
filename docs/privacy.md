@@ -23,7 +23,7 @@ dashboard local price snapshot
   -> user clicks Upload Cloud, or enables auto-upload after import
   -> Worker validates crop prices and capture time
   -> D1 stores price submissions and the accepted default price snapshot
-  -> dashboard can use the accepted cloud default when it is newer than local data
+  -> dashboard can use the accepted cloud default when it is newer than local data, or its same-batch trend history is more complete
 ```
 
 Cloud upload is limited to crop price data and timing metadata:

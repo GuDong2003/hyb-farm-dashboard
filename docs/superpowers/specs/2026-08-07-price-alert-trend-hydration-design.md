@@ -31,7 +31,7 @@ The user's Chrome session also continued loading the pre-alert `index.html` and 
 
 ### 1. Worker-side per-field hydration plus versioned asset URLs — selected
 
-Always build a fallback trend map from recent accepted submissions when the snapshot does not already contain usable series for every crop. Merge per crop and per field: retain uploaded `hourly` only when it contains a complete 24-hour anchor relative to its uploaded `lastRefreshedAt`; otherwise use synthesized `hourly`. Treat the selected hourly series and its `lastRefreshedAt` as one source pair. Continue to prefer non-empty uploaded `daily` and finite uploaded `unitPrice`. Reference the critical CSS and JavaScript assets with the `20260807-alert2` deployment version token in `index.html`.
+Always build a fallback trend map from recent accepted submissions when the snapshot does not already contain usable series for every crop. Merge per crop and per field: retain uploaded `hourly` only when it contains a complete 24-hour anchor relative to its uploaded `lastRefreshedAt`; otherwise use synthesized `hourly`. Treat the selected hourly series and its `lastRefreshedAt` as one source pair. Continue to prefer non-empty uploaded `daily` and finite uploaded `unitPrice`. Reference the critical CSS and JavaScript assets with the `20260808-alert3` deployment version token in `index.html`.
 
 This keeps the latest snapshot self-contained for every dashboard client, reuses the existing history-to-bucket implementation, and fixes automated uploads without coupling the browser alert calculation to a second API response.
 
@@ -63,7 +63,9 @@ The 500-row limit remains unchanged. Migration `0003_price_submissions_accepted_
 
 ## Asset Freshness
 
-`web/index.html` references `style.css`, `chart-time-utils.js`, `price-alert-utils.js`, and `app.js` with the exact shared query token `?v=20260807-alert2`. The contract test requires all four exact URLs and keeps `price-alert-utils.js` before `app.js`. Once the updated HTML is fetched, browser caches see new subordinate resource URLs instead of reusing the previous scripts and stylesheet. An already open document still requires a reload to fetch the updated HTML.
+`web/index.html` references `style.css`, `chart-time-utils.js`, `price-alert-utils.js`, and `app.js` with the exact shared query token `?v=20260808-alert3`. The contract test requires all four exact URLs and keeps `price-alert-utils.js` before `app.js`. Once the updated HTML is fetched, browser caches see new subordinate resource URLs instead of reusing the previous scripts and stylesheet. An already open document still requires a reload to fetch the updated HTML.
+
+When a browser already holds the same accepted `capturedAt` with incomplete local trends, the cloud loader compares trend completeness and adopts the now-complete cloud trend map even though the price batch is not newer. This repairs existing profiles without changing their prices or requiring users to clear local data.
 
 The underlying files remain normal static assets; no build pipeline or service worker is introduced.
 
@@ -95,8 +97,9 @@ The underlying files remain normal static assets; no build pipeline or service w
 
 ### Asset contract test
 
-- The four critical asset references in `web/index.html` must exactly use `?v=20260807-alert2`.
+- The four critical asset references in `web/index.html` must exactly use `?v=20260808-alert3`.
 - `price-alert-utils.js` must remain before `app.js`.
+- A complete same-capture cloud trend map must replace an incomplete local trend map, while complete local or incomplete cloud maps remain untouched.
 
 ### Verification
 

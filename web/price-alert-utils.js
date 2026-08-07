@@ -114,6 +114,28 @@
     return JSON.stringify([capturedAt, entries]);
   }
 
+  function hasCompleteTrendMap(trends, seedIds) {
+    const ids = normalizedIds(seedIds);
+    if (!ids.length) return false;
+    const source = trends && typeof trends === 'object' ? trends : {};
+    return ids.every((seedId) => {
+      const trend = source[seedId];
+      const referenceAt = Date.parse(trend && trend.lastRefreshedAt);
+      const unitPrice = numberValue(trend && trend.unitPrice);
+      if (!trend || !Number.isFinite(referenceAt) || !Number.isFinite(unitPrice) || !Array.isArray(trend.hourly)) return false;
+      const targetAt = referenceAt - DAY_MS;
+      return trend.hourly.some((point) => {
+        const bucketAt = Date.parse(point && point.bucketStartedAt);
+        const avgUnitPrice = numberValue(point && point.avgUnitPrice);
+        return Number.isFinite(bucketAt) && bucketAt <= targetAt && Number.isFinite(avgUnitPrice) && avgUnitPrice > 0;
+      });
+    });
+  }
+
+  function shouldUseCloudTrendMap(localTrends, cloudTrends, seedIds) {
+    return hasCompleteTrendMap(cloudTrends, seedIds) && !hasCompleteTrendMap(localTrends, seedIds);
+  }
+
   root.HYBPriceAlert = Object.freeze({
     WINDOW,
     DAY_MS,
@@ -125,6 +147,7 @@
     normalizeSuppression,
     addSuppressedCrops,
     unsuppressedItems,
-    batchKey
+    batchKey,
+    shouldUseCloudTrendMap
   });
 })(typeof globalThis === 'object' ? globalThis : this);
