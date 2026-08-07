@@ -1365,7 +1365,8 @@
     }).join('');
     const yAxisTicks = yTickRatios.map((ratio, index) => {
       const tickY = pad.top + ratio * plotHeight;
-      return `<text class="history-line-label" x="${axisWidth - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(yTickLabels[index])}</text>`;
+      const tickTop = (tickY / height) * 100;
+      return `<span class="history-line-y-label" style="top:${formatNumber(tickTop, 4)}%">${escapeHtml(yTickLabels[index])}</span>`;
     }).join('');
     const xTicks = dailySlots.length
       ? dailySlots.map((slot) => {
@@ -1416,7 +1417,7 @@
     const lastPrice = last ? formatUsd(last.price) : '-';
     return {
       axisWidth,
-      axisContent: `<rect class="history-line-bg" x="0" y="0" width="${axisWidth}" height="${height}"></rect>${yAxisTicks}`,
+      axisContent: yAxisTicks,
       plotContent: `<rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>${yGridLines}${xTicks}${trendLine}${highlights}${pointMarkers}`,
       chartStats,
       metaContent: `<span>${firstPrice}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${hasChange ? formatSignedPercent(totalChange) : '-'}</span><span>${lastPrice}</span>`,
@@ -1460,9 +1461,9 @@
           <div class="history-line-head-actions"><span data-history-chart-stats>${frame.chartStats}</span>${pointToggle}${anomalyToggle}</div>
         </div>
         <div class="history-line-chart-layout" data-history-chart-layout style="--history-axis-width:${frame.axisWidth}px">
-          <svg class="history-line-y-axis" data-history-y-axis viewBox="0 0 ${frame.axisWidth} ${height}" aria-hidden="true" preserveAspectRatio="none">
+          <div class="history-line-y-axis" data-history-y-axis aria-hidden="true">
             ${frame.axisContent}
-          </svg>
+          </div>
           <div class="history-line-chart-wrap ${draggable ? 'draggable' : ''}" data-history-chart-wrap ${draggable ? 'data-history-chart-drag' : ''}>
             <svg class="history-line-chart" data-history-plot viewBox="0 0 420 250" role="img" aria-label="${escapeHtml(`${group.seedId} ${model.chartWindow} 价格趋势`)}" preserveAspectRatio="none">
               ${frame.plotContent}
@@ -1590,7 +1591,6 @@
     const frame = renderHistoryLineChartFrame(model, chartOptions, range, width, height);
     state.trendModalVisibleEnd = range.end;
     layout.style.setProperty('--history-axis-width', `${frame.axisWidth}px`);
-    axis.setAttribute('viewBox', `0 0 ${frame.axisWidth} ${height}`);
     axis.innerHTML = frame.axisContent;
     plot.innerHTML = frame.plotContent;
     stats.textContent = frame.chartStats;

@@ -41,3 +41,10 @@ test('dragging uses grab affordances without exposing a native scrollbar', () =>
   assert.match(styleSource, /\.history-line-chart-wrap\.draggable\.dragging\s*\{[^}]*cursor:\s*grabbing;/s);
   assert.doesNotMatch(styleSource, /\.history-line-chart-wrap\.scrollable/);
 });
+
+test('Y-axis labels use unscaled HTML positioned against the SVG grid', () => {
+  assert.match(appSource, /<div class="history-line-y-axis" data-history-y-axis/);
+  assert.doesNotMatch(appSource, /<svg class="history-line-y-axis"/);
+  assert.match(appSource, /class="history-line-y-label" style="top:\$\{formatNumber\(tickTop, 4\)\}%"/);
+  assert.match(styleSource, /\.history-line-y-label\s*\{[^}]*position:\s*absolute;[^}]*right:\s*8px;[^}]*transform:\s*translateY\(-50%\);/s);
+});
