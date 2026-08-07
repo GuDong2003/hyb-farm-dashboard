@@ -19,10 +19,6 @@
     return Number(normalized.replace('h', '')) * HOUR_MS;
   }
 
-  function isScrollableWindow(value) {
-    return normalizeWindow(value, 'all') !== 'all';
-  }
-
   function formatBeijingDay(dayStartedAt) {
     const shifted = new Date(dayStartedAt + BEIJING_OFFSET_MS);
     const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
@@ -50,36 +46,39 @@
     return slots;
   }
 
-  function plotWidth(value, minTime, maxTime, minimumWidth) {
-    const baseWidth = Math.max(1, Number(minimumWidth) || 420);
-    const start = Number(minTime);
-    const end = Number(maxTime);
-    const duration = end - start;
-    const windowMs = windowMilliseconds(value, 'all');
-    if (!Number.isFinite(duration) || duration <= 0 || !windowMs || duration <= windowMs) return baseWidth;
-    return baseWidth * duration / windowMs;
+  function clampVisibleEnd(minValue, maxValue, windowValue, visibleEndValue) {
+    const minTime = Number(minValue);
+    const maxTime = Number(maxValue);
+    const windowMs = Number(windowValue);
+    if (!Number.isFinite(minTime) || !Number.isFinite(maxTime) || maxTime <= minTime) return maxTime;
+    if (!Number.isFinite(windowMs) || windowMs <= 0 || maxTime - minTime <= windowMs) return maxTime;
+    const earliestEnd = minTime + windowMs;
+    const hintedEnd = visibleEndValue == null ? maxTime : Number(visibleEndValue);
+    const visibleEnd = Number.isFinite(hintedEnd) ? hintedEnd : maxTime;
+    return Math.min(maxTime, Math.max(earliestEnd, visibleEnd));
   }
 
-  function visibleTimeRange(scrollLeft, scrollWidth, clientWidth, minTime, maxTime, selectedWindowMs) {
-    const start = Number(minTime);
-    const end = Number(maxTime);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return { start, end };
-
-    const viewportWidth = Math.max(1, Number(clientWidth) || 1);
-    const contentWidth = Math.max(viewportWidth, Number(scrollWidth) || viewportWidth);
-    const maximumScroll = Math.max(0, contentWidth - viewportWidth);
-    const offset = Math.min(maximumScroll, Math.max(0, Number(scrollLeft) || 0));
-    const duration = end - start;
-    const windowMs = Number(selectedWindowMs);
-    if (Number.isFinite(windowMs) && windowMs > 0 && windowMs < duration) {
-      const scrollRatio = maximumScroll > 0 ? offset / maximumScroll : 1;
-      const visibleStart = start + (duration - windowMs) * scrollRatio;
-      return { start: visibleStart, end: visibleStart + windowMs };
+  function visibleRange(minValue, maxValue, windowValue, visibleEndValue) {
+    const minTime = Number(minValue);
+    const maxTime = Number(maxValue);
+    const windowMs = Number(windowValue);
+    if (!Number.isFinite(minTime) || !Number.isFinite(maxTime) || maxTime <= minTime) {
+      return { start: minTime, end: maxTime };
     }
-    return {
-      start: start + (offset / contentWidth) * duration,
-      end: start + (Math.min(contentWidth, offset + viewportWidth) / contentWidth) * duration
-    };
+    if (!Number.isFinite(windowMs) || windowMs <= 0 || maxTime - minTime <= windowMs) {
+      return { start: minTime, end: maxTime };
+    }
+    const end = clampVisibleEnd(minTime, maxTime, windowMs, visibleEndValue);
+    return { start: end - windowMs, end };
+  }
+
+  function shiftVisibleEnd(currentEndValue, pixelDeltaValue, viewportWidthValue, windowValue, minValue, maxValue) {
+    const currentEnd = Number(currentEndValue);
+    const pixelDelta = Number(pixelDeltaValue);
+    const viewportWidth = Math.max(1, Number(viewportWidthValue) || 1);
+    const windowMs = Number(windowValue);
+    const nextEnd = currentEnd + ((Number.isFinite(pixelDelta) ? pixelDelta : 0) / viewportWidth) * windowMs;
+    return clampVisibleEnd(minValue, maxValue, windowMs, nextEnd);
   }
 
   root.HYBChartTime = Object.freeze({
@@ -87,9 +86,9 @@
     DAY_MS,
     normalizeWindow,
     windowMilliseconds,
-    isScrollableWindow,
     beijingDaySlots,
-    plotWidth,
-    visibleTimeRange
+    clampVisibleEnd,
+    visibleRange,
+    shiftVisibleEnd
   });
 })(typeof globalThis === 'object' ? globalThis : this);

@@ -10,14 +10,6 @@ test('30d maps to a thirty-day window', () => {
   assert.equal(chartTime.windowMilliseconds('30d', '24h'), 30 * 24 * 60 * 60 * 1000);
 });
 
-test('finite chart windows use horizontal scrolling while all history fits one screen', () => {
-  assert.equal(chartTime.isScrollableWindow('1h'), true);
-  assert.equal(chartTime.isScrollableWindow('24h'), true);
-  assert.equal(chartTime.isScrollableWindow('7d'), true);
-  assert.equal(chartTime.isScrollableWindow('30d'), true);
-  assert.equal(chartTime.isScrollableWindow('all'), false);
-});
-
 test('Beijing day slots include every intersecting calendar date', () => {
   const minTime = Date.parse('2026-08-01T20:00:00.000Z'); // 08-02 04:00 in Beijing
   const maxTime = Date.parse('2026-08-03T04:00:00.000Z'); // 08-03 12:00 in Beijing
@@ -29,55 +21,37 @@ test('Beijing day slots include every intersecting calendar date', () => {
   assert.ok(slots[0].labelAt < slots[1].labelAt);
 });
 
-test('selected duration fills one viewport across the complete history', () => {
+test('finite windows default to the latest exact range', () => {
   const minTime = Date.parse('2026-07-01T00:00:00.000Z');
   const maxTime = minTime + 35 * chartTime.DAY_MS;
-
-  assert.equal(chartTime.plotWidth('7d', minTime, maxTime, 700), 3500);
-  assert.equal(chartTime.plotWidth('30d', minTime, maxTime, 700), 700 * 35 / 30);
-  assert.equal(chartTime.plotWidth('all', minTime, maxTime, 700), 700);
-});
-
-test('plot width does not create empty scrolling when history is shorter than the window', () => {
-  const minTime = Date.parse('2026-08-01T00:00:00.000Z');
-  const maxTime = minTime + 3 * chartTime.DAY_MS;
-
-  assert.equal(chartTime.plotWidth('7d', minTime, maxTime, 700), 700);
-});
-
-test('scroll position maps to the visible part of complete history', () => {
-  const minTime = Date.parse('2026-07-01T00:00:00.000Z');
-  const maxTime = minTime + 35 * chartTime.DAY_MS;
-  const scrollWidth = 3500;
-  const clientWidth = 700;
-
   assert.deepEqual(
-    chartTime.visibleTimeRange(0, scrollWidth, clientWidth, minTime, maxTime),
-    { start: minTime, end: minTime + 7 * chartTime.DAY_MS }
-  );
-  assert.deepEqual(
-    chartTime.visibleTimeRange(scrollWidth - clientWidth, scrollWidth, clientWidth, minTime, maxTime),
+    chartTime.visibleRange(minTime, maxTime, 7 * chartTime.DAY_MS, null),
     { start: maxTime - 7 * chartTime.DAY_MS, end: maxTime }
   );
 });
 
-test('all-history viewport maps to the complete range', () => {
+test('visible end is clamped to the earliest complete window and latest point', () => {
   const minTime = Date.parse('2026-07-01T00:00:00.000Z');
   const maxTime = minTime + 35 * chartTime.DAY_MS;
-
-  assert.deepEqual(
-    chartTime.visibleTimeRange(0, 700, 700, minTime, maxTime),
-    { start: minTime, end: maxTime }
-  );
+  const windowMs = 7 * chartTime.DAY_MS;
+  assert.equal(chartTime.clampVisibleEnd(minTime, maxTime, windowMs, minTime), minTime + windowMs);
+  assert.equal(chartTime.clampVisibleEnd(minTime, maxTime, windowMs, maxTime + windowMs), maxTime);
 });
 
-test('explicit window duration stays exact when browser width is rounded', () => {
-  const minTime = Date.parse('2026-06-24T00:00:00.000Z');
-  const maxTime = minTime + 44 * chartTime.DAY_MS;
+test('drag pixel delta shifts the visible end continuously', () => {
+  const minTime = Date.parse('2026-07-01T00:00:00.000Z');
+  const maxTime = minTime + 35 * chartTime.DAY_MS;
   const windowMs = 7 * chartTime.DAY_MS;
-
-  assert.deepEqual(
-    chartTime.visibleTimeRange(3806, 4526, 720, minTime, maxTime, windowMs),
-    { start: maxTime - windowMs, end: maxTime }
+  assert.equal(
+    chartTime.shiftVisibleEnd(maxTime, -350, 700, windowMs, minTime, maxTime),
+    maxTime - windowMs / 2
   );
+  assert.equal(chartTime.shiftVisibleEnd(maxTime, 350, 700, windowMs, minTime, maxTime), maxTime);
+});
+
+test('all history and short history return one fixed range', () => {
+  const minTime = Date.parse('2026-08-01T00:00:00.000Z');
+  const maxTime = minTime + 3 * chartTime.DAY_MS;
+  assert.deepEqual(chartTime.visibleRange(minTime, maxTime, 0, null), { start: minTime, end: maxTime });
+  assert.deepEqual(chartTime.visibleRange(minTime, maxTime, 7 * chartTime.DAY_MS, null), { start: minTime, end: maxTime });
 });
