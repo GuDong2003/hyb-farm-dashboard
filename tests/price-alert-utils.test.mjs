@@ -29,6 +29,20 @@ test('threshold validation permits zero but rejects non-finite values', () => {
   assert.equal(priceAlert.validateThresholds(8, Number.POSITIVE_INFINITY).ok, false);
 });
 
+test('threshold validation accepts numeric strings but rejects malformed values', () => {
+  const validCases = [[0, '20'], ['0', '20.5'], [8, 20]];
+  const invalidCases = [
+    [' ', 20], [8, '  '], [[], 20], [8, []], [{}, 20], [8, {}], [true, 20], [8, false]
+  ];
+
+  for (const [normal, anomaly] of validCases) {
+    assert.equal(priceAlert.validateThresholds(normal, anomaly).ok, true);
+  }
+  for (const [normal, anomaly] of invalidCases) {
+    assert.equal(priceAlert.validateThresholds(normal, anomaly).ok, false);
+  }
+});
+
 test('evaluate includes qualifying crops sorted by rate and classifies their severity', () => {
   const result = priceAlert.evaluate([
     { seed: { id: 'seven', name: '七' }, priceAlertRate: 7.99, price: '7.99' },
@@ -62,6 +76,30 @@ test('evaluate skips invalid rates while retaining valid rows', () => {
   assert.deepEqual(result.items.map((item) => item.seedId), ['valid']);
   assert.equal(result.items[0].rate, 9);
   assert.equal(result.items[0].price, 12.5);
+});
+
+test('evaluate skips rows without a usable seed ID', () => {
+  const result = priceAlert.evaluate([
+    { seed: null, priceAlertRate: 9, price: 1 },
+    { seed: { name: '缺少 ID' }, priceAlertRate: 10, price: 2 },
+    { seed: { id: '', name: '空 ID' }, priceAlertRate: 11, price: 3 },
+    { seed: { id: 'valid', name: '有效' }, priceAlertRate: 12, price: 4 }
+  ], 8, 20);
+
+  assert.deepEqual(result.items.map((item) => item.seedId), ['valid']);
+});
+
+test('evaluate rejects malformed rates but accepts numeric strings including zero', () => {
+  const result = priceAlert.evaluate([
+    { seed: { id: 'space', name: '空白' }, priceAlertRate: ' ', price: 1 },
+    { seed: { id: 'array', name: '数组' }, priceAlertRate: [], price: 2 },
+    { seed: { id: 'object', name: '对象' }, priceAlertRate: {}, price: 3 },
+    { seed: { id: 'boolean', name: '布尔' }, priceAlertRate: true, price: 4 },
+    { seed: { id: 'zero', name: '零' }, priceAlertRate: '0', price: 5 }
+  ], '0', 20);
+
+  assert.deepEqual(result.items.map((item) => item.seedId), ['zero']);
+  assert.equal(result.items[0].rate, 0);
 });
 
 test('Beijing date keys and suppression reset at Beijing midnight', () => {

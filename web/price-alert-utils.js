@@ -8,7 +8,8 @@
   const DEFAULT_ANOMALY_THRESHOLD = 20;
 
   function numberValue(value) {
-    if (value === null || value === '' || typeof value === 'boolean') return Number.NaN;
+    if (typeof value === 'number') return value;
+    if (typeof value !== 'string' || value.trim() === '') return Number.NaN;
     return Number(value);
   }
 
@@ -35,10 +36,12 @@
       const rate = numberValue(row && row.priceAlertRate);
       if (!Number.isFinite(rate) || rate < normalThreshold) return result;
       const seed = row && row.seed ? row.seed : {};
+      const seedId = seed.id == null ? '' : String(seed.id);
+      if (seedId.trim() === '') return result;
       const name = seed.name == null ? '' : String(seed.name);
       result.push({
         row,
-        seedId: seed.id == null ? '' : String(seed.id),
+        seedId,
         name,
         rate,
         price: numberValue(row && row.price),
