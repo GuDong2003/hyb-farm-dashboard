@@ -4,7 +4,6 @@
   const HOUR_MS = 60 * 60 * 1000;
   const DAY_MS = 24 * HOUR_MS;
   const BEIJING_OFFSET_MS = 8 * HOUR_MS;
-  const DAY_WIDTH = 120;
   const WINDOWS = ['1h', '6h', '12h', '24h', '7d', '30d', 'all'];
 
   function normalizeWindow(value, fallback) {
@@ -21,7 +20,7 @@
   }
 
   function isScrollableWindow(value) {
-    return ['7d', '30d', 'all'].includes(value);
+    return normalizeWindow(value, 'all') !== 'all';
   }
 
   function formatBeijingDay(dayStartedAt) {
@@ -53,18 +52,44 @@
 
   function plotWidth(value, minTime, maxTime, minimumWidth) {
     const baseWidth = Math.max(1, Number(minimumWidth) || 420);
-    if (!isScrollableWindow(value)) return baseWidth;
-    return Math.max(baseWidth, beijingDaySlots(minTime, maxTime).length * DAY_WIDTH);
+    const start = Number(minTime);
+    const end = Number(maxTime);
+    const duration = end - start;
+    const windowMs = windowMilliseconds(value, 'all');
+    if (!Number.isFinite(duration) || duration <= 0 || !windowMs || duration <= windowMs) return baseWidth;
+    return baseWidth * duration / windowMs;
+  }
+
+  function visibleTimeRange(scrollLeft, scrollWidth, clientWidth, minTime, maxTime, selectedWindowMs) {
+    const start = Number(minTime);
+    const end = Number(maxTime);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return { start, end };
+
+    const viewportWidth = Math.max(1, Number(clientWidth) || 1);
+    const contentWidth = Math.max(viewportWidth, Number(scrollWidth) || viewportWidth);
+    const maximumScroll = Math.max(0, contentWidth - viewportWidth);
+    const offset = Math.min(maximumScroll, Math.max(0, Number(scrollLeft) || 0));
+    const duration = end - start;
+    const windowMs = Number(selectedWindowMs);
+    if (Number.isFinite(windowMs) && windowMs > 0 && windowMs < duration) {
+      const scrollRatio = maximumScroll > 0 ? offset / maximumScroll : 1;
+      const visibleStart = start + (duration - windowMs) * scrollRatio;
+      return { start: visibleStart, end: visibleStart + windowMs };
+    }
+    return {
+      start: start + (offset / contentWidth) * duration,
+      end: start + (Math.min(contentWidth, offset + viewportWidth) / contentWidth) * duration
+    };
   }
 
   root.HYBChartTime = Object.freeze({
     HOUR_MS,
     DAY_MS,
-    DAY_WIDTH,
     normalizeWindow,
     windowMilliseconds,
     isScrollableWindow,
     beijingDaySlots,
-    plotWidth
+    plotWidth,
+    visibleTimeRange
   });
 })(typeof globalThis === 'object' ? globalThis : this);
