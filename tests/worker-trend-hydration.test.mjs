@@ -154,6 +154,56 @@ test('merge scales fallback series to the existing unit-price scale without muta
   }
 });
 
+test('merge falls back atomically when scaling any selected series point would overflow', () => {
+  const fallbackTrends = {
+    carrot: {
+      hourly: [
+        { bucketStartedAt: '2026-08-06T12:00:00.000Z', avgUnitPrice: 1 },
+        { bucketStartedAt: '2026-08-07T12:00:00.000Z', avgUnitPrice: 2 }
+      ],
+      daily: [{ bucketStartedAt: '2026-08-06T00:00:00.000Z', avgUnitPrice: 1 }],
+      unitPrice: 1,
+      lastRefreshedAt: REFRESHED_AT
+    }
+  };
+  const existingTrends = { carrot: { unitPrice: Number.MAX_VALUE } };
+  const originalFallback = structuredClone(fallbackTrends);
+  const originalExisting = structuredClone(existingTrends);
+
+  const merged = mergePriceTrendMaps(fallbackTrends, existingTrends);
+
+  assert.deepEqual(merged.carrot, fallbackTrends.carrot);
+  assert.notEqual(merged.carrot.hourly, fallbackTrends.carrot.hourly);
+  assert.notEqual(merged.carrot.daily, fallbackTrends.carrot.daily);
+  assert.deepEqual(fallbackTrends, originalFallback);
+  assert.deepEqual(existingTrends, originalExisting);
+});
+
+test('merge falls back atomically when fallback unit price cannot define a scale', () => {
+  const fallbackTrends = {
+    carrot: {
+      hourly: [
+        { bucketStartedAt: '2026-08-06T12:00:00.000Z', avgUnitPrice: 1 },
+        { bucketStartedAt: '2026-08-07T12:00:00.000Z', avgUnitPrice: 2 }
+      ],
+      daily: [{ bucketStartedAt: '2026-08-06T00:00:00.000Z', avgUnitPrice: 1 }],
+      unitPrice: 0,
+      lastRefreshedAt: REFRESHED_AT
+    }
+  };
+  const existingTrends = { carrot: { unitPrice: 7 } };
+  const originalFallback = structuredClone(fallbackTrends);
+  const originalExisting = structuredClone(existingTrends);
+
+  const merged = mergePriceTrendMaps(fallbackTrends, existingTrends);
+
+  assert.deepEqual(merged.carrot, fallbackTrends.carrot);
+  assert.notEqual(merged.carrot.hourly, fallbackTrends.carrot.hourly);
+  assert.notEqual(merged.carrot.daily, fallbackTrends.carrot.daily);
+  assert.deepEqual(fallbackTrends, originalFallback);
+  assert.deepEqual(existingTrends, originalExisting);
+});
+
 test('merge replaces recent-only existing hourly history with a complete fallback', () => {
   const existingRefreshedAt = '2026-08-07T13:00:00.000Z';
   const existingDaily = [{ bucketStartedAt: '2026-08-06T00:00:00.000Z', avgUnitPrice: 9 }];

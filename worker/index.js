@@ -285,9 +285,9 @@ export function trendMapNeedsHydration(existingTrends, currentPrices) {
 }
 
 function fallbackSeriesScale(existingUnitPrice, fallbackUnitPrice) {
-  if (!Number.isFinite(existingUnitPrice) || !Number.isFinite(fallbackUnitPrice) || fallbackUnitPrice <= 0) return 1;
+  if (!Number.isFinite(existingUnitPrice) || !Number.isFinite(fallbackUnitPrice) || fallbackUnitPrice <= 0) return null;
   const scale = existingUnitPrice / fallbackUnitPrice;
-  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+  return Number.isFinite(scale) && scale > 0 ? scale : null;
 }
 
 function copyTrendSeries(series, scale = 1) {
@@ -301,6 +301,23 @@ function copyTrendSeries(series, scale = 1) {
   });
 }
 
+function canScaleTrendSeries(series, scale) {
+  return !Array.isArray(series) || series.every((point) => (
+    Number.isFinite(Number(point && point.avgUnitPrice) * scale)
+  ));
+}
+
+function copyPriceTrend(trend) {
+  const copy = {};
+  const hourly = copyTrendSeries(trend && trend.hourly);
+  const daily = copyTrendSeries(trend && trend.daily);
+  if (hourly) copy.hourly = hourly;
+  if (daily) copy.daily = daily;
+  if (Number.isFinite(trend && trend.unitPrice)) copy.unitPrice = trend.unitPrice;
+  if (validIsoLike(trend && trend.lastRefreshedAt)) copy.lastRefreshedAt = trend.lastRefreshedAt;
+  return copy;
+}
+
 export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
   const merged = {};
   for (const id of SEED_IDS) {
@@ -310,7 +327,6 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
 
     const trend = {};
     const hasExistingUnitPrice = Boolean(existing && Number.isFinite(existing.unitPrice));
-    const scale = fallbackSeriesScale(existing && existing.unitPrice, fallback && fallback.unitPrice);
     const existingHourly = existing && existing.hourly;
     const useExistingHourly = hasExistingUnitPrice
       && hasCompleteHourlyAnchor(existingHourly, existing && existing.lastRefreshedAt);
@@ -325,6 +341,23 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
     const daily = useExistingDaily
       ? existingDaily
       : fallback && fallback.daily;
+    const usesFallbackHourly = !useExistingHourly && Array.isArray(fallback && fallback.hourly);
+    const usesFallbackDaily = !useExistingDaily && Array.isArray(fallback && fallback.daily);
+    const scale = hasExistingUnitPrice
+      ? fallbackSeriesScale(existing.unitPrice, fallback && fallback.unitPrice)
+      : 1;
+    if (
+      hasExistingUnitPrice
+      && (usesFallbackHourly || usesFallbackDaily)
+      && (
+        !Number.isFinite(scale)
+        || (usesFallbackHourly && !canScaleTrendSeries(fallback.hourly, scale))
+        || (usesFallbackDaily && !canScaleTrendSeries(fallback.daily, scale))
+      )
+    ) {
+      merged[id] = copyPriceTrend(fallback);
+      continue;
+    }
     const copiedHourly = copyTrendSeries(hourly, useExistingHourly ? 1 : scale);
     const copiedDaily = copyTrendSeries(daily, useExistingDaily ? 1 : scale);
     if (copiedHourly) trend.hourly = copiedHourly;

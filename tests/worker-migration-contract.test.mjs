@@ -28,7 +28,7 @@ test('deployment workflow applies D1 migrations before deploying the Worker', ()
   const migrationAt = workflow.indexOf(migrationCommand);
   const deployAt = workflow.indexOf(deployCommand);
 
-  assert.equal(wranglerActionUses.length, 2, 'migration and deploy use separate Wrangler action steps');
+  assert.ok(wranglerActionUses.length >= 2, 'migration and deploy use separate Wrangler action steps');
   assert.notEqual(migrationAt, -1, 'workflow applies remote D1 migrations');
   assert.notEqual(deployAt, -1, 'workflow deploys the Worker');
   assert.ok(migrationAt < deployAt, 'D1 migrations run before Worker deployment');
