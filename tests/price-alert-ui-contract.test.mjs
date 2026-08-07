@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [app, html, userscript] = await Promise.all([
+const [app, html, userscript, style] = await Promise.all([
   readFile(new URL('../web/app.js', import.meta.url), 'utf8'),
   readFile(new URL('../web/index.html', import.meta.url), 'utf8'),
-  readFile(new URL('../web/userscripts/hyb-farm-dashboard-capture.user.js', import.meta.url), 'utf8')
+  readFile(new URL('../web/userscripts/hyb-farm-dashboard-capture.user.js', import.meta.url), 'utf8'),
+  readFile(new URL('../web/style.css', import.meta.url), 'utf8')
 ]);
 
 test('page loads price-alert utilities before the application', () => {
@@ -48,6 +49,19 @@ test('settings render configurable price alert controls', () => {
   assert.match(app, /普通暴涨阈值/);
   assert.match(app, /异常暴涨阈值/);
   assert.match(app, /站内弹窗提醒/);
+});
+
+test('settings expose escaped live status feedback and keep in-app alerts passive', () => {
+  assert.match(app, /class="settings-status" role="status" aria-live="polite">\$\{escapeHtml\(state\.status\)\}/);
+  assert.match(app, /function savePriceAlertThresholds\(normalValue, anomalyValue\)\s*\{[\s\S]*?PRICE_ALERT\.validateThresholds\(normalValue, anomalyValue\)/);
+  const inAppHandler = app.match(/const inAppPriceAlerts = document\.getElementById\('inAppPriceAlerts'\);[\s\S]*?(?=\n    const importFile)/)?.[0] || '';
+  assert.match(inAppHandler, /state\.config\.inAppPriceAlerts = inAppPriceAlerts\.checked;/);
+  assert.match(inAppHandler, /saveState\(\);\s*render\(\);/);
+  assert.doesNotMatch(inAppHandler, /(maybeNotifyPriceRise|showPriceAlert|openPriceAlert|dispatch)/);
+});
+
+test('hidden toggle inputs retain a visible keyboard focus indicator', () => {
+  assert.match(style, /\.toggle-control input:focus-visible \+ \.toggle-track\s*\{[^}]*outline:\s*2px solid var\(--blue\);[^}]*outline-offset:\s*2px;/);
 });
 
 test('capture userscript supplies twenty-five hourly buckets for rolling 24-hour alerts', () => {

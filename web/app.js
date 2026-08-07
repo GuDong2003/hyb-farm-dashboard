@@ -1824,6 +1824,7 @@
   function renderSettings() {
     return `
       <div class="settings">
+        <div class="settings-status" role="status" aria-live="polite">${escapeHtml(state.status)}</div>
         <section class="settings-panel settings-wide">
           <div class="settings-head">
             <div>
