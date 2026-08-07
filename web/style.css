@@ -533,6 +533,11 @@ tr:hover td { background: var(--row-hover); }
 .toggle-track::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, .28); transition: transform .16s ease; }
 .toggle-control input:checked + .toggle-track { background: var(--blue); }
 .toggle-control input:checked + .toggle-track::after { transform: translateX(20px); }
+.price-alert-thresholds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.price-alert-threshold-field { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.price-alert-threshold-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.price-alert-threshold-input input { width: 100%; }
+.price-alert-threshold-input b { color: var(--text); }
 .settings-copy { color: var(--muted); line-height: 1.7; }
 .history-stat { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 10px; border-radius: 6px; background: var(--history-bg); color: var(--muted); }
 .history-stat strong { color: var(--text); font-size: 18px; }
@@ -570,4 +575,5 @@ tr:hover td { background: var(--row-hover); }
   .crop-trend-loading { min-height: 320px; }
   .settings { grid-template-columns: 1fr; }
   .settings-head { align-items: flex-start; flex-direction: column; }
+  .price-alert-thresholds { grid-template-columns: 1fr; }
 }

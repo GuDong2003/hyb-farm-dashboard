@@ -1853,9 +1853,32 @@
               <span class="toggle-text"><strong>导入后自动上传</strong><small>关闭时只有手动上传才进入云端校验</small></span>
               <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
+          </div>
+        </section>
+
+        <section class="settings-panel">
+          <div class="settings-head compact">
+            <div>
+              <h2>价格提醒</h2>
+              <p>按完整 24 小时涨幅区分普通与异常暴涨。</p>
+            </div>
+          </div>
+          <div class="price-alert-thresholds">
+            <label class="price-alert-threshold-field">普通暴涨阈值
+              <span class="price-alert-threshold-input"><input id="priceAlertNormalThreshold" class="field" type="number" min="0" step="0.1" value="${state.config.priceAlertNormalThreshold}" /><b>%</b></span>
+            </label>
+            <label class="price-alert-threshold-field">异常暴涨阈值
+              <span class="price-alert-threshold-input"><input id="priceAlertAnomalyThreshold" class="field" type="number" min="0" step="0.1" value="${state.config.priceAlertAnomalyThreshold}" /><b>%</b></span>
+            </label>
+          </div>
+          <div class="toggle-list">
             <label class="toggle-row">
-              <span class="toggle-text"><strong>涨幅通知</strong><small>仅当前后 24 小时涨幅达到 ${formatNumber(state.config.priceAlertNormalThreshold, 0)}% 时使用浏览器通知提醒</small></span>
+              <span class="toggle-text"><strong>浏览器系统通知</strong><small>使用系统通知概括当前达标作物</small></span>
               <span class="toggle-control"><input id="browserPriceAlerts" type="checkbox" ${state.config.browserPriceAlerts ? 'checked' : ''} /><span class="toggle-track"></span></span>
+            </label>
+            <label class="toggle-row">
+              <span class="toggle-text"><strong>站内弹窗提醒</strong><small>新价格到达时列出所有未被今日屏蔽的达标作物</small></span>
+              <span class="toggle-control"><input id="inAppPriceAlerts" type="checkbox" ${state.config.inAppPriceAlerts ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
           </div>
         </section>
@@ -2050,6 +2073,25 @@
         render();
       });
     });
+    const priceAlertNormalThreshold = document.getElementById('priceAlertNormalThreshold');
+    const priceAlertAnomalyThreshold = document.getElementById('priceAlertAnomalyThreshold');
+    const saveThresholds = () => {
+      savePriceAlertThresholds(priceAlertNormalThreshold.value, priceAlertAnomalyThreshold.value);
+      render();
+    };
+    if (priceAlertNormalThreshold && priceAlertAnomalyThreshold) {
+      priceAlertNormalThreshold.addEventListener('change', saveThresholds);
+      priceAlertAnomalyThreshold.addEventListener('change', saveThresholds);
+    }
+    const inAppPriceAlerts = document.getElementById('inAppPriceAlerts');
+    if (inAppPriceAlerts) inAppPriceAlerts.addEventListener('change', () => {
+      state.config.inAppPriceAlerts = inAppPriceAlerts.checked;
+      state.status = state.config.inAppPriceAlerts
+        ? '已开启站内弹窗提醒；下一批新价格开始提醒。'
+        : '已关闭站内弹窗提醒。';
+      saveState();
+      render();
+    });
     const importFile = document.getElementById('importFile');
     if (importFile) importFile.addEventListener('change', importJsonFile);
   }
@@ -2188,6 +2230,19 @@
     state.status = '已开启涨幅异常通知。';
     saveState();
     maybeNotifyPriceRise(true);
+  }
+
+  function savePriceAlertThresholds(normalValue, anomalyValue) {
+    const thresholds = PRICE_ALERT.validateThresholds(normalValue, anomalyValue);
+    if (!thresholds.ok) {
+      state.status = thresholds.message;
+      return false;
+    }
+    state.config.priceAlertNormalThreshold = thresholds.normalThreshold;
+    state.config.priceAlertAnomalyThreshold = thresholds.anomalyThreshold;
+    state.status = `价格提醒阈值已更新：普通 ${thresholds.normalThreshold}%，异常 ${thresholds.anomalyThreshold}%。`;
+    saveState();
+    return true;
   }
 
   function maybeNotifyPriceRise(force) {

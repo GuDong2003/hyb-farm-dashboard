@@ -40,6 +40,16 @@ test('application persists alert configuration and transient modal state', () =>
   assert.match(app, /PRICE_ALERT\.normalizeSuppression\([^)]*Date\.now\(\)/);
 });
 
+test('settings render configurable price alert controls', () => {
+  assert.match(app, /id="priceAlertNormalThreshold"/);
+  assert.match(app, /id="priceAlertAnomalyThreshold"/);
+  assert.match(app, /id="browserPriceAlerts"/);
+  assert.match(app, /id="inAppPriceAlerts"/);
+  assert.match(app, /普通暴涨阈值/);
+  assert.match(app, /异常暴涨阈值/);
+  assert.match(app, /站内弹窗提醒/);
+});
+
 test('capture userscript supplies twenty-five hourly buckets for rolling 24-hour alerts', () => {
   assert.match(userscript, /@version\s+0\.3\.7/);
   assert.match(userscript, /granularity=hour&trendRange=25/);
