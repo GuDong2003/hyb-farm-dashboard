@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [app, html, userscript, style] = await Promise.all([
+const [app, html, userscript, style, readme] = await Promise.all([
   readFile(new URL('../web/app.js', import.meta.url), 'utf8'),
   readFile(new URL('../web/index.html', import.meta.url), 'utf8'),
   readFile(new URL('../web/userscripts/hyb-farm-dashboard-capture.user.js', import.meta.url), 'utf8'),
-  readFile(new URL('../web/style.css', import.meta.url), 'utf8')
+  readFile(new URL('../web/style.css', import.meta.url), 'utf8'),
+  readFile(new URL('../README.md', import.meta.url), 'utf8')
 ]);
 
 test('page loads price-alert utilities before the application', () => {
@@ -75,6 +76,28 @@ test('application deduplicates and suppresses popup batches through shared utili
   assert.match(app, /PRICE_ALERT\.unsuppressedItems/);
   assert.match(app, /PRICE_ALERT\.addSuppressedCrops/);
   assert.match(app, /priceAlertModalSeedIds/);
+});
+
+test('browser notifications summarize the whole qualifying batch and open its full list', () => {
+  const notificationSource = app.match(/function maybeNotifyPriceRise\(summary, force\)\s*\{[\s\S]*?(?=\n  function clampInt)/)?.[0] || '';
+  const browserToggleSource = app.match(/async function setBrowserPriceAlerts\(enabled\)\s*\{[\s\S]*?(?=\n  function savePriceAlertThresholds)/)?.[0] || '';
+
+  assert.match(notificationSource, /function maybeNotifyPriceRise\(summary, force\)/);
+  assert.match(notificationSource, /if \(!summary \|\| !summary\.total \|\| !summary\.highest\) return;/);
+  assert.match(notificationSource, /const batchKey = PRICE_ALERT\.batchKey\(state\.lastImportedAt, summary\.items\);/);
+  assert.match(notificationSource, /if \(!force && state\.config\.notifiedPriceAlertKey === batchKey\) return;/);
+  assert.match(notificationSource, /summary\.anomalyCount/);
+  assert.match(notificationSource, /HYB Farm 24h 异常暴涨 · \$\{summary\.total\} 种达标/);
+  assert.match(notificationSource, /HYB Farm 24h 普通上涨 · \$\{summary\.total\} 种达标/);
+  assert.match(notificationSource, /tag:\s*'hyb-price-rise'/);
+  assert.match(notificationSource, /window\.focus\(\);[\s\S]*?openPriceAlertModal\(priceAlertSummary\(\)\.items, true\);[\s\S]*?render\(\);/);
+  assert.match(browserToggleSource, /maybeNotifyPriceRise\(priceAlertSummary\(\), true\);/);
+  assert.doesNotMatch(browserToggleSource, /maybeOpenPriceAlertModal/);
+});
+
+test('README describes configurable complete 24-hour price alerts and their channels', () => {
+  assert.match(readme, /按完整 24 小时涨幅提供价格提醒：普通阈值默认 8%、异常阈值默认 20%，两档均可在设置中修改。/);
+  assert.match(readme, /顶栏公告汇总全部达标作物；浏览器系统通知与站内弹窗可分别开关，弹窗支持按当前作物设置“今日不再提醒”。/);
 });
 
 test('price alert dialog inerts only the background shell and manages focus end to end', () => {

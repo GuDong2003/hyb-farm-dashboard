@@ -2398,7 +2398,7 @@
   async function setBrowserPriceAlerts(enabled) {
     if (!enabled) {
       state.config.browserPriceAlerts = false;
-      state.status = '已关闭涨幅异常通知。';
+      state.status = '已关闭浏览器系统通知。';
       saveState();
       return;
     }
@@ -2412,12 +2412,12 @@
     if (permission === 'default') permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       state.config.browserPriceAlerts = false;
-      state.status = '浏览器未授予通知权限，已关闭涨幅异常通知。';
+      state.status = '浏览器未授予通知权限，已关闭浏览器系统通知。';
       saveState();
       return;
     }
     state.config.browserPriceAlerts = true;
-    state.status = '已开启涨幅异常通知。';
+    state.status = '已开启浏览器系统通知。';
     saveState();
     maybeNotifyPriceRise(priceAlertSummary(), true);
   }
@@ -2437,24 +2437,24 @@
 
   function maybeNotifyPriceRise(summary, force) {
     if (!state.config.browserPriceAlerts) return;
+    if (!summary || !summary.total || !summary.highest) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    const highest = summary && summary.highest;
-    if (!highest) return;
-    const row = highest.row;
-    const rate = highest.rate;
-    const capturedAt = Number(state.lastImportedAt) || 0;
-    const alertKey = `${row.seed.id}:${capturedAt}:${formatNumber(rate, 2)}:${formatNumber(row.price, 5)}`;
-    if (!force && state.config.notifiedPriceAlertKey === alertKey) return;
-    state.config.notifiedPriceAlertKey = alertKey;
+    const batchKey = PRICE_ALERT.batchKey(state.lastImportedAt, summary.items);
+    if (!force && state.config.notifiedPriceAlertKey === batchKey) return;
+    state.config.notifiedPriceAlertKey = batchKey;
     saveState();
-    const notification = new Notification('HYB Farm 24h 涨幅提醒', {
-      body: `${row.seed.name} 前后 24 小时涨幅 ${formatSignedPercent(rate)}，价格 ${formatUsd(row.price)}`,
-      tag: `hyb-price-rise-${row.seed.id}`,
+    const highest = summary.highest;
+    const title = summary.anomalyCount > 0
+      ? `HYB Farm 24h 异常暴涨 · ${summary.total} 种达标`
+      : `HYB Farm 24h 普通上涨 · ${summary.total} 种达标`;
+    const notification = new Notification(title, {
+      body: `${highest.name} ${formatSignedPercent(highest.rate)}，点击查看全部达标作物`,
+      tag: 'hyb-price-rise',
       renotify: true
     });
     notification.onclick = () => {
       window.focus();
-      state.view = 'table';
+      openPriceAlertModal(priceAlertSummary().items, true);
       render();
     };
   }
