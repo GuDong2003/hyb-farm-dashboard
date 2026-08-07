@@ -48,3 +48,19 @@ test('Y-axis labels use unscaled HTML positioned against the SVG grid', () => {
   assert.match(appSource, /class="history-line-y-label" style="top:\$\{formatNumber\(tickTop, 4\)\}%"/);
   assert.match(styleSource, /\.history-line-y-label\s*\{[^}]*position:\s*absolute;[^}]*right:\s*8px;[^}]*transform:\s*translateY\(-50%\);/s);
 });
+
+test('anomalies do not draw a second connection over the real trend path', () => {
+  assert.doesNotMatch(appSource, /history-line-anomaly-segment/);
+  assert.doesNotMatch(styleSource, /history-line-anomaly-segment/);
+  assert.match(appSource, /history-line-anomaly-band/);
+  assert.match(appSource, /history-line-marker/);
+});
+
+test('full history samples date ticks without sampling trend data', () => {
+  assert.match(appSource, /model\.chartWindow === 'all'\s*\? CHART_TIME\.sampleSlots\(dailySlots, 8\)/);
+  assert.match(appSource, /const visibleTimelinePoints = historyPointsInRange\(model\.timelinePoints, range\);/);
+});
+
+test('all history never advertises drag navigation', () => {
+  assert.match(appSource, /const draggable = Boolean\(windowMs && model\.maxTime - model\.minTime > windowMs\);/);
+});

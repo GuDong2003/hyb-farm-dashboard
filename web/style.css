@@ -456,12 +456,6 @@ tr:hover td { background: var(--row-hover); }
 .history-line-anomaly-band { opacity: .08; }
 .history-line-anomaly.up .history-line-anomaly-band { fill: var(--red); }
 .history-line-anomaly.down .history-line-anomaly-band { fill: var(--green); }
-.history-line-anomaly-segment { fill: none; stroke-width: 4; stroke-linecap: round; }
-.history-line-anomaly.up .history-line-anomaly-segment { stroke: var(--red); }
-.history-line-anomaly.down .history-line-anomaly-segment { stroke: var(--green); }
-.history-line-anomaly-start { fill: var(--surface); stroke-width: 2; }
-.history-line-anomaly.up .history-line-anomaly-start { stroke: var(--red); }
-.history-line-anomaly.down .history-line-anomaly-start { stroke: var(--green); }
 .history-line-marker { stroke: var(--surface); stroke-width: 1.8; }
 .history-line-marker.up { fill: var(--red); }
 .history-line-marker.down { fill: var(--green); }

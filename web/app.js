@@ -1317,7 +1317,12 @@
     const showDailySlots = ['7d', '30d', 'all'].includes(model.chartWindow)
       && range.end - range.start >= CHART_TIME.DAY_MS;
     const dailySlots = showDailySlots ? CHART_TIME.beijingDaySlots(range.start, range.end) : [];
-    const dailySlotWidth = dailySlots.length ? width * CHART_TIME.DAY_MS / Math.max(1, range.end - range.start) : width;
+    const visibleDailySlots = model.chartWindow === 'all'
+      ? CHART_TIME.sampleSlots(dailySlots, 8)
+      : dailySlots;
+    const dailySlotWidth = visibleDailySlots.length > 1
+      ? width / (visibleDailySlots.length - 1)
+      : width;
     const denseDailyLabels = dailySlotWidth < 42;
     const pad = {
       left: 10,
@@ -1357,7 +1362,7 @@
       const startX = x(previousCapturedAt);
       const endX = x(capturedAt);
       const title = `${formatTime(previousCapturedAt)} → ${formatTime(capturedAt)}，${formatUsd(previousPrice)} → ${formatUsd(currentPrice)}（${formatSignedPercent(event.changeRate)}）`;
-      return `<g class="history-line-anomaly ${direction}"><title>${escapeHtml(title)}</title><rect class="history-line-anomaly-band" x="${formatNumber(Math.min(startX, endX), 2)}" y="${pad.top}" width="${formatNumber(Math.max(2, Math.abs(endX - startX)), 2)}" height="${plotHeight}"></rect><line class="history-line-anomaly-segment" x1="${formatNumber(startX, 2)}" y1="${formatNumber(y(previousPrice), 2)}" x2="${formatNumber(endX, 2)}" y2="${formatNumber(y(currentPrice), 2)}"></line><circle class="history-line-anomaly-start" cx="${formatNumber(startX, 2)}" cy="${formatNumber(y(previousPrice), 2)}" r="3"></circle><circle class="history-line-marker ${direction}" cx="${formatNumber(endX, 2)}" cy="${formatNumber(y(currentPrice), 2)}" r="4"></circle></g>`;
+      return `<g class="history-line-anomaly ${direction}"><title>${escapeHtml(title)}</title><rect class="history-line-anomaly-band" x="${formatNumber(Math.min(startX, endX), 2)}" y="${pad.top}" width="${formatNumber(Math.max(2, Math.abs(endX - startX)), 2)}" height="${plotHeight}"></rect><circle class="history-line-marker ${direction}" cx="${formatNumber(endX, 2)}" cy="${formatNumber(y(currentPrice), 2)}" r="4"></circle></g>`;
     }).join('');
     const yGridLines = yTickRatios.map((ratio) => {
       const tickY = pad.top + ratio * plotHeight;
@@ -1368,8 +1373,8 @@
       const tickTop = (tickY / height) * 100;
       return `<span class="history-line-y-label" style="top:${formatNumber(tickTop, 4)}%">${escapeHtml(yTickLabels[index])}</span>`;
     }).join('');
-    const xTicks = dailySlots.length
-      ? dailySlots.map((slot) => {
+    const xTicks = visibleDailySlots.length
+      ? visibleDailySlots.map((slot) => {
         const boundary = slot.boundaryAt == null ? null : Number(slot.boundaryAt);
         const labelX = x(slot.labelAt);
         const labelY = height - 8;
