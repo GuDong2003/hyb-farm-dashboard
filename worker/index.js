@@ -284,6 +284,23 @@ export function trendMapNeedsHydration(existingTrends, currentPrices) {
   return false;
 }
 
+function fallbackSeriesScale(existingUnitPrice, fallbackUnitPrice) {
+  if (!Number.isFinite(existingUnitPrice) || !Number.isFinite(fallbackUnitPrice) || fallbackUnitPrice <= 0) return 1;
+  const scale = existingUnitPrice / fallbackUnitPrice;
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+function copyTrendSeries(series, scale = 1) {
+  if (!Array.isArray(series)) return null;
+  return series.map((point) => {
+    if (!point || typeof point !== 'object') return point;
+    const copy = { ...point };
+    const scaledPrice = Number(point.avgUnitPrice) * scale;
+    if (Number.isFinite(scaledPrice)) copy.avgUnitPrice = scaledPrice;
+    return copy;
+  });
+}
+
 export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
   const merged = {};
   for (const id of SEED_IDS) {
@@ -292,6 +309,7 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
     if ((!fallback || typeof fallback !== 'object') && (!existing || typeof existing !== 'object')) continue;
 
     const trend = {};
+    const scale = fallbackSeriesScale(existing && existing.unitPrice, fallback && fallback.unitPrice);
     const existingHourly = existing && existing.hourly;
     const useExistingHourly = hasCompleteHourlyAnchor(existingHourly, existing && existing.lastRefreshedAt);
     const hourly = useExistingHourly
@@ -301,11 +319,14 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
       ? existing && existing.lastRefreshedAt
       : fallback && fallback.lastRefreshedAt;
     const existingDaily = existing && existing.daily;
-    const daily = Array.isArray(existingDaily) && existingDaily.length
+    const useExistingDaily = Array.isArray(existingDaily) && existingDaily.length;
+    const daily = useExistingDaily
       ? existingDaily
       : fallback && fallback.daily;
-    if (Array.isArray(hourly)) trend.hourly = hourly.slice();
-    if (Array.isArray(daily)) trend.daily = daily.slice();
+    const copiedHourly = copyTrendSeries(hourly, useExistingHourly ? 1 : scale);
+    const copiedDaily = copyTrendSeries(daily, useExistingDaily ? 1 : scale);
+    if (copiedHourly) trend.hourly = copiedHourly;
+    if (copiedDaily) trend.daily = copiedDaily;
 
     const unitPrice = existing && Number.isFinite(existing.unitPrice)
       ? existing.unitPrice

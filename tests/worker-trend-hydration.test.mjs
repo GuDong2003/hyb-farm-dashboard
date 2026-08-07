@@ -52,6 +52,10 @@ function completeTrend(unitPrice = 4) {
   };
 }
 
+function priceChangeRate(currentPrice, historicalPrice) {
+  return ((currentPrice - historicalPrice) / historicalPrice) * 100;
+}
+
 test('unit-price-only trends for all current crops need hydration', () => {
   const currentPrices = Object.fromEntries(SEED_IDS.map((id, index) => [id, index + 1]));
   const existingTrends = Object.fromEntries(SEED_IDS.map((id, index) => [id, { unitPrice: index + 1 }]));
@@ -96,11 +100,12 @@ test('merge preserves usable existing fields and fills missing fields from fallb
       unitPrice: 7
     }
   };
+  const expectedHourly = [{ ...OLD_HOURLY_POINT, avgUnitPrice: 1.75 }];
 
   const merged = mergePriceTrendMaps(fallbackTrends, existingTrends);
 
   assert.deepEqual(merged.carrot, {
-    hourly: fallbackHourly,
+    hourly: expectedHourly,
     daily: existingDaily,
     unitPrice: 7,
     lastRefreshedAt: REFRESHED_AT
@@ -111,6 +116,42 @@ test('merge preserves usable existing fields and fills missing fields from fallb
   assert.notEqual(merged.carrot.daily, existingDaily);
   assert.deepEqual(fallbackTrends.carrot.hourly, fallbackHourly);
   assert.deepEqual(existingTrends.carrot.daily, existingDaily);
+});
+
+test('merge scales fallback series to the existing unit-price scale without mutating fallback input', () => {
+  const fallbackTrends = {
+    carrot: {
+      hourly: [
+        { bucketStartedAt: '2026-08-06T12:00:00.000Z', avgUnitPrice: 3 },
+        { bucketStartedAt: '2026-08-07T12:00:00.000Z', avgUnitPrice: 7 }
+      ],
+      daily: [
+        { bucketStartedAt: '2026-08-06T00:00:00.000Z', avgUnitPrice: 3 }
+      ],
+      unitPrice: 7,
+      lastRefreshedAt: REFRESHED_AT
+    }
+  };
+  const originalFallback = structuredClone(fallbackTrends);
+  const scenarios = [
+    { name: 'USD existing price', existingUnitPrice: 7, expectedHistoricalPrice: 3 },
+    { name: 'raw existing price', existingUnitPrice: 3_500_000, expectedHistoricalPrice: 1_500_000 }
+  ];
+
+  for (const scenario of scenarios) {
+    const merged = mergePriceTrendMaps(fallbackTrends, {
+      carrot: { unitPrice: scenario.existingUnitPrice }
+    });
+
+    assert.equal(merged.carrot.unitPrice, scenario.existingUnitPrice, `${scenario.name} is preserved`);
+    assert.equal(merged.carrot.hourly[0].avgUnitPrice, scenario.expectedHistoricalPrice);
+    assert.equal(merged.carrot.daily[0].avgUnitPrice, scenario.expectedHistoricalPrice);
+    assert.ok(
+      Math.abs(priceChangeRate(merged.carrot.unitPrice, merged.carrot.hourly[0].avgUnitPrice) - 133.33333333333334) < 1e-9,
+      `${scenario.name} retains the $3 to $7 relative change`
+    );
+    assert.deepEqual(fallbackTrends, originalFallback, `${scenario.name} does not mutate fallback input`);
+  }
 });
 
 test('merge replaces recent-only existing hourly history with a complete fallback', () => {
@@ -133,7 +174,7 @@ test('merge replaces recent-only existing hourly history with a complete fallbac
   });
 
   assert.deepEqual(merged.carrot, {
-    hourly: [OLD_HOURLY_POINT],
+    hourly: [{ ...OLD_HOURLY_POINT, avgUnitPrice: 1.75 }],
     daily: existingDaily,
     unitPrice: 7,
     lastRefreshedAt: REFRESHED_AT
