@@ -21,6 +21,7 @@
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const PRICE_CHANGE_ALERT_THRESHOLD = 20;
   const PRICE_CHANGE_ALERT_WINDOW = '1h';
+  const CHART_TIME = window.HYBChartTime;
 
   const SEEDS = [
     { id: 'carrot', name: '胡萝卜', price: '500000', growthTime: 1800, harvestQuantity: 2, harvestValue: '500000', experienceValue: 5, isVipOnly: false, sortOrder: 10 },
@@ -109,6 +110,7 @@
       trendModalWindow: '',
       trendHideAnomalies: false,
       trendHidePoints: false,
+      trendModalScrollLeft: null,
       error: ''
     };
 
@@ -119,7 +121,7 @@
       merged.config.landCounts = normalizeLandCounts(merged.config.landCounts);
       merged.config.currentTotalExp = normalizeTotalExperience(merged.config.currentTotalExp);
       merged.config.source = 'shop';
-      if (!['1h', '6h', '12h', '24h', '7d'].includes(merged.config.trendWindow)) merged.config.trendWindow = base.config.trendWindow;
+      if (!['1h', '6h', '12h', '24h', '7d', '30d'].includes(merged.config.trendWindow)) merged.config.trendWindow = base.config.trendWindow;
       delete merged.config.seedMode;
       if (merged.config.sortKey === 'expPerCrop') merged.config.sortKey = 'expPerHarvest';
       if (merged.config.sortKey === 'priceDelta') merged.config.sortKey = 'priceChangeRate';
@@ -849,18 +851,15 @@
   }
 
   function trendWindowLabel() {
-    return ['1h', '6h', '12h', '24h', '7d'].includes(state.config.trendWindow) ? state.config.trendWindow : '24h';
+    return ['1h', '6h', '12h', '24h', '7d', '30d'].includes(state.config.trendWindow) ? state.config.trendWindow : '24h';
   }
 
   function normalizeChartWindow(value) {
-    return ['1h', '6h', '12h', '24h', '7d', 'all'].includes(value) ? value : trendWindowLabel();
+    return CHART_TIME.normalizeWindow(value, trendWindowLabel());
   }
 
   function chartWindowMilliseconds(value) {
-    const normalized = normalizeChartWindow(value);
-    if (normalized === 'all') return 0;
-    if (normalized === '7d') return 7 * 24 * 60 * 60 * 1000;
-    return Number(normalized.replace('h', '')) * 60 * 60 * 1000;
+    return CHART_TIME.windowMilliseconds(value, trendWindowLabel());
   }
 
   function pointsInChartWindow(points, value) {
@@ -909,14 +908,15 @@
         <option value="12h" ${selected === '12h' ? 'selected' : ''}>12h</option>
         <option value="24h" ${selected === '24h' ? 'selected' : ''}>24h</option>
         <option value="7d" ${selected === '7d' ? 'selected' : ''}>7d</option>
+        <option value="30d" ${selected === '30d' ? 'selected' : ''}>30d</option>
         <option value="all" ${selected === 'all' ? 'selected' : ''}>全部</option>
       </select>
     `;
   }
 
   function trendWindowConfig(value) {
-    const normalized = ['1h', '6h', '12h', '24h', '7d'].includes(value) ? value : trendWindowLabel();
-    if (normalized === '7d') return { value: normalized, source: 'daily', ms: 7 * 24 * 60 * 60 * 1000 };
+    const normalized = ['1h', '6h', '12h', '24h', '7d', '30d'].includes(value) ? value : trendWindowLabel();
+    if (normalized === '7d' || normalized === '30d') return { value: normalized, source: 'daily', ms: chartWindowMilliseconds(normalized) };
     return { value: normalized, source: 'hourly', ms: Number(normalized.replace('h', '')) * 60 * 60 * 1000 };
   }
 
@@ -1277,10 +1277,11 @@
       `;
     }
 
-    const width = 420;
-    const height = 250;
     const minTime = points[0].capturedAt;
     const maxTime = points[points.length - 1].capturedAt;
+    const scrollableChart = CHART_TIME.isScrollableWindow(chartWindow);
+    const width = CHART_TIME.plotWidth(chartWindow, minTime, maxTime, 420);
+    const height = 250;
     const prices = points.map((point) => point.price);
     let minPrice = Math.min(...prices);
     let maxPrice = Math.max(...prices);
@@ -1300,11 +1301,12 @@
     const yTickDigits = chartAxisPrecision(yTickValues, yAxis.step);
     const yTickLabels = yTickValues.map((value) => formatChartAxisUsd(value, yTickDigits));
     const widestYTick = Math.max(...yTickLabels.map((label) => label.length));
+    const axisWidth = Math.min(86, Math.max(48, 14 + widestYTick * 6.5));
     const pad = {
-      left: Math.min(86, Math.max(48, 14 + widestYTick * 6.5)),
+      left: 10,
       right: 14,
       top: 14,
-      bottom: 30
+      bottom: 36
     };
     const plotHeight = height - pad.top - pad.bottom;
     const x = (time) => pad.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * (width - pad.left - pad.right);
@@ -1329,10 +1331,27 @@
       const title = `${formatTime(previousCapturedAt)} → ${formatTime(capturedAt)}，${formatUsd(previousPrice)} → ${formatUsd(currentPrice)}（${formatSignedPercent(event.changeRate)}）`;
       return `<g class="history-line-anomaly ${direction}"><title>${escapeHtml(title)}</title><rect class="history-line-anomaly-band" x="${formatNumber(Math.min(startX, endX), 2)}" y="${pad.top}" width="${formatNumber(Math.max(2, Math.abs(endX - startX)), 2)}" height="${plotHeight}"></rect><line class="history-line-anomaly-segment" x1="${formatNumber(startX, 2)}" y1="${formatNumber(y(previousPrice), 2)}" x2="${formatNumber(endX, 2)}" y2="${formatNumber(y(currentPrice), 2)}"></line><circle class="history-line-anomaly-start" cx="${formatNumber(startX, 2)}" cy="${formatNumber(y(previousPrice), 2)}" r="3"></circle><circle class="history-line-marker ${direction}" cx="${formatNumber(endX, 2)}" cy="${formatNumber(y(currentPrice), 2)}" r="4"></circle></g>`;
     }).join('');
-    const yTicks = yTickRatios.map((ratio, index) => {
+    const yGridLines = yTickRatios.map((ratio) => {
       const tickY = pad.top + ratio * plotHeight;
-      return `<g><line class="history-line-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line><text class="history-line-label" x="${pad.left - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(yTickLabels[index])}</text></g>`;
+      return `<line class="history-line-grid" x1="${pad.left}" y1="${formatNumber(tickY, 2)}" x2="${width - pad.right}" y2="${formatNumber(tickY, 2)}"></line>`;
     }).join('');
+    const yAxisTicks = yTickRatios.map((ratio, index) => {
+      const tickY = pad.top + ratio * plotHeight;
+      return `<text class="history-line-label" x="${axisWidth - 8}" y="${formatNumber(tickY + 4, 2)}" text-anchor="end">${escapeHtml(yTickLabels[index])}</text>`;
+    }).join('');
+    const dailySlots = scrollableChart ? CHART_TIME.beijingDaySlots(minTime, maxTime) : [];
+    const xTicks = scrollableChart
+      ? dailySlots.map((slot) => {
+        const boundary = slot.boundaryAt == null ? null : Number(slot.boundaryAt);
+        const boundaryLine = boundary != null && Number.isFinite(boundary)
+          ? `<line class="history-line-grid history-line-grid-vertical" x1="${formatNumber(x(boundary), 2)}" y1="${pad.top}" x2="${formatNumber(x(boundary), 2)}" y2="${height - pad.bottom}"></line>`
+          : '';
+        return `<g>${boundaryLine}<text class="history-line-label history-line-day-label" x="${formatNumber(x(slot.labelAt), 2)}" y="${height - 9}" text-anchor="middle">${escapeHtml(slot.label)}</text></g>`;
+      }).join('')
+      : `
+        <text class="history-line-label" x="${pad.left}" y="${height - 8}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt, maxTime - minTime))}</text>
+        <text class="history-line-label" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt, maxTime - minTime))}</text>
+      `;
     const hidePoints = Boolean(chartOptions.allowPointToggle && chartOptions.hidePoints);
     const pointMarkers = hidePoints ? '' : points.map((point) => {
       const pointX = x(point.capturedAt);
@@ -1357,7 +1376,6 @@
       `;
     }).join('');
     const totalChange = first.price > 0 ? ((last.price - first.price) / first.price) * 100 : null;
-    const rangeMs = maxTime - minTime;
     const anomalyToggle = chartOptions.allowAnomalyToggle && anomalyTimes.size
       ? `<button class="history-chart-toggle ${hiddenAnomalyCount ? 'active' : ''}" type="button" data-trend-anomaly-toggle aria-pressed="${hiddenAnomalyCount ? 'true' : 'false'}">${hiddenAnomalyCount ? '显示异常值' : '隐藏异常值'}</button>`
       : '';
@@ -1373,16 +1391,21 @@
           <div class="history-line-title"><strong>价格趋势</strong>${windowSelect}</div>
           <div class="history-line-head-actions"><span>${chartStats}</span>${pointToggle}${anomalyToggle}</div>
         </div>
-        <div class="history-line-chart-wrap">
-          <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(`${group.seedId} ${chartWindow} 价格趋势`)}" preserveAspectRatio="xMidYMid meet">
-            <rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>
-            ${yTicks}
-            ${trendLine}
-            ${highlights}
-            ${pointMarkers}
-            <text class="history-line-label" x="${pad.left}" y="${height - 8}" text-anchor="start">${escapeHtml(formatChartDate(first.capturedAt, rangeMs))}</text>
-            <text class="history-line-label" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt, rangeMs))}</text>
+        <div class="history-line-chart-layout" style="--history-axis-width:${axisWidth}px">
+          <svg class="history-line-y-axis" viewBox="0 0 ${axisWidth} ${height}" aria-hidden="true" preserveAspectRatio="none">
+            <rect class="history-line-bg" x="0" y="0" width="${axisWidth}" height="${height}"></rect>
+            ${yAxisTicks}
           </svg>
+          <div class="history-line-chart-wrap ${scrollableChart ? 'scrollable' : ''}" ${scrollableChart ? 'data-history-chart-scroll' : ''}>
+            <svg class="history-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(`${group.seedId} ${chartWindow} 价格趋势`)}" preserveAspectRatio="none" ${scrollableChart ? `style="width:${width}px;min-width:${width}px"` : ''}>
+              <rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>
+              ${yGridLines}
+              ${xTicks}
+              ${trendLine}
+              ${highlights}
+              ${pointMarkers}
+            </svg>
+          </div>
         </div>
         <div class="history-line-meta"><span>${formatUsd(first.price)}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${formatSignedPercent(totalChange)}</span><span>${formatUsd(last.price)}</span></div>
       </aside>
@@ -1551,6 +1574,7 @@
     state.trendModalWindow = '';
     state.trendHideAnomalies = false;
     state.trendHidePoints = false;
+    state.trendModalScrollLeft = null;
     render();
   }
 
@@ -1560,6 +1584,7 @@
     state.trendModalWindow = trendWindowLabel();
     state.trendHideAnomalies = false;
     state.trendHidePoints = false;
+    state.trendModalScrollLeft = null;
     const historyPromise = loadHistoryAlerts(false);
     render();
     historyPromise.finally(() => {
@@ -1619,6 +1644,7 @@
           <option value="12h" ${trendWindowLabel() === '12h' ? 'selected' : ''}>涨跌幅 12h</option>
           <option value="24h" ${trendWindowLabel() === '24h' ? 'selected' : ''}>涨跌幅 24h</option>
           <option value="7d" ${trendWindowLabel() === '7d' ? 'selected' : ''}>涨跌幅 7d</option>
+          <option value="30d" ${trendWindowLabel() === '30d' ? 'selected' : ''}>涨跌幅 30d</option>
         </select>
         <select class="field" id="cycleMode">
           <option value="active" ${state.config.cycleMode === 'active' ? 'selected' : ''}>${state.config.activeHours}h 活跃估算</option>
@@ -1921,8 +1947,21 @@
     const trendModalWindow = document.querySelector('[data-trend-window]');
     if (trendModalWindow) trendModalWindow.addEventListener('change', () => {
       state.trendModalWindow = normalizeChartWindow(trendModalWindow.value);
+      state.trendModalScrollLeft = null;
       render();
     });
+    const trendChartScroll = document.querySelector('[data-history-chart-scroll]');
+    if (trendChartScroll) {
+      window.requestAnimationFrame(() => {
+        const savedScrollLeft = Number(state.trendModalScrollLeft);
+        trendChartScroll.scrollLeft = state.trendModalScrollLeft == null || !Number.isFinite(savedScrollLeft)
+          ? trendChartScroll.scrollWidth
+          : savedScrollLeft;
+      });
+      trendChartScroll.addEventListener('scroll', () => {
+        state.trendModalScrollLeft = trendChartScroll.scrollLeft;
+      }, { passive: true });
+    }
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
     if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {
       state.trendHideAnomalies = !state.trendHideAnomalies;
