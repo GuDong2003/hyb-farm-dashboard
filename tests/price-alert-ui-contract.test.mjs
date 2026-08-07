@@ -64,7 +64,7 @@ test('application renders a shared clickable announcement and price-specific ale
   assert.match(app, /data-price-alert-open/);
   assert.match(app, /共 \$\{summary\.total\} 种达标/);
   assert.match(app, /data-price-alert-backdrop/);
-  assert.match(app, /class="price-alert-modal" role="dialog" aria-modal="true" aria-labelledby="priceAlertTitle"/);
+  assert.match(app, /class="price-alert-modal" data-price-alert-dialog role="dialog" aria-modal="true" aria-labelledby="priceAlertTitle"/);
   assert.match(app, /id="priceAlertTitle">24h 价格上涨提醒<\/h2>/);
   assert.match(app, /今日不再提醒上述作物/);
   assert.match(app, /item\.severity === 'anomaly'/);
@@ -75,6 +75,44 @@ test('application deduplicates and suppresses popup batches through shared utili
   assert.match(app, /PRICE_ALERT\.unsuppressedItems/);
   assert.match(app, /PRICE_ALERT\.addSuppressedCrops/);
   assert.match(app, /priceAlertModalSeedIds/);
+});
+
+test('price alert dialog inerts only the background shell and manages focus end to end', () => {
+  const renderSource = app.match(/function render\(\)\s*\{[\s\S]*?(?=\n  function renderHistoryView)/)?.[0] || '';
+  const bindSource = app.match(/function bindEvents\(\)\s*\{[\s\S]*?(?=\n  async function handleAction)/)?.[0] || '';
+  const closeSource = app.match(/function closePriceAlertModal\(\)\s*\{[\s\S]*?(?=\n  function renderPriceAlertModal)/)?.[0] || '';
+
+  assert.match(renderSource, /<div class="app" data-app-shell \$\{priceAlertModal \? 'inert' : ''\}>/);
+  assert.match(renderSource, /<\/div>\s*\$\{priceAlertModal\}\s*`;/);
+  assert.match(renderSource, /classList\.toggle\('modal-open', cropTrendModalVisible \|\| Boolean\(priceAlertModal\)\)/);
+  assert.match(renderSource, /if \(priceAlertModal\) schedulePriceAlertModalFocus\(\);/);
+  assert.match(app, /data-price-alert-dialog[^>]*role="dialog" aria-modal="true" aria-labelledby="priceAlertTitle" aria-describedby="priceAlertDescription"/);
+  assert.match(app, /function schedulePriceAlertModalFocus\(\)\s*\{[\s\S]*?requestAnimationFrame[\s\S]*?\.focus\(\)/);
+  assert.match(app, /function trapPriceAlertModalFocus\(event\)\s*\{[\s\S]*?event\.key !== 'Tab'[\s\S]*?event\.shiftKey[\s\S]*?event\.preventDefault\(\)/);
+  assert.match(bindSource, /priceAlertDialog\.addEventListener\('keydown', trapPriceAlertModalFocus\)/);
+  assert.match(closeSource, /const restoreFocus = state\.priceAlertModalOpener === 'announcement';[\s\S]*?clearPriceAlertModalState\(\);[\s\S]*?render\(\);[\s\S]*?restorePriceAlertModalFocus\(restoreFocus\);/);
+});
+
+test('new empty or fully suppressed batches clear stale price alert modal state', () => {
+  const maybeOpenSource = app.match(/function maybeOpenPriceAlertModal\(summary\)\s*\{[\s\S]*?(?=\n  function closePriceAlertModal)/)?.[0] || '';
+  const clearSource = app.match(/function clearPriceAlertModalState\(\)\s*\{[\s\S]*?\n  \}/)?.[0] || '';
+  const initSource = app.match(/async function init\(\)\s*\{[\s\S]*?(?=\n  init\(\))/)?.[0] || '';
+
+  assert.match(clearSource, /state\.priceAlertModalSeedIds = \[\];/);
+  assert.match(clearSource, /state\.priceAlertModalManual = false;/);
+  assert.match(clearSource, /state\.priceAlertMuteOnClose = false;/);
+  assert.match(clearSource, /state\.priceAlertModalOpener = '';/);
+  assert.match(maybeOpenSource, /if \(!items\.length\)\s*\{[\s\S]*?if \(!state\.config\.inAppPriceAlerts\)\s*\{[\s\S]*?clearPriceAlertModalState\(\);[\s\S]*?return false;[\s\S]*?const batchKey = PRICE_ALERT\.batchKey\(state\.lastImportedAt, items\);[\s\S]*?state\.config\.inAppPriceAlertKey = batchKey;[\s\S]*?clearPriceAlertModalState\(\);[\s\S]*?saveState\(\);[\s\S]*?return false;/);
+  assert.match(maybeOpenSource, /state\.config\.inAppPriceAlertKey = batchKey;[\s\S]*?PRICE_ALERT\.unsuppressedItems[\s\S]*?if \(!unsuppressedItems\.length\)\s*\{[\s\S]*?clearPriceAlertModalState\(\);[\s\S]*?saveState\(\);[\s\S]*?return false;/);
+  assert.match(initSource, /const priceAlertDialog = document\.querySelector\('\[data-price-alert-dialog\]'\);[\s\S]*?if \(priceAlertDialog\) closePriceAlertModal\(\);[\s\S]*?else if \(state\.trendModalSeedId\) closeCropTrendModal\(\);/);
+});
+
+test('price and crop trend dialogs clear each other before opening', () => {
+  const priceOpenSource = app.match(/function openPriceAlertModal\(items, manual\)\s*\{[\s\S]*?(?=\n  function maybeOpenPriceAlertModal)/)?.[0] || '';
+  const trendOpenSource = app.match(/function openCropTrendModal\(seedId\)\s*\{[\s\S]*?(?=\n  function renderFarmExperienceResult)/)?.[0] || '';
+
+  assert.match(priceOpenSource, /clearCropTrendModalState\(\);/);
+  assert.match(trendOpenSource, /if \(!SEED_BY_ID\[seedId\]\) return;\s*clearPriceAlertModalState\(\);/);
 });
 
 test('hidden toggle inputs retain a visible keyboard focus indicator', () => {

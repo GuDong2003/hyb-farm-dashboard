@@ -115,6 +115,7 @@
       priceAlertModalSeedIds: [],
       priceAlertModalManual: false,
       priceAlertMuteOnClose: false,
+      priceAlertModalOpener: '',
       trendModalSeedId: '',
       trendModalWindow: '',
       trendHideAnomalies: false,
@@ -1049,6 +1050,13 @@
       : [];
   }
 
+  function clearPriceAlertModalState() {
+    state.priceAlertModalSeedIds = [];
+    state.priceAlertModalManual = false;
+    state.priceAlertMuteOnClose = false;
+    state.priceAlertModalOpener = '';
+  }
+
   function openPriceAlertModal(items, manual) {
     const selectedIds = [...new Set((Array.isArray(items) ? items : [])
       .filter((item) => item && item.seedId !== null && item.seedId !== undefined && String(item.seedId) !== '')
@@ -1058,25 +1066,45 @@
     state.priceAlertModalSeedIds = selectedIds;
     state.priceAlertModalManual = Boolean(manual);
     state.priceAlertMuteOnClose = false;
+    state.priceAlertModalOpener = manual ? 'announcement' : '';
     return true;
   }
 
   function maybeOpenPriceAlertModal(summary) {
-    if (!state.config.inAppPriceAlerts || !summary || !summary.items.length) return false;
-    const batchKey = PRICE_ALERT.batchKey(state.lastImportedAt, summary.items);
+    const items = summary && Array.isArray(summary.items) ? summary.items : [];
+    if (!items.length) {
+      if (!state.config.inAppPriceAlerts) {
+        clearPriceAlertModalState();
+        return false;
+      }
+      const batchKey = PRICE_ALERT.batchKey(state.lastImportedAt, items);
+      if (state.config.inAppPriceAlertKey === batchKey) return false;
+      state.config.inAppPriceAlertKey = batchKey;
+      clearPriceAlertModalState();
+      saveState();
+      return false;
+    }
+    if (!state.config.inAppPriceAlerts) return false;
+    const batchKey = PRICE_ALERT.batchKey(state.lastImportedAt, items);
     if (state.config.inAppPriceAlertKey === batchKey) return false;
     state.config.inAppPriceAlertKey = batchKey;
-    const items = PRICE_ALERT.unsuppressedItems(
-      summary.items,
+    const unsuppressedItems = PRICE_ALERT.unsuppressedItems(
+      items,
       state.config.suppressedPriceAlerts,
       Date.now()
     );
+    if (!unsuppressedItems.length) {
+      clearPriceAlertModalState();
+      saveState();
+      return false;
+    }
     saveState();
-    return openPriceAlertModal(items, false);
+    return openPriceAlertModal(unsuppressedItems, false);
   }
 
   function closePriceAlertModal() {
     if (!(state.priceAlertModalSeedIds || []).length) return;
+    const restoreFocus = state.priceAlertModalOpener === 'announcement';
     const displayedIds = priceAlertModalItems(priceAlertSummary()).map((item) => item.seedId);
     if (state.priceAlertMuteOnClose && displayedIds.length) {
       state.config.suppressedPriceAlerts = PRICE_ALERT.addSuppressedCrops(
@@ -1086,10 +1114,45 @@
       );
       saveState();
     }
-    state.priceAlertModalSeedIds = [];
-    state.priceAlertModalManual = false;
-    state.priceAlertMuteOnClose = false;
+    clearPriceAlertModalState();
     render();
+    restorePriceAlertModalFocus(restoreFocus);
+  }
+
+  function restorePriceAlertModalFocus(restoreFocus) {
+    if (!restoreFocus) return;
+    const opener = document.querySelector('[data-price-alert-open]');
+    if (opener) opener.focus();
+  }
+
+  function schedulePriceAlertModalFocus() {
+    window.requestAnimationFrame(() => {
+      const dialog = document.querySelector('[data-price-alert-dialog]');
+      if (!dialog) return;
+      const focusTarget = dialog.querySelector('[data-price-alert-close]') || dialog;
+      focusTarget.focus();
+    });
+  }
+
+  function trapPriceAlertModalFocus(event) {
+    if (event.key !== 'Tab') return;
+    const dialog = event.currentTarget;
+    const controls = Array.from(dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'));
+    if (!controls.length) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !dialog.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function renderPriceAlertModal(summary) {
@@ -1102,7 +1165,7 @@
       : '以下作物在最新一批价格中达到提醒阈值。';
     return `
       <div class="price-alert-backdrop" data-price-alert-backdrop>
-        <section class="price-alert-modal" role="dialog" aria-modal="true" aria-labelledby="priceAlertTitle" aria-describedby="priceAlertDescription">
+        <section class="price-alert-modal" data-price-alert-dialog role="dialog" aria-modal="true" aria-labelledby="priceAlertTitle" aria-describedby="priceAlertDescription" tabindex="-1">
           <header class="price-alert-modal-head">
             <div>
               <h2 id="priceAlertTitle">24h 价格上涨提醒</h2>
@@ -1153,7 +1216,7 @@
     const priceAlertModal = renderPriceAlertModal(alertSummary);
     const cropTrendModalVisible = state.view === 'table' && Boolean(SEED_BY_ID[state.trendModalSeedId]);
     app.innerHTML = `
-      <div class="app">
+      <div class="app" data-app-shell ${priceAlertModal ? 'inert' : ''}>
         <header class="topbar">
           <div class="brand">HYB Farm Dashboard</div>
           <nav class="nav">
@@ -1177,11 +1240,12 @@
         <main class="main">
           ${state.view === 'settings' ? renderSettings() : state.view === 'history' ? renderHistoryView() : renderTableView(rows, bestRevenue, bestExpDay, bestExpHour)}
         </main>
-        ${priceAlertModal}
       </div>
+      ${priceAlertModal}
     `;
     document.body.classList.toggle('modal-open', cropTrendModalVisible || Boolean(priceAlertModal));
     bindEvents();
+    if (priceAlertModal) schedulePriceAlertModalFocus();
   }
 
   function renderHistoryView() {
@@ -1722,6 +1786,7 @@
 
   function openCropTrendModal(seedId) {
     if (!SEED_BY_ID[seedId]) return;
+    clearPriceAlertModalState();
     state.trendModalSeedId = seedId;
     state.trendModalWindow = trendWindowLabel();
     state.trendHideAnomalies = false;
@@ -2062,6 +2127,8 @@
     if (priceAlertBackdrop) priceAlertBackdrop.addEventListener('click', (event) => {
       if (event.target === priceAlertBackdrop) closePriceAlertModal();
     });
+    const priceAlertDialog = document.querySelector('[data-price-alert-dialog]');
+    if (priceAlertDialog) priceAlertDialog.addEventListener('keydown', trapPriceAlertModalFocus);
     document.querySelectorAll('[data-history-record]').forEach((button) => {
       button.addEventListener('click', () => {
         const key = String(button.dataset.historyRecord || '');
@@ -2449,7 +2516,8 @@
     installPriceBridgeListener();
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
-      if ((state.priceAlertModalSeedIds || []).length) closePriceAlertModal();
+      const priceAlertDialog = document.querySelector('[data-price-alert-dialog]');
+      if (priceAlertDialog) closePriceAlertModal();
       else if (state.trendModalSeedId) closeCropTrendModal();
     });
     await importSnapshotFromHash();
