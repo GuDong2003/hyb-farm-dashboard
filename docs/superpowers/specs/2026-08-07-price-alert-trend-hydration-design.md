@@ -45,8 +45,8 @@ Uploaders could be required to send 25 valid hourly buckets. This is stricter bu
 ## Worker Data Flow
 
 1. `getDefaultPrices()` reads the accepted default snapshot.
-2. `hydrateSnapshotTrends()` evaluates actual trend usability rather than counting crop keys.
-3. When any crop lacks an hourly series, daily series, current unit price, or refresh timestamp, the Worker reads the latest 500 accepted submissions and builds fallback hourly and daily buckets with the existing `buildTrendMapFromRows()` path.
+2. `hydrateSnapshotTrends()` evaluates actual trend usability rather than counting crop keys. A usable hourly series must contain a valid bucket at or before `lastRefreshedAt - 24 hours`; a merely non-empty recent series is still incomplete for this alert.
+3. When any crop lacks that complete hourly anchor, a daily series, current unit price, or refresh timestamp, the Worker reads the latest 500 accepted submissions and builds fallback hourly and daily buckets with the existing `buildTrendMapFromRows()` path.
 4. A pure merge helper combines the uploaded and synthesized trend maps per crop and per field:
    - non-empty uploaded `hourly` and `daily` arrays win;
    - missing or empty arrays use synthesized arrays;
@@ -75,6 +75,7 @@ The underlying files remain normal static assets; no build pipeline or service w
 ### Worker regression tests
 
 - A snapshot with nineteen `unitPrice`-only trend objects must not be considered fully hydrated.
+- A recent-only hourly series without a point at or before the 24-hour target must still require hydration.
 - Per-field merging must fill missing hourly/daily series and refresh time while preserving valid uploaded values.
 - An uploaded non-empty hourly series must not be overwritten by synthesized history.
 - A truly complete existing trend map may skip the history query.
