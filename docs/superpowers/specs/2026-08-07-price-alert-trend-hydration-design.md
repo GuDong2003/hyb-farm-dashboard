@@ -15,6 +15,7 @@ The user's Chrome session also continued loading the pre-alert `index.html` and 
 
 - Produce a usable complete rolling 24-hour alert rate when the latest submission contains only current prices or partial trend objects.
 - Preserve a complete uploaded hourly series with its own refresh timestamp, preserve other valid uploaded fields, and fill incomplete series or missing metadata from accepted cloud history.
+- Keep synthesized history in the same price unit as retained uploaded trend data for both USD uploaders and raw-game-unit uploaders.
 - Keep the existing ordinary/anomaly thresholds, announcement behavior, popup behavior, and table calculation unchanged.
 - Make a newly deployed frontend version use distinct critical asset URLs so browser and edge caches cannot silently reuse the previous application bundle.
 - Cover both regressions with automated tests before implementation.
@@ -52,6 +53,9 @@ Uploaders could be required to send 25 valid hourly buckets. This is stricter bu
    - a complete uploaded `hourly` keeps the uploaded `lastRefreshedAt`; an incomplete or recent-only uploaded series uses both synthesized `hourly` and synthesized `lastRefreshedAt`;
    - a non-empty uploaded `daily` array wins, while a missing or empty array uses synthesized `daily`;
    - a finite uploaded `unitPrice` wins, otherwise the synthesized current price is used;
+   - synthesized hourly/daily points are copied and scaled by `uploaded unitPrice / synthesized unitPrice` when an uploaded unit is retained, so USD and raw-game-unit sources remain internally consistent;
+   - scaling is atomic per crop: an undefined/zero denominator or any non-finite scaled point makes the whole crop use the unscaled synthesized hourly, daily, unit price, and timestamp;
+   - uploaded series without a finite uploaded `unitPrice` have an unknown unit and therefore use the complete synthesized trend instead of mixing sources.
 5. The response returns hydrated `priceTrends`. The database row is not rewritten.
 6. The existing frontend `trendAnchor(..., requireFullWindow=true)` still refuses to emit an alert until it finds a point at or before the exact 24-hour target.
 
@@ -69,6 +73,7 @@ The underlying files remain normal static assets; no build pipeline or service w
 - Invalid uploaded trend fields continue to be removed by `normalizePriceTrends()`.
 - Missing history produces empty synthesized series, so the frontend continues to omit the announcement rather than calculating from an incomplete window.
 - Complete uploaded hourly series remain paired with their uploaded refresh timestamp; incomplete hourly series are replaced as a pair so a fallback series is never evaluated against an unrelated uploaded timestamp.
+- Invalid or overflowing unit conversion never partially scales a series; the complete synthesized crop trend is used instead.
 
 ## Testing
 
@@ -81,6 +86,8 @@ The underlying files remain normal static assets; no build pipeline or service w
 - A recent-only uploaded hourly series must use the synthesized hourly series and synthesized timestamp together, even when the uploaded timestamp is valid but different.
 - A truly complete existing trend map may skip the history query.
 - Mock D1 tests must prove complete trends perform zero history queries, while `unitPrice`-only and recent-only trends perform exactly one query and become complete 24-hour snapshots.
+- USD and raw-game-unit uploads must produce the same relative change after fallback hydration, without mutating either input map.
+- Missing uploaded unit prices, zero synthesized unit prices, and overflowing conversion factors must fall back atomically instead of producing mixed-unit points.
 
 ### Migration contract test
 
@@ -106,5 +113,7 @@ Apply the D1 migration before deploying the Worker:
 npx wrangler d1 migrations apply hyb-farm-dashboard-db --remote
 npx wrangler deploy
 ```
+
+The main-branch deployment workflow performs the same remote migration command in a separate Wrangler action step before its deploy step, using the existing Cloudflare account and API-token secrets.
 
 If the hydration response causes an unexpected regression, roll back to the previous Worker version. The hydration path does not mutate stored submissions or the default row. The new index is non-destructive and may remain in place after a Worker rollback.

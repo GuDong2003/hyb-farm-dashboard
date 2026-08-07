@@ -4,7 +4,7 @@
 
 **Goal:** Restore top price announcements for complete 24-hour rises when accepted uploads contain only current prices, and prevent newly deployed browsers from reusing obsolete critical frontend assets.
 
-**Architecture:** Keep the frontend alert calculation unchanged and repair the default snapshot at the Worker boundary. A pure per-field trend merge preserves complete uploaded hourly/timestamp pairs and other valid fields while filling incomplete data from accepted submission history; an indexed history query bounds lookup cost, and one shared version token on critical HTML asset references provides deterministic cache invalidation.
+**Architecture:** Keep the frontend alert calculation unchanged and repair the default snapshot at the Worker boundary. A pure merge preserves complete uploaded hourly/timestamp/unit pairs and scales synthesized points into the retained unit, with atomic fallback for unknown or invalid conversions; an indexed history query bounds lookup cost, and one shared version token on critical HTML asset references provides deterministic cache invalidation.
 
 **Tech Stack:** Cloudflare Workers, D1, static HTML/CSS/JavaScript, Node.js built-in test runner, Wrangler.
 
@@ -16,6 +16,7 @@
 - Create `tests/worker-trend-hydration.test.mjs`: exercise hydration completeness and merge behavior through named Worker exports.
 - Create `migrations/0003_price_submissions_accepted_captured_at.sql`: index the accepted history hydration query.
 - Create `tests/worker-migration-contract.test.mjs`: enforce the migration and index column order.
+- Modify `.github/workflows/deploy.yml`: apply remote D1 migrations before deploying the Worker.
 - Modify `web/index.html`: append one shared version query token to critical CSS and JavaScript URLs.
 - Modify `tests/price-alert-ui-contract.test.mjs`: enforce shared critical-asset versioning and script order.
 - Preserve `web/app.js`, `web/price-alert-utils.js`, alert thresholds, modal behavior, and stored D1 rows.
@@ -224,6 +225,8 @@ CREATE INDEX IF NOT EXISTS idx_price_submissions_accepted_captured_at
   ON price_submissions (accepted, captured_at DESC);
 ```
 
+When fallback series are selected while retaining an uploaded `unitPrice`, copy and scale every synthesized point by `uploaded unitPrice / synthesized unitPrice`. Preflight all selected hourly and daily points; if the ratio is undefined or any multiplication is non-finite, copy the whole synthesized crop trend instead. Do the same when uploaded series have no finite unit price, because their unit cannot be inferred safely. Cover USD, raw units, missing units, zero denominators, overflow, and input immutability.
+
 The merge must create new objects/arrays by selection and must not mutate either input map.
 
 - [ ] **Step 4: Wire helpers into `hydrateSnapshotTrends()`**
@@ -321,6 +324,7 @@ git commit -m "fix: version price alert frontend assets"
 **Files:**
 - Verify: `worker/index.js`
 - Verify: `migrations/0003_price_submissions_accepted_captured_at.sql`
+- Verify: `.github/workflows/deploy.yml`
 - Verify: `web/index.html`
 - Verify: `web/app.js`
 - Verify: `web/price-alert-utils.js`
@@ -358,6 +362,8 @@ npx wrangler deployments status
 ```
 
 Expected: migration `0003` applies successfully and the new Worker version receives 100% traffic.
+
+The main-branch GitHub Actions workflow must enforce the same order with separate Wrangler action steps and shared Cloudflare secrets.
 
 - [ ] **Step 5: Verify production data and UI**
 
