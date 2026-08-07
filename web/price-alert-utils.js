@@ -15,11 +15,11 @@
   function validateThresholds(normalValue, anomalyValue) {
     const normalThreshold = numberValue(normalValue);
     const anomalyThreshold = numberValue(anomalyValue);
-    if (!Number.isFinite(normalThreshold) || normalThreshold <= 0) {
-      return { ok: false, message: '普通预警阈值必须是大于 0 的数字。' };
+    if (!Number.isFinite(normalThreshold) || normalThreshold < 0) {
+      return { ok: false, message: '普通预警阈值必须是不小于 0 的数字。' };
     }
-    if (!Number.isFinite(anomalyThreshold) || anomalyThreshold <= 0) {
-      return { ok: false, message: '异常预警阈值必须是大于 0 的数字。' };
+    if (!Number.isFinite(anomalyThreshold) || anomalyThreshold < 0) {
+      return { ok: false, message: '异常预警阈值必须是不小于 0 的数字。' };
     }
     if (anomalyThreshold <= normalThreshold) {
       return { ok: false, message: '异常预警阈值必须严格大于普通预警阈值。' };
@@ -103,7 +103,11 @@
       item && item.seedId == null ? '' : String(item && item.seedId),
       item && item.rate,
       item && item.price
-    ]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right), 'zh-CN'));
+    ]).sort((left, right) => {
+      const leftKey = JSON.stringify(left);
+      const rightKey = JSON.stringify(right);
+      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    });
     return JSON.stringify([capturedAt, entries]);
   }
 

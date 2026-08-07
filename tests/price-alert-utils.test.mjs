@@ -18,6 +18,17 @@ test('threshold validation accepts increasing positive values and rejects invali
   }
 });
 
+test('threshold validation permits zero but rejects non-finite values', () => {
+  assert.deepEqual(priceAlert.validateThresholds(0, 20), {
+    ok: true,
+    normalThreshold: 0,
+    anomalyThreshold: 20,
+    message: ''
+  });
+  assert.equal(priceAlert.validateThresholds(Number.NaN, 20).ok, false);
+  assert.equal(priceAlert.validateThresholds(8, Number.POSITIVE_INFINITY).ok, false);
+});
+
 test('evaluate includes qualifying crops sorted by rate and classifies their severity', () => {
   const result = priceAlert.evaluate([
     { seed: { id: 'seven', name: '七' }, priceAlertRate: 7.99, price: '7.99' },
@@ -99,5 +110,17 @@ test('batch keys are order-independent but reflect capture time', () => {
   assert.notEqual(
     priceAlert.batchKey('2026-08-07T12:00:00Z', items),
     priceAlert.batchKey('2026-08-07T12:01:00Z', items)
+  );
+});
+
+test('batch keys retain order independence for locale-equivalent seed IDs', () => {
+  const items = [
+    { seedId: 'é', rate: 20, price: 5 },
+    { seedId: 'e\u0301', rate: 20, price: 5 }
+  ];
+
+  assert.equal(
+    priceAlert.batchKey('2026-08-07T12:00:00Z', items),
+    priceAlert.batchKey('2026-08-07T12:00:00Z', [...items].reverse())
   );
 });
