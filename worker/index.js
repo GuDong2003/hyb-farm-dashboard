@@ -309,9 +309,11 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
     if ((!fallback || typeof fallback !== 'object') && (!existing || typeof existing !== 'object')) continue;
 
     const trend = {};
+    const hasExistingUnitPrice = Boolean(existing && Number.isFinite(existing.unitPrice));
     const scale = fallbackSeriesScale(existing && existing.unitPrice, fallback && fallback.unitPrice);
     const existingHourly = existing && existing.hourly;
-    const useExistingHourly = hasCompleteHourlyAnchor(existingHourly, existing && existing.lastRefreshedAt);
+    const useExistingHourly = hasExistingUnitPrice
+      && hasCompleteHourlyAnchor(existingHourly, existing && existing.lastRefreshedAt);
     const hourly = useExistingHourly
       ? existingHourly
       : fallback && fallback.hourly;
@@ -319,7 +321,7 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
       ? existing && existing.lastRefreshedAt
       : fallback && fallback.lastRefreshedAt;
     const existingDaily = existing && existing.daily;
-    const useExistingDaily = Array.isArray(existingDaily) && existingDaily.length;
+    const useExistingDaily = hasExistingUnitPrice && Array.isArray(existingDaily) && existingDaily.length;
     const daily = useExistingDaily
       ? existingDaily
       : fallback && fallback.daily;
@@ -328,7 +330,7 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
     if (copiedHourly) trend.hourly = copiedHourly;
     if (copiedDaily) trend.daily = copiedDaily;
 
-    const unitPrice = existing && Number.isFinite(existing.unitPrice)
+    const unitPrice = hasExistingUnitPrice
       ? existing.unitPrice
       : fallback && fallback.unitPrice;
     if (Number.isFinite(unitPrice)) trend.unitPrice = unitPrice;

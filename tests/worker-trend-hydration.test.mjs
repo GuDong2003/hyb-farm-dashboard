@@ -203,6 +203,34 @@ test('merge preserves complete existing hourly history', () => {
   assert.equal(merged.carrot.lastRefreshedAt, existingRefreshedAt);
 });
 
+test('merge replaces existing series when their unit-price scale is unknown', () => {
+  const fallbackTrends = {
+    carrot: {
+      hourly: [{ bucketStartedAt: '2026-08-06T12:00:00.000Z', avgUnitPrice: 3 }],
+      daily: [{ bucketStartedAt: '2026-08-06T00:00:00.000Z', avgUnitPrice: 3 }],
+      unitPrice: 7,
+      lastRefreshedAt: REFRESHED_AT
+    }
+  };
+  const existingTrends = {
+    carrot: {
+      hourly: [{ bucketStartedAt: '2026-08-06T13:00:00.000Z', avgUnitPrice: 1_500_000 }],
+      daily: [{ bucketStartedAt: '2026-08-06T00:00:00.000Z', avgUnitPrice: 1_500_000 }],
+      lastRefreshedAt: '2026-08-07T13:00:00.000Z'
+    }
+  };
+  const originalFallback = structuredClone(fallbackTrends);
+  const originalExisting = structuredClone(existingTrends);
+
+  const merged = mergePriceTrendMaps(fallbackTrends, existingTrends);
+
+  assert.deepEqual(merged.carrot, fallbackTrends.carrot);
+  assert.notEqual(merged.carrot.hourly, fallbackTrends.carrot.hourly);
+  assert.notEqual(merged.carrot.daily, fallbackTrends.carrot.daily);
+  assert.deepEqual(fallbackTrends, originalFallback);
+  assert.deepEqual(existingTrends, originalExisting);
+});
+
 test('merge replaces empty uploaded arrays with fallback series', () => {
   const fallbackHourly = [OLD_HOURLY_POINT];
   const fallbackDaily = [DAILY_POINT];
