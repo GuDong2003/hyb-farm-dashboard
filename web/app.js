@@ -54,6 +54,8 @@
   let priceBridgeRequest = null;
   let autoRefreshTimer = null;
   let trendChartUpdateFrame = 0;
+  let trendChartDrag = null;
+  let suppressTrendPointClick = false;
 
   function normalizeSeed(seed) {
     return {
@@ -1015,6 +1017,8 @@
       window.cancelAnimationFrame(trendChartUpdateFrame);
       trendChartUpdateFrame = 0;
     }
+    trendChartDrag = null;
+    suppressTrendPointClick = false;
     const app = document.getElementById('app');
     const rows = computeRows();
     const bestRevenue = bestBy(rows, 'totalDaily');
@@ -1479,6 +1483,90 @@
       windowValue: state.trendModalWindow,
       visibleEnd: state.trendModalVisibleEnd
     };
+  }
+
+  function activeTrendChartBounds() {
+    const trend = cropTrendData(state.trendModalSeedId);
+    const model = historyLineChartModel(trend.group, trend.result, activeTrendChartOptions());
+    return { model, minTime: model.minTime, maxTime: model.maxTime };
+  }
+
+  function bindTrendChartGestures(chartWrap) {
+    chartWrap.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || !chartWrap.hasAttribute('data-history-chart-drag')) return;
+      const { model } = activeTrendChartBounds();
+      const range = historyChartRange(model, state.trendModalVisibleEnd);
+      suppressTrendPointClick = false;
+      trendChartDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startVisibleEnd: range.end,
+        dragged: false
+      };
+      chartWrap.setPointerCapture(event.pointerId);
+    });
+
+    chartWrap.addEventListener('pointermove', (event) => {
+      if (!trendChartDrag || trendChartDrag.pointerId !== event.pointerId) return;
+      const deltaX = event.clientX - trendChartDrag.startX;
+      if (!trendChartDrag.dragged && Math.abs(deltaX) < 4) return;
+      trendChartDrag.dragged = true;
+      const { model } = activeTrendChartBounds();
+      state.trendModalVisibleEnd = CHART_TIME.shiftVisibleEnd(
+        trendChartDrag.startVisibleEnd,
+        -deltaX,
+        chartWrap.clientWidth,
+        chartWindowMilliseconds(model.chartWindow),
+        model.minTime,
+        model.maxTime
+      );
+      chartWrap.classList.add('dragging');
+      if (event.cancelable) event.preventDefault();
+      scheduleTrendChartViewportRefresh();
+    });
+
+    const finishTrendChartDrag = (event) => {
+      if (!trendChartDrag || trendChartDrag.pointerId !== event.pointerId) return;
+      suppressTrendPointClick = trendChartDrag.dragged;
+      if (chartWrap.hasPointerCapture(event.pointerId)) chartWrap.releasePointerCapture(event.pointerId);
+      chartWrap.classList.remove('dragging');
+      trendChartDrag = null;
+    };
+    chartWrap.addEventListener('pointerup', finishTrendChartDrag);
+    chartWrap.addEventListener('pointercancel', finishTrendChartDrag);
+
+    chartWrap.addEventListener('wheel', (event) => {
+      const horizontalDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.shiftKey ? event.deltaY : 0;
+      if (!horizontalDelta || !chartWrap.hasAttribute('data-history-chart-drag')) return;
+      const { model } = activeTrendChartBounds();
+      const range = historyChartRange(model, state.trendModalVisibleEnd);
+      state.trendModalVisibleEnd = CHART_TIME.shiftVisibleEnd(
+        range.end,
+        horizontalDelta,
+        chartWrap.clientWidth,
+        chartWindowMilliseconds(model.chartWindow),
+        model.minTime,
+        model.maxTime
+      );
+      event.preventDefault();
+      scheduleTrendChartViewportRefresh();
+    }, { passive: false });
+
+    chartWrap.addEventListener('click', (event) => {
+      if (suppressTrendPointClick) {
+        suppressTrendPointClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const point = event.target.closest && event.target.closest('[data-history-point]');
+      if (point) {
+        event.stopPropagation();
+        point.focus();
+      }
+    }, true);
   }
 
   function updateTrendChartViewport(chartWrap) {
@@ -2061,13 +2149,7 @@
       render();
     });
     const trendChartWrap = document.querySelector('[data-history-chart-wrap]');
-    if (trendChartWrap) trendChartWrap.addEventListener('click', (event) => {
-      const point = event.target.closest && event.target.closest('[data-history-point]');
-      if (point) {
-        event.stopPropagation();
-        point.focus();
-      }
-    });
+    if (trendChartWrap) bindTrendChartGestures(trendChartWrap);
     const trendBackdrop = document.querySelector('[data-trend-backdrop]');
     if (trendBackdrop) trendBackdrop.addEventListener('click', (event) => {
       if (event.target === trendBackdrop) closeCropTrendModal();

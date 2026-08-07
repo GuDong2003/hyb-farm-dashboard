@@ -433,7 +433,8 @@ tr:hover td { background: var(--row-hover); }
 .history-line-y-axis, .history-line-chart { display: block; width: 100%; height: 100%; min-height: 228px; }
 .history-line-y-axis { position: relative; z-index: 2; }
 .history-line-chart-wrap { display: block; width: 100%; min-width: 0; min-height: 0; overflow: hidden; }
-.history-line-chart-wrap.scrollable { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; touch-action: pan-x; scrollbar-width: thin; }
+.history-line-chart-wrap.draggable { cursor: grab; touch-action: pan-y; user-select: none; }
+.history-line-chart-wrap.draggable.dragging { cursor: grabbing; }
 .history-line-bg { fill: var(--formula-bg); }
 .history-line-grid { stroke: var(--line-soft); stroke-width: 1; }
 .history-line-grid-vertical { stroke-dasharray: 3 3; }
