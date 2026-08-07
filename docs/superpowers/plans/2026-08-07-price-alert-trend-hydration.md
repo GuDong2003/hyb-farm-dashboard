@@ -4,7 +4,7 @@
 
 **Goal:** Restore top price announcements for complete 24-hour rises when accepted uploads contain only current prices, and prevent newly deployed browsers from reusing obsolete critical frontend assets.
 
-**Architecture:** Keep the frontend alert calculation unchanged and repair the default snapshot at the Worker boundary. A pure per-field trend merge fills missing uploaded data from accepted submission history while preserving valid uploaded values; one shared version token on critical HTML asset references provides deterministic cache invalidation.
+**Architecture:** Keep the frontend alert calculation unchanged and repair the default snapshot at the Worker boundary. A pure per-field trend merge preserves complete uploaded hourly/timestamp pairs and other valid fields while filling incomplete data from accepted submission history; an indexed history query bounds lookup cost, and one shared version token on critical HTML asset references provides deterministic cache invalidation.
 
 **Tech Stack:** Cloudflare Workers, D1, static HTML/CSS/JavaScript, Node.js built-in test runner, Wrangler.
 
@@ -14,9 +14,11 @@
 
 - Modify `worker/index.js`: decide whether hydration is needed and merge synthesized/uploaded trend fields.
 - Create `tests/worker-trend-hydration.test.mjs`: exercise hydration completeness and merge behavior through named Worker exports.
+- Create `migrations/0003_price_submissions_accepted_captured_at.sql`: index the accepted history hydration query.
+- Create `tests/worker-migration-contract.test.mjs`: enforce the migration and index column order.
 - Modify `web/index.html`: append one shared version query token to critical CSS and JavaScript URLs.
 - Modify `tests/price-alert-ui-contract.test.mjs`: enforce shared critical-asset versioning and script order.
-- Preserve `web/app.js`, `web/price-alert-utils.js`, alert thresholds, modal behavior, and D1 schema.
+- Preserve `web/app.js`, `web/price-alert-utils.js`, alert thresholds, modal behavior, and stored D1 rows.
 
 ### Task 0: Integrate the latest remote chart update in isolation
 
@@ -75,6 +77,8 @@ Do not add the unrelated root `.codex/` directory.
 
 **Files:**
 - Create: `tests/worker-trend-hydration.test.mjs`
+- Create: `migrations/0003_price_submissions_accepted_captured_at.sql`
+- Create: `tests/worker-migration-contract.test.mjs`
 - Modify: `worker/index.js:353-367`
 
 - [ ] **Step 1: Write failing completeness and merge tests**
@@ -129,7 +133,13 @@ test('merge fills missing fields without replacing valid uploaded series', () =>
     }
   };
   const uploadedHourly = [{ bucketStartedAt: '2026-08-06T11:00:00.000Z', avgUnitPrice: 0.9 }];
-  const merged = mergePriceTrendMaps(fallback, { carrot: { hourly: uploadedHourly, unitPrice: 2.5 } });
+  const merged = mergePriceTrendMaps(fallback, {
+    carrot: {
+      hourly: uploadedHourly,
+      unitPrice: 2.5,
+      lastRefreshedAt: '2026-08-07T12:00:00.000Z'
+    }
+  });
   assert.deepEqual(merged.carrot.hourly, uploadedHourly);
   assert.deepEqual(merged.carrot.daily, fallback.carrot.daily);
   assert.equal(merged.carrot.unitPrice, 2.5);
@@ -137,7 +147,7 @@ test('merge fills missing fields without replacing valid uploaded series', () =>
 });
 ```
 
-Also include a case where an empty uploaded array is replaced by fallback data.
+Also include cases where a recent-only uploaded hourly array is replaced by a complete fallback and its timestamp, a complete uploaded hourly/timestamp pair is preserved, an empty uploaded array is replaced by fallback data, and the hydration path performs zero or one history query as appropriate.
 
 - [ ] **Step 2: Run the tests and verify RED**
 
@@ -156,11 +166,11 @@ Add named exports with the complete implementation:
 ```js
 const PRICE_ALERT_WINDOW_MS = 24 * REFRESH_INTERVAL_MS;
 
-function hasCompleteHourlyWindow(trend) {
-  const referenceAt = Date.parse(trend && trend.lastRefreshedAt);
-  if (!Number.isFinite(referenceAt) || !Array.isArray(trend.hourly)) return false;
+function hasCompleteHourlyAnchor(hourly, lastRefreshedAt) {
+  const referenceAt = Date.parse(lastRefreshedAt);
+  if (!Number.isFinite(referenceAt) || !Array.isArray(hourly)) return false;
   const targetAt = referenceAt - PRICE_ALERT_WINDOW_MS;
-  return trend.hourly.some((point) => {
+  return hourly.some((point) => {
     const bucketAt = Date.parse(point && point.bucketStartedAt);
     return Number.isFinite(bucketAt) && bucketAt <= targetAt;
   });
@@ -171,7 +181,7 @@ export function trendMapNeedsHydration(existingTrends, currentPrices) {
     if (!SEED_IDS.includes(id)) return false;
     const trend = existingTrends && existingTrends[id];
     return !trend
-      || !hasCompleteHourlyWindow(trend)
+      || !hasCompleteHourlyAnchor(trend.hourly, trend.lastRefreshedAt)
       || !Array.isArray(trend.daily) || !trend.daily.length
       || !Number.isFinite(Number(trend.unitPrice))
       || !validIsoLike(trend.lastRefreshedAt);
@@ -187,14 +197,15 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
     const existing = existingTrends && existingTrends[id] && typeof existingTrends[id] === 'object'
       ? existingTrends[id]
       : {};
-    const hourly = Array.isArray(existing.hourly) && existing.hourly.length ? existing.hourly : fallback.hourly;
+    const useExistingHourly = hasCompleteHourlyAnchor(existing.hourly, existing.lastRefreshedAt);
+    const hourly = useExistingHourly ? existing.hourly : fallback.hourly;
+    const lastRefreshedAt = useExistingHourly
+      ? existing.lastRefreshedAt
+      : fallback.lastRefreshedAt;
     const daily = Array.isArray(existing.daily) && existing.daily.length ? existing.daily : fallback.daily;
     const existingUnitPrice = Number(existing.unitPrice);
     const fallbackUnitPrice = Number(fallback.unitPrice);
     const unitPrice = Number.isFinite(existingUnitPrice) ? existingUnitPrice : fallbackUnitPrice;
-    const lastRefreshedAt = validIsoLike(existing.lastRefreshedAt)
-      ? existing.lastRefreshedAt
-      : validIsoLike(fallback.lastRefreshedAt) ? fallback.lastRefreshedAt : '';
     if (!Array.isArray(hourly) && !Array.isArray(daily) && !Number.isFinite(unitPrice) && !lastRefreshedAt) continue;
     merged[id] = {};
     if (Array.isArray(hourly) && hourly.length) merged[id].hourly = hourly.slice();
@@ -204,6 +215,13 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
   }
   return merged;
 }
+```
+
+Export `hydrateSnapshotTrends` for focused mock-D1 tests. Add a migration contract that requires:
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_price_submissions_accepted_captured_at
+  ON price_submissions (accepted, captured_at DESC);
 ```
 
 The merge must create new objects/arrays by selection and must not mutate either input map.
@@ -237,8 +255,10 @@ Expected: all tests and checks pass.
 - [ ] **Step 6: Commit Task 1**
 
 ```bash
-git add worker/index.js tests/worker-trend-hydration.test.mjs
-git commit -m "fix: hydrate partial price alert trends"
+git add worker/index.js tests/worker-trend-hydration.test.mjs \
+  migrations/0003_price_submissions_accepted_captured_at.sql \
+  tests/worker-migration-contract.test.mjs
+git commit -m "fix: harden price trend hydration"
 ```
 
 ### Task 2: Version critical frontend assets
@@ -300,6 +320,7 @@ git commit -m "fix: version price alert frontend assets"
 
 **Files:**
 - Verify: `worker/index.js`
+- Verify: `migrations/0003_price_submissions_accepted_captured_at.sql`
 - Verify: `web/index.html`
 - Verify: `web/app.js`
 - Verify: `web/price-alert-utils.js`
@@ -331,15 +352,17 @@ Use the previously selected local-merge workflow. Verify the merged `main` with 
 - [ ] **Step 4: Deploy the verified `main`**
 
 ```bash
+npx wrangler d1 migrations apply hyb-farm-dashboard-db --remote
 npx wrangler deploy
 npx wrangler deployments status
 ```
 
-Expected: the new version receives 100% traffic.
+Expected: migration `0003` applies successfully and the new Worker version receives 100% traffic.
 
 - [ ] **Step 5: Verify production data and UI**
 
 - Confirm `/api/default-prices` returns non-empty hourly arrays for current crops.
+- Confirm those hourly arrays contain a point at or before `lastRefreshedAt - 24 hours`.
 - Confirm custom-domain `index.html` includes the shared version token.
 - Confirm key online asset bodies match the deployed local files.
 - Load the custom domain in Chrome and verify the new 8%/20% settings plus a top announcement for qualifying complete 24-hour positive changes.
