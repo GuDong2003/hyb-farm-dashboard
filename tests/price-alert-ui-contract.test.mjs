@@ -22,7 +22,7 @@ test('application keeps history anomalies fixed while live alerts use shared uti
   assert.match(app, /const HISTORY_ANOMALY_THRESHOLD = 20;/);
   assert.match(app, /const PRICE_ALERT = window\.HYBPriceAlert;/);
   assert.match(app, /const PRICE_CHANGE_ALERT_WINDOW = PRICE_ALERT\.WINDOW;/);
-  assert.match(app, /PRICE_ALERT\.evaluate\(\s*rows,\s*state\.config\.priceAlertNormalThreshold,\s*state\.config\.priceAlertAnomalyThreshold\s*\)\.highest/);
+  assert.match(app, /function priceAlertSummary\(rows\)\s*\{[\s\S]*?PRICE_ALERT\.evaluate\(\s*rows \|\| computeRows\(\),\s*state\.config\.priceAlertNormalThreshold,\s*state\.config\.priceAlertAnomalyThreshold\s*\)/);
 });
 
 test('application persists alert configuration and transient modal state', () => {
@@ -58,6 +58,23 @@ test('settings expose escaped live status feedback and keep in-app alerts passiv
   assert.match(inAppHandler, /state\.config\.inAppPriceAlerts = inAppPriceAlerts\.checked;/);
   assert.match(inAppHandler, /saveState\(\);\s*render\(\);/);
   assert.doesNotMatch(inAppHandler, /(maybeNotifyPriceRise|showPriceAlert|openPriceAlert|dispatch)/);
+});
+
+test('application renders a shared clickable announcement and price-specific alert dialog', () => {
+  assert.match(app, /data-price-alert-open/);
+  assert.match(app, /共 \$\{summary\.total\} 种达标/);
+  assert.match(app, /data-price-alert-backdrop/);
+  assert.match(app, /class="price-alert-modal" role="dialog" aria-modal="true" aria-labelledby="priceAlertTitle"/);
+  assert.match(app, /id="priceAlertTitle">24h 价格上涨提醒<\/h2>/);
+  assert.match(app, /今日不再提醒上述作物/);
+  assert.match(app, /item\.severity === 'anomaly'/);
+});
+
+test('application deduplicates and suppresses popup batches through shared utilities', () => {
+  assert.match(app, /PRICE_ALERT\.batchKey/);
+  assert.match(app, /PRICE_ALERT\.unsuppressedItems/);
+  assert.match(app, /PRICE_ALERT\.addSuppressedCrops/);
+  assert.match(app, /priceAlertModalSeedIds/);
 });
 
 test('hidden toggle inputs retain a visible keyboard focus indicator', () => {

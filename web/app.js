@@ -516,7 +516,7 @@
     await putSnapshot(snapshot);
     await refreshCachedLocalHistory();
     saveState();
-    maybeNotifyPriceRise();
+    handlePriceAlertsForNewData();
     if (state.config.autoUploadPrices) queueCloudSubmission(snapshot);
   }
 
@@ -546,7 +546,7 @@
         state.config.source = 'shop';
         state.status = `使用云端默认价格：${formatTime(state.lastImportedAt)}。`;
         saveState();
-        maybeNotifyPriceRise();
+        handlePriceAlertsForNewData();
         changed = true;
       }
     } catch (_) {
@@ -1027,19 +1027,116 @@
     }, null);
   }
 
-  function bestPriceRiseRow(rows) {
-    const highest = PRICE_ALERT.evaluate(
-      rows,
+  function priceAlertSummary(rows) {
+    return PRICE_ALERT.evaluate(
+      rows || computeRows(),
       state.config.priceAlertNormalThreshold,
       state.config.priceAlertAnomalyThreshold
-    ).highest;
-    return highest ? highest.row : null;
+    );
   }
 
-  function topPriceRiseAlert(rows) {
-    const best = bestPriceRiseRow(rows);
-    if (!best) return '';
-    return `<div class="top-alert" title="${escapeHtml(priceAlertRateTitle(best))}"><span class="top-alert-label">24h 涨幅提醒</span><strong>${escapeHtml(best.seed.name)}</strong><span>${formatSignedPercent(best.priceAlertRate)}</span><span>${formatUsd(best.price)}</span></div>`;
+  function topPriceRiseAlert(summary) {
+    if (!summary || !summary.items.length) return '';
+    const highest = summary.highest;
+    const severityLabel = highest.severity === 'anomaly' ? '异常' : '普通';
+    return `<button type="button" class="top-alert ${highest.severity}" data-price-alert-open title="查看全部 ${summary.total} 种 24h 价格上涨提醒"><span class="top-alert-label">24h ${severityLabel}</span><strong>${escapeHtml(highest.name)}</strong><span>${formatSignedPercent(highest.rate)}</span><span>共 ${summary.total} 种达标</span></button>`;
+  }
+
+  function priceAlertModalItems(summary) {
+    const selectedIds = new Set((state.priceAlertModalSeedIds || []).map(String));
+    return summary && Array.isArray(summary.items)
+      ? summary.items.filter((item) => selectedIds.has(String(item.seedId)))
+      : [];
+  }
+
+  function openPriceAlertModal(items, manual) {
+    const selectedIds = [...new Set((Array.isArray(items) ? items : [])
+      .filter((item) => item && item.seedId !== null && item.seedId !== undefined && String(item.seedId) !== '')
+      .map((item) => String(item.seedId)))];
+    if (!selectedIds.length) return false;
+    clearCropTrendModalState();
+    state.priceAlertModalSeedIds = selectedIds;
+    state.priceAlertModalManual = Boolean(manual);
+    state.priceAlertMuteOnClose = false;
+    return true;
+  }
+
+  function maybeOpenPriceAlertModal(summary) {
+    if (!state.config.inAppPriceAlerts || !summary || !summary.items.length) return false;
+    const batchKey = PRICE_ALERT.batchKey(state.lastImportedAt, summary.items);
+    if (state.config.inAppPriceAlertKey === batchKey) return false;
+    state.config.inAppPriceAlertKey = batchKey;
+    const items = PRICE_ALERT.unsuppressedItems(
+      summary.items,
+      state.config.suppressedPriceAlerts,
+      Date.now()
+    );
+    saveState();
+    return openPriceAlertModal(items, false);
+  }
+
+  function closePriceAlertModal() {
+    if (!(state.priceAlertModalSeedIds || []).length) return;
+    const displayedIds = priceAlertModalItems(priceAlertSummary()).map((item) => item.seedId);
+    if (state.priceAlertMuteOnClose && displayedIds.length) {
+      state.config.suppressedPriceAlerts = PRICE_ALERT.addSuppressedCrops(
+        state.config.suppressedPriceAlerts,
+        displayedIds,
+        Date.now()
+      );
+      saveState();
+    }
+    state.priceAlertModalSeedIds = [];
+    state.priceAlertModalManual = false;
+    state.priceAlertMuteOnClose = false;
+    render();
+  }
+
+  function renderPriceAlertModal(summary) {
+    const items = priceAlertModalItems(summary);
+    if (!items.length) return '';
+    const anomalyCount = items.filter((item) => item.severity === 'anomaly').length;
+    const normalCount = items.length - anomalyCount;
+    const description = state.priceAlertModalManual
+      ? '当前展示全部达到阈值的作物。'
+      : '以下作物在最新一批价格中达到提醒阈值。';
+    return `
+      <div class="price-alert-backdrop" data-price-alert-backdrop>
+        <section class="price-alert-modal" role="dialog" aria-modal="true" aria-labelledby="priceAlertTitle" aria-describedby="priceAlertDescription">
+          <header class="price-alert-modal-head">
+            <div>
+              <h2 id="priceAlertTitle">24h 价格上涨提醒</h2>
+              <p id="priceAlertDescription">异常 ${anomalyCount} 种 · 普通 ${normalCount} 种。${description}</p>
+            </div>
+            <button class="price-alert-close" type="button" data-price-alert-close aria-label="关闭价格上涨提醒" title="关闭">×</button>
+          </header>
+          <div class="price-alert-list" role="list">
+            ${items.map((item) => {
+              const anomaly = item.severity === 'anomaly';
+              return `
+                <div class="price-alert-item ${item.severity}" role="listitem">
+                  <img class="price-alert-item-image" src="./assets/crops/${escapeHtml(item.seedId)}.png" alt="" onerror="this.style.display='none'" />
+                  <strong class="price-alert-item-name">${escapeHtml(item.name)}</strong>
+                  <span class="price-alert-severity ${item.severity}">${anomaly ? '异常' : '普通'}</span>
+                  <span class="price-alert-item-rate">${formatSignedPercent(item.rate)}</span>
+                  <span class="price-alert-item-price">${formatUsd(item.price)}</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+          <footer class="price-alert-modal-footer">
+            <label class="price-alert-mute"><input type="checkbox" data-price-alert-mute ${state.priceAlertMuteOnClose ? 'checked' : ''} />今日不再提醒上述作物</label>
+            <button class="btn primary" type="button" data-price-alert-close>知道了</button>
+          </footer>
+        </section>
+      </div>
+    `;
+  }
+
+  function handlePriceAlertsForNewData() {
+    const summary = priceAlertSummary();
+    maybeNotifyPriceRise(summary, false);
+    maybeOpenPriceAlertModal(summary);
   }
 
   function totalLands() {
@@ -1049,9 +1146,12 @@
   function render() {
     const app = document.getElementById('app');
     const rows = computeRows();
+    const alertSummary = priceAlertSummary(rows);
     const bestRevenue = bestBy(rows, 'totalDaily');
     const bestExpDay = bestBy(rows, 'expTotalDaily');
     const bestExpHour = bestBy(rows, 'expHourly');
+    const priceAlertModal = renderPriceAlertModal(alertSummary);
+    const cropTrendModalVisible = state.view === 'table' && Boolean(SEED_BY_ID[state.trendModalSeedId]);
     app.innerHTML = `
       <div class="app">
         <header class="topbar">
@@ -1060,7 +1160,7 @@
             <button data-view="table" class="${state.view === 'table' ? 'active' : ''}">收益表</button>
             <button data-view="settings" class="${state.view === 'settings' ? 'active' : ''}">设置</button>
           </nav>
-          ${topPriceRiseAlert(rows)}
+          ${topPriceRiseAlert(alertSummary)}
           <nav class="topbar-actions" aria-label="项目链接与主题">
             <button class="topbar-link history-link ${state.view === 'history' ? 'active' : ''}" data-view="history" title="查看价格快照历史">历史 ${historyNavigationCount()} 条</button>
             <a class="card-link" href="https://card.gudong226.com/" target="_blank" rel="noopener noreferrer" aria-label="打开 HYB 卡牌收益计算" title="HYB 卡牌收益计算">
@@ -1077,9 +1177,10 @@
         <main class="main">
           ${state.view === 'settings' ? renderSettings() : state.view === 'history' ? renderHistoryView() : renderTableView(rows, bestRevenue, bestExpDay, bestExpHour)}
         </main>
+        ${priceAlertModal}
       </div>
     `;
-    document.body.classList.toggle('modal-open', state.view === 'table' && Boolean(state.trendModalSeedId));
+    document.body.classList.toggle('modal-open', cropTrendModalVisible || Boolean(priceAlertModal));
     bindEvents();
   }
 
@@ -1605,13 +1706,17 @@
     `;
   }
 
-  function closeCropTrendModal() {
-    if (!state.trendModalSeedId) return;
+  function clearCropTrendModalState() {
     state.trendModalSeedId = '';
     state.trendModalWindow = '';
     state.trendHideAnomalies = false;
     state.trendHidePoints = false;
     state.trendModalScrollLeft = null;
+  }
+
+  function closeCropTrendModal() {
+    if (!state.trendModalSeedId) return;
+    clearCropTrendModalState();
     render();
   }
 
@@ -1940,6 +2045,23 @@
     document.querySelectorAll('[data-action]').forEach((button) => {
       button.addEventListener('click', handleAction);
     });
+    document.querySelectorAll('[data-price-alert-open]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const summary = priceAlertSummary();
+        if (openPriceAlertModal(summary.items, true)) render();
+      });
+    });
+    document.querySelectorAll('[data-price-alert-close]').forEach((button) => {
+      button.addEventListener('click', closePriceAlertModal);
+    });
+    const priceAlertMute = document.querySelector('[data-price-alert-mute]');
+    if (priceAlertMute) priceAlertMute.addEventListener('change', () => {
+      state.priceAlertMuteOnClose = priceAlertMute.checked;
+    });
+    const priceAlertBackdrop = document.querySelector('[data-price-alert-backdrop]');
+    if (priceAlertBackdrop) priceAlertBackdrop.addEventListener('click', (event) => {
+      if (event.target === priceAlertBackdrop) closePriceAlertModal();
+    });
     document.querySelectorAll('[data-history-record]').forEach((button) => {
       button.addEventListener('click', () => {
         const key = String(button.dataset.historyRecord || '');
@@ -1996,7 +2118,7 @@
         state.priceOrigin = 'manual';
         state.status = '已手动更新当前价格。';
         saveState();
-        maybeNotifyPriceRise();
+        handlePriceAlertsForNewData();
         render();
       });
     });
@@ -2230,7 +2352,7 @@
     state.config.browserPriceAlerts = true;
     state.status = '已开启涨幅异常通知。';
     saveState();
-    maybeNotifyPriceRise(true);
+    maybeNotifyPriceRise(priceAlertSummary(), true);
   }
 
   function savePriceAlertThresholds(normalValue, anomalyValue) {
@@ -2246,12 +2368,13 @@
     return true;
   }
 
-  function maybeNotifyPriceRise(force) {
+  function maybeNotifyPriceRise(summary, force) {
     if (!state.config.browserPriceAlerts) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    const row = bestPriceRiseRow(computeRows());
-    if (!row) return;
-    const rate = Number(row.priceAlertRate);
+    const highest = summary && summary.highest;
+    if (!highest) return;
+    const row = highest.row;
+    const rate = highest.rate;
     const capturedAt = Number(state.lastImportedAt) || 0;
     const alertKey = `${row.seed.id}:${capturedAt}:${formatNumber(rate, 2)}:${formatNumber(row.price, 5)}`;
     if (!force && state.config.notifiedPriceAlertKey === alertKey) return;
@@ -2325,7 +2448,9 @@
   async function init() {
     installPriceBridgeListener();
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && state.trendModalSeedId) closeCropTrendModal();
+      if (event.key !== 'Escape') return;
+      if ((state.priceAlertModalSeedIds || []).length) closePriceAlertModal();
+      else if (state.trendModalSeedId) closeCropTrendModal();
     });
     await importSnapshotFromHash();
     installThemeListener();
