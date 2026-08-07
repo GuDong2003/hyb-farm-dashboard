@@ -259,24 +259,26 @@ function validIsoLike(value) {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
 }
 
+function hasCompleteHourlyAnchor(hourly, lastRefreshedAt) {
+  if (!Array.isArray(hourly) || !validIsoLike(lastRefreshedAt)) return false;
+  const targetAt = Date.parse(lastRefreshedAt) - 24 * REFRESH_INTERVAL_MS;
+  return hourly.some((point) => (
+    validIsoLike(point && point.bucketStartedAt)
+    && Date.parse(point.bucketStartedAt) <= targetAt
+  ));
+}
+
 export function trendMapNeedsHydration(existingTrends, currentPrices) {
   for (const id of SEED_IDS) {
     if (!Object.prototype.hasOwnProperty.call(currentPrices || {}, id)) continue;
     const trend = existingTrends && existingTrends[id];
-    const refreshedAt = trend && validIsoLike(trend.lastRefreshedAt)
-      ? Date.parse(trend.lastRefreshedAt)
-      : Number.NaN;
-    const hasHourlyAnchor = trend && Array.isArray(trend.hourly) && trend.hourly.some((point) => (
-      validIsoLike(point && point.bucketStartedAt)
-      && Date.parse(point.bucketStartedAt) <= refreshedAt - 24 * REFRESH_INTERVAL_MS
-    ));
     if (
-      !Number.isFinite(refreshedAt)
+      !trend
+      || !validIsoLike(trend.lastRefreshedAt)
       || !Number.isFinite(trend && trend.unitPrice)
-      || !trend
       || !Array.isArray(trend.daily)
       || !trend.daily.length
-      || !hasHourlyAnchor
+      || !hasCompleteHourlyAnchor(trend.hourly, trend.lastRefreshedAt)
     ) return true;
   }
   return false;
@@ -290,21 +292,25 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
     if ((!fallback || typeof fallback !== 'object') && (!existing || typeof existing !== 'object')) continue;
 
     const trend = {};
-    for (const seriesKey of ['hourly', 'daily']) {
-      const existingSeries = existing && existing[seriesKey];
-      const fallbackSeries = fallback && fallback[seriesKey];
-      const series = Array.isArray(existingSeries) && existingSeries.length ? existingSeries : fallbackSeries;
-      if (Array.isArray(series)) trend[seriesKey] = series.slice();
-    }
+    const lastRefreshedAt = existing && validIsoLike(existing.lastRefreshedAt)
+      ? existing.lastRefreshedAt
+      : fallback && fallback.lastRefreshedAt;
+    const existingHourly = existing && existing.hourly;
+    const hourly = hasCompleteHourlyAnchor(existingHourly, lastRefreshedAt)
+      ? existingHourly
+      : fallback && fallback.hourly;
+    const existingDaily = existing && existing.daily;
+    const daily = Array.isArray(existingDaily) && existingDaily.length
+      ? existingDaily
+      : fallback && fallback.daily;
+    if (Array.isArray(hourly)) trend.hourly = hourly.slice();
+    if (Array.isArray(daily)) trend.daily = daily.slice();
 
     const unitPrice = existing && Number.isFinite(existing.unitPrice)
       ? existing.unitPrice
       : fallback && fallback.unitPrice;
     if (Number.isFinite(unitPrice)) trend.unitPrice = unitPrice;
 
-    const lastRefreshedAt = existing && validIsoLike(existing.lastRefreshedAt)
-      ? existing.lastRefreshedAt
-      : fallback && fallback.lastRefreshedAt;
     if (validIsoLike(lastRefreshedAt)) trend.lastRefreshedAt = lastRefreshedAt;
 
     merged[id] = trend;

@@ -14,7 +14,7 @@ The user's Chrome session also continued loading the pre-alert `index.html` and 
 ## Goals
 
 - Produce a usable complete rolling 24-hour alert rate when the latest submission contains only current prices or partial trend objects.
-- Preserve valid trend data supplied by an uploader and fill only missing series or metadata from accepted cloud history.
+- Preserve complete hourly trend data and other valid fields supplied by an uploader, while filling incomplete series or missing metadata from accepted cloud history.
 - Keep the existing ordinary/anomaly thresholds, announcement behavior, popup behavior, and table calculation unchanged.
 - Make a newly deployed frontend version use distinct critical asset URLs so browser and edge caches cannot silently reuse the previous application bundle.
 - Cover both regressions with automated tests before implementation.
@@ -30,7 +30,7 @@ The user's Chrome session also continued loading the pre-alert `index.html` and 
 
 ### 1. Worker-side per-field hydration plus versioned asset URLs — selected
 
-Always build a fallback trend map from recent accepted submissions when the snapshot does not already contain usable series for every crop. Merge per crop and per field: retain valid uploaded `hourly`, `daily`, `unitPrice`, and `lastRefreshedAt` values, while filling absent or empty fields from the synthesized map. Reference the critical CSS and JavaScript assets with one deployment version query token in `index.html`.
+Always build a fallback trend map from recent accepted submissions when the snapshot does not already contain usable series for every crop. Merge per crop and per field: retain uploaded `hourly` only when it contains a complete 24-hour anchor relative to the final refresh timestamp, retain non-empty `daily` plus valid `unitPrice` and `lastRefreshedAt` values, and fill incomplete or missing fields from the synthesized map. Reference the critical CSS and JavaScript assets with one deployment version query token in `index.html`.
 
 This keeps the latest snapshot self-contained for every dashboard client, reuses the existing history-to-bucket implementation, and fixes automated uploads without coupling the browser alert calculation to a second API response.
 
@@ -48,8 +48,8 @@ Uploaders could be required to send 25 valid hourly buckets. This is stricter bu
 2. `hydrateSnapshotTrends()` evaluates actual trend usability rather than counting crop keys. A usable hourly series must contain a valid bucket at or before `lastRefreshedAt - 24 hours`; a merely non-empty recent series is still incomplete for this alert.
 3. When any crop lacks that complete hourly anchor, a daily series, current unit price, or refresh timestamp, the Worker reads the latest 500 accepted submissions and builds fallback hourly and daily buckets with the existing `buildTrendMapFromRows()` path.
 4. A pure merge helper combines the uploaded and synthesized trend maps per crop and per field:
-   - non-empty uploaded `hourly` and `daily` arrays win;
-   - missing or empty arrays use synthesized arrays;
+   - uploaded `hourly` wins only when it contains a point at or before the final `lastRefreshedAt - 24 hours`; a recent-only uploaded series uses the complete synthesized `hourly` fallback;
+   - a non-empty uploaded `daily` array wins, while a missing or empty array uses the synthesized `daily` fallback;
    - a finite uploaded `unitPrice` wins, otherwise the synthesized current price is used;
    - a valid uploaded `lastRefreshedAt` wins, otherwise the synthesized snapshot time is used.
 5. The response returns hydrated `priceTrends`. The database row is not rewritten.
@@ -68,7 +68,7 @@ The underlying files remain normal static assets; no build pipeline or service w
 - If D1 history cannot be queried, the existing Worker error behavior remains visible instead of silently fabricating an alert rate.
 - Invalid uploaded trend fields continue to be removed by `normalizePriceTrends()`.
 - Missing history produces empty synthesized series, so the frontend continues to omit the announcement rather than calculating from an incomplete window.
-- Uploaded valid series are never replaced merely because synthesized data also exists.
+- Uploaded complete hourly series and non-empty daily series are never replaced merely because synthesized data also exists; recent-only hourly series are replaced by a synthesized complete window.
 
 ## Testing
 
@@ -77,7 +77,8 @@ The underlying files remain normal static assets; no build pipeline or service w
 - A snapshot with nineteen `unitPrice`-only trend objects must not be considered fully hydrated.
 - A recent-only hourly series without a point at or before the 24-hour target must still require hydration.
 - Per-field merging must fill missing hourly/daily series and refresh time while preserving valid uploaded values.
-- An uploaded non-empty hourly series must not be overwritten by synthesized history.
+- An uploaded hourly series with a complete 24-hour anchor must not be overwritten by synthesized history.
+- An uploaded recent-only hourly series must use a synthesized fallback that contains the missing 24-hour anchor.
 - A truly complete existing trend map may skip the history query.
 
 ### Asset contract test

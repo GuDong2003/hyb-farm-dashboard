@@ -112,6 +112,51 @@ test('merge preserves usable existing fields and fills missing fields from fallb
   assert.deepEqual(existingTrends.carrot.daily, existingDaily);
 });
 
+test('merge replaces recent-only existing hourly history with a complete fallback', () => {
+  const existingDaily = [{ bucketStartedAt: '2026-08-06T00:00:00.000Z', avgUnitPrice: 9 }];
+  const merged = mergePriceTrendMaps({
+    carrot: {
+      hourly: [OLD_HOURLY_POINT],
+      daily: [DAILY_POINT],
+      unitPrice: 4,
+      lastRefreshedAt: REFRESHED_AT
+    }
+  }, {
+    carrot: {
+      hourly: [RECENT_HOURLY_POINT],
+      daily: existingDaily,
+      unitPrice: 7,
+      lastRefreshedAt: REFRESHED_AT
+    }
+  });
+
+  assert.deepEqual(merged.carrot, {
+    hourly: [OLD_HOURLY_POINT],
+    daily: existingDaily,
+    unitPrice: 7,
+    lastRefreshedAt: REFRESHED_AT
+  });
+  assert.equal(trendMapNeedsHydration({ carrot: merged.carrot }, { carrot: 7 }), false);
+});
+
+test('merge preserves complete existing hourly history', () => {
+  const existingHourly = [{
+    bucketStartedAt: '2026-08-06T11:00:00.000Z',
+    avgUnitPrice: 8
+  }];
+  const merged = mergePriceTrendMaps({
+    carrot: completeTrend()
+  }, {
+    carrot: {
+      ...completeTrend(7),
+      hourly: existingHourly
+    }
+  });
+
+  assert.deepEqual(merged.carrot.hourly, existingHourly);
+  assert.notEqual(merged.carrot.hourly, existingHourly);
+});
+
 test('merge replaces empty uploaded arrays with fallback series', () => {
   const fallbackHourly = [OLD_HOURLY_POINT];
   const fallbackDaily = [DAILY_POINT];

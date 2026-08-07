@@ -4,7 +4,7 @@
 
 **Goal:** Restore top price announcements for complete 24-hour rises when accepted uploads contain only current prices, and prevent newly deployed browsers from reusing obsolete critical frontend assets.
 
-**Architecture:** Keep the frontend alert calculation unchanged and repair the default snapshot at the Worker boundary. A pure per-field trend merge fills missing uploaded data from accepted submission history while preserving valid uploaded values; one shared version token on critical HTML asset references provides deterministic cache invalidation.
+**Architecture:** Keep the frontend alert calculation unchanged and repair the default snapshot at the Worker boundary. A pure per-field trend merge fills incomplete uploaded data from accepted submission history while preserving complete uploaded hourly series and other valid fields; one shared version token on critical HTML asset references provides deterministic cache invalidation.
 
 **Tech Stack:** Cloudflare Workers, D1, static HTML/CSS/JavaScript, Node.js built-in test runner, Wrangler.
 
@@ -137,7 +137,7 @@ test('merge fills missing fields without replacing valid uploaded series', () =>
 });
 ```
 
-Also include a case where an empty uploaded array is replaced by fallback data.
+Also include cases where a recent-only uploaded hourly array is replaced by a complete fallback, a complete uploaded hourly array is preserved, and an empty uploaded array is replaced by fallback data.
 
 - [ ] **Step 2: Run the tests and verify RED**
 
@@ -156,11 +156,11 @@ Add named exports with the complete implementation:
 ```js
 const PRICE_ALERT_WINDOW_MS = 24 * REFRESH_INTERVAL_MS;
 
-function hasCompleteHourlyWindow(trend) {
-  const referenceAt = Date.parse(trend && trend.lastRefreshedAt);
-  if (!Number.isFinite(referenceAt) || !Array.isArray(trend.hourly)) return false;
+function hasCompleteHourlyAnchor(hourly, lastRefreshedAt) {
+  const referenceAt = Date.parse(lastRefreshedAt);
+  if (!Number.isFinite(referenceAt) || !Array.isArray(hourly)) return false;
   const targetAt = referenceAt - PRICE_ALERT_WINDOW_MS;
-  return trend.hourly.some((point) => {
+  return hourly.some((point) => {
     const bucketAt = Date.parse(point && point.bucketStartedAt);
     return Number.isFinite(bucketAt) && bucketAt <= targetAt;
   });
@@ -171,7 +171,7 @@ export function trendMapNeedsHydration(existingTrends, currentPrices) {
     if (!SEED_IDS.includes(id)) return false;
     const trend = existingTrends && existingTrends[id];
     return !trend
-      || !hasCompleteHourlyWindow(trend)
+      || !hasCompleteHourlyAnchor(trend.hourly, trend.lastRefreshedAt)
       || !Array.isArray(trend.daily) || !trend.daily.length
       || !Number.isFinite(Number(trend.unitPrice))
       || !validIsoLike(trend.lastRefreshedAt);
@@ -187,14 +187,16 @@ export function mergePriceTrendMaps(fallbackTrends, existingTrends) {
     const existing = existingTrends && existingTrends[id] && typeof existingTrends[id] === 'object'
       ? existingTrends[id]
       : {};
-    const hourly = Array.isArray(existing.hourly) && existing.hourly.length ? existing.hourly : fallback.hourly;
+    const lastRefreshedAt = validIsoLike(existing.lastRefreshedAt)
+      ? existing.lastRefreshedAt
+      : validIsoLike(fallback.lastRefreshedAt) ? fallback.lastRefreshedAt : '';
+    const hourly = hasCompleteHourlyAnchor(existing.hourly, lastRefreshedAt)
+      ? existing.hourly
+      : fallback.hourly;
     const daily = Array.isArray(existing.daily) && existing.daily.length ? existing.daily : fallback.daily;
     const existingUnitPrice = Number(existing.unitPrice);
     const fallbackUnitPrice = Number(fallback.unitPrice);
     const unitPrice = Number.isFinite(existingUnitPrice) ? existingUnitPrice : fallbackUnitPrice;
-    const lastRefreshedAt = validIsoLike(existing.lastRefreshedAt)
-      ? existing.lastRefreshedAt
-      : validIsoLike(fallback.lastRefreshedAt) ? fallback.lastRefreshedAt : '';
     if (!Array.isArray(hourly) && !Array.isArray(daily) && !Number.isFinite(unitPrice) && !lastRefreshedAt) continue;
     merged[id] = {};
     if (Array.isArray(hourly) && hourly.length) merged[id].hourly = hourly.slice();
