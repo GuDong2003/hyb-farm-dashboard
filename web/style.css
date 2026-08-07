@@ -337,7 +337,7 @@ tr:hover td { background: var(--row-hover); }
 .green { color: var(--green); font-weight: 800; }
 .red { color: var(--red); font-weight: 800; }
 .muted { color: var(--muted); }
-.price-input { width: 90px; height: 28px; padding: 0 7px; border: 1px solid var(--control-border); border-radius: 5px; text-align: right; background: var(--control-bg); color: var(--text); }
+.price-input { width: 90px; height: 28px; padding: 0 24px 0 7px; border: 1px solid var(--control-border); border-radius: 5px; text-align: right; background: var(--control-bg); color: var(--text); }
 .price-delta { display: inline-grid; grid-template-columns: 12px minmax(0, 1fr); align-items: center; column-gap: 4px; width: 72px; font-weight: 850; font-variant-numeric: tabular-nums; }
 .price-delta-arrow { text-align: center; }
 .price-delta-value, .price-delta-percent { text-align: right; }

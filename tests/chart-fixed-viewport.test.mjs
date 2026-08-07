@@ -87,3 +87,7 @@ test('tooltip is populated and positioned from the active SVG point', () => {
   assert.match(appSource, /tooltip\.style\.top/);
   assert.match(appSource, /function hideTrendPointTooltip\(chartWrap\)/);
 });
+
+test('price input reserves space for native increment controls', () => {
+  assert.match(styleSource, /\.price-input\s*\{[^}]*padding:\s*0 24px 0 7px;/s);
+});
