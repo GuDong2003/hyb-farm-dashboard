@@ -430,7 +430,7 @@ tr:hover td { background: var(--row-hover); }
 .history-line-head, .history-line-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
 .history-line-head strong { color: var(--text); font-size: 13px; }
 .history-line-title { display: flex; align-items: center; gap: 8px; }
-.history-window-select { height: 26px; padding: 0 24px 0 8px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--text); background: var(--control-bg); cursor: pointer; font-size: 12px; }
+.history-date-picker { height: 26px; padding: 0 6px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--text); background: var(--control-bg); cursor: pointer; font-size: 12px; }
 .history-line-head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .history-chart-toggle { flex: none; height: 26px; padding: 0 9px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--muted); background: var(--control-bg); cursor: pointer; font-size: 12px; }
 .history-chart-toggle:hover, .history-chart-toggle:focus-visible { color: var(--text); background: var(--control-hover); }
@@ -456,8 +456,12 @@ tr:hover td { background: var(--row-hover); }
 .history-line-point-wrap { cursor: pointer; }
 .history-line-point-hit { fill: transparent; stroke: transparent; }
 .history-line-point-hit:focus { outline: none; }
-.history-line-point { fill: var(--surface); stroke: var(--blue); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; transition: transform .12s ease, fill .12s ease, stroke-width .12s ease; pointer-events: none; }
-.history-line-point-wrap:hover .history-line-point, .history-line-point-wrap:focus-within .history-line-point { fill: var(--blue); stroke-width: 2; transform: scale(1.65); }
+.history-line-point { fill: var(--surface); stroke: var(--blue); stroke-width: 1.5; opacity: 0; transform-box: fill-box; transform-origin: center; transition: opacity .12s ease, transform .12s ease, fill .12s ease, stroke-width .12s ease; pointer-events: none; }
+.history-line-point-wrap.crosshair-active .history-line-point { opacity: 1; fill: var(--blue); stroke-width: 2; transform: scale(1.65); }
+.history-line-crosshair { opacity: 0; pointer-events: none; }
+.history-line-crosshair.visible { opacity: 1; }
+.history-line-crosshair > line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; opacity: .82; }
+.history-line-crosshair-point line { stroke: var(--blue); stroke-width: 1.8; stroke-linecap: round; }
 .history-line-point-tooltip { position: absolute; z-index: 3; display: grid; align-content: center; width: 154px; height: 42px; padding: 5px 9px; border: 1px solid var(--control-border); border-radius: 6px; box-sizing: border-box; pointer-events: none; opacity: 0; color: var(--text); background: var(--surface); box-shadow: 0 3px 6px rgba(0, 0, 0, .24); transition: opacity .12s ease; }
 .history-line-point-tooltip.visible { opacity: 1; }
 .history-line-point-tooltip strong, .history-line-point-tooltip span { overflow: hidden; font-variant-numeric: tabular-nums; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }

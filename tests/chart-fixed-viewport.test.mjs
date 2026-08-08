@@ -31,14 +31,15 @@ test('mouse and touch pointer dragging shift the fixed time anchor', () => {
   assert.match(appSource, /setPointerCapture\(event\.pointerId\)/);
 });
 
-test('wheel gestures zoom adaptive windows and retain time navigation for short windows', () => {
+test('wheel gestures zoom the unified timeline around the cursor', () => {
   assert.match(appSource, /CHART_TIME\.wheelNavigationDelta\(event\.deltaX, event\.deltaY\)/);
-  assert.match(appSource, /CHART_TIME\.navigationStepMilliseconds\(model\.chartWindow/);
-  assert.match(appSource, /CHART_TIME\.shiftVisibleEndBySteps\(/);
-  assert.match(appSource, /if \(isAdaptiveTrendWindow\(model\.chartWindow\)\)/);
-  assert.match(appSource, /const pointerRatio =/);
+  assert.match(appSource, /const maxWindowMs = historySpan;/);
+  assert.match(appSource, /const minWindowMs = Math\.min\(CHART_TIME\.HOUR_MS, maxWindowMs\);/);
+  assert.match(appSource, /let pointerRatio =/);
+  assert.match(appSource, /if \(atLeftEdge && !atRightEdge\) pointerRatio = 0;/);
+  assert.match(appSource, /if \(atRightEdge && !atLeftEdge\) pointerRatio = 1;/);
   assert.match(appSource, /const nextWindowMs =/);
-  assert.match(appSource, /state\.trendModalVisibleWindowMs = nextWindowMs >= maxWindowMs \? null : nextWindowMs;/);
+  assert.match(appSource, /state\.trendModalVisibleWindowMs = nextWindowMs;/);
   assert.match(appSource, /if \(!chartWrap\.hasAttribute\('data-history-chart-drag'\)\) return;/);
   assert.match(appSource, /addEventListener\('wheel',[\s\S]*?\{ passive: false \}\)/);
 });
@@ -69,20 +70,18 @@ test('trend chart keeps a fixed axis column while the y-axis animates', () => {
   assert.match(styleSource, /\.history-line-chart-layout\s*\{[^}]*grid-template-columns:\s*86px\s+minmax\(0, 1fr\);/s);
 });
 
-test('chart window changes preserve the current viewport center across detail levels', () => {
-  assert.match(appSource, /function preserveTrendChartCenterForWindow\(nextWindowValue\)/);
+test('trend popup replaces range selection with a Beijing date picker', () => {
+  assert.match(appSource, /function renderChartDatePicker\(model\)/);
+  assert.match(appSource, /data-trend-date/);
+  assert.match(appSource, /function beijingDateValue\(timestampValue\)/);
+  assert.match(appSource, /function beijingDateStart\(value\)/);
+  assert.doesNotMatch(appSource, /data-trend-window/);
+  assert.doesNotMatch(appSource, /function renderChartWindowSelect\(/);
+  assert.doesNotMatch(appSource, /preserveTrendChartCenterForWindow/);
   assert.match(appSource, /trendModalCenterAt: null/);
-  assert.match(appSource, /const rememberedCenter = Number\(state\.trendModalCenterAt\);/);
   assert.match(appSource, /state\.trendModalCenterAt = \(range\.start \+ range\.end\) \/ 2;/);
-  assert.match(appSource, /state\.trendModalCenterAt = state\.trendModalVisibleEnd - model\.visibleWindowMs \/ 2;/);
-  assert.match(appSource, /trendModalVisibleWindowMs: null/);
-  assert.match(appSource, /const currentIsDaily = \['7d', '30d', 'all'\]\.includes\(model\.chartWindow\);/);
-  assert.match(appSource, /const nextIsHourly = \['1h', '6h', '12h', '24h'\]\.includes\(normalizeChartWindow\(nextWindowValue\)\);/);
-  assert.match(appSource, /const dailyPoints = historyPointsInRange\(model\.timelinePoints, currentRange\);/);
-  assert.match(appSource, /const currentRange = historyChartRange\(model, state\.trendModalVisibleEnd\);/);
-  assert.match(appSource, /CHART_TIME\.clampVisibleEnd\(\s*model\.minTime,\s*model\.maxTime,\s*nextWindowMs,/s);
-  assert.match(appSource, /const preservedVisibleEnd = preserveTrendChartCenterForWindow\(nextWindow\);/);
-  assert.doesNotMatch(appSource, /state\.trendModalVisibleEnd = null;\s*render\(\);/);
+  assert.match(appSource, /const selectedStart = beijingDateStart\(trendDatePicker\.value\);/);
+  assert.match(appSource, /state\.trendModalVisibleEnd = CHART_TIME\.clampVisibleEnd\(/);
 });
 
 test('chart keeps visible raw anomaly markers inside the y-axis domain', () => {
@@ -121,6 +120,15 @@ test('all history enables wheel interaction and gains dragging after zoom', () =
   assert.match(appSource, /const draggable = Boolean\(model\.visibleWindowMs && model\.maxTime - model\.minTime > model\.visibleWindowMs\);/);
   assert.match(appSource, /const interactive = Boolean\(model\.maxTime > model\.minTime && \(draggable \|\| isAdaptiveTrendWindow\(model\.chartWindow\)\)\);/);
   assert.match(appSource, /chartWrap\.classList\.toggle\('draggable', draggable\);/);
+});
+
+test('anomaly details and crosshair are gated by the zoom level', () => {
+  assert.match(appSource, /showAnomalyDetails: visibleWindowMs <= CHART_TIME\.DAY_MS/);
+  assert.match(appSource, /const visibleEvents = model\.showAnomalyDetails && !model\.hideAnomalies/);
+  assert.match(appSource, /data-history-crosshair/);
+  assert.match(appSource, /function showTrendCrosshair\(chartWrap, point\)/);
+  assert.match(appSource, /function nearestTrendPoint\(chartWrap, clientX\)/);
+  assert.match(styleSource, /\.history-line-crosshair\.visible\s*\{[^}]*opacity: 1;/s);
 });
 
 test('adaptive trend gaps use dashed connectors without changing the short-window path', () => {
