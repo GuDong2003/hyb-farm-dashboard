@@ -1867,11 +1867,21 @@
     if (!Number.isFinite(model.minTime) || !Number.isFinite(model.maxTime) || model.maxTime <= model.minTime) return null;
     const currentRange = historyChartRange(model, state.trendModalVisibleEnd);
     const rememberedCenter = Number(state.trendModalCenterAt);
-    const center = Number.isFinite(rememberedCenter)
+    let center = Number.isFinite(rememberedCenter)
       ? rememberedCenter
       : (Number(currentRange.start) + Number(currentRange.end)) / 2;
     const nextWindowMs = chartWindowMilliseconds(nextWindowValue);
     if (!Number.isFinite(center) || !Number.isFinite(nextWindowMs) || nextWindowMs <= 0) return null;
+    const currentIsDaily = ['7d', '30d', 'all'].includes(model.chartWindow);
+    const nextIsHourly = ['1h', '6h', '12h', '24h'].includes(normalizeChartWindow(nextWindowValue));
+    if (currentIsDaily && nextIsHourly) {
+      const dailyPoints = historyPointsInRange(model.timelinePoints, currentRange);
+      const anchor = dailyPoints.reduce((closest, point) => {
+        if (!closest || Math.abs(Number(point.capturedAt) - center) < Math.abs(Number(closest.capturedAt) - center)) return point;
+        return closest;
+      }, null);
+      if (anchor && Number.isFinite(Number(anchor.capturedAt))) center = Number(anchor.capturedAt);
+    }
     return CHART_TIME.clampVisibleEnd(
       model.minTime,
       model.maxTime,

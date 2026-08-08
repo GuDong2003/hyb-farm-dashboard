@@ -71,6 +71,9 @@ test('chart window changes preserve the current viewport center across detail le
   assert.match(appSource, /const rememberedCenter = Number\(state\.trendModalCenterAt\);/);
   assert.match(appSource, /state\.trendModalCenterAt = \(range\.start \+ range\.end\) \/ 2;/);
   assert.match(appSource, /state\.trendModalCenterAt = state\.trendModalVisibleEnd - chartWindowMilliseconds\(model\.chartWindow\) \/ 2;/);
+  assert.match(appSource, /const currentIsDaily = \['7d', '30d', 'all'\]\.includes\(model\.chartWindow\);/);
+  assert.match(appSource, /const nextIsHourly = \['1h', '6h', '12h', '24h'\]\.includes\(normalizeChartWindow\(nextWindowValue\)\);/);
+  assert.match(appSource, /const dailyPoints = historyPointsInRange\(model\.timelinePoints, currentRange\);/);
   assert.match(appSource, /const currentRange = historyChartRange\(model, state\.trendModalVisibleEnd\);/);
   assert.match(appSource, /CHART_TIME\.clampVisibleEnd\(\s*model\.minTime,\s*model\.maxTime,\s*nextWindowMs,/s);
   assert.match(appSource, /const preservedVisibleEnd = preserveTrendChartCenterForWindow\(nextWindow\);/);
