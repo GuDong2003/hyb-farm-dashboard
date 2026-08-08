@@ -62,6 +62,72 @@
     );
   }
 
+  function aggregatePricePoints(pointsValue, bucketMsValue, bucketOffsetValue) {
+    const points = (Array.isArray(pointsValue) ? pointsValue : [])
+      .map((point) => ({ capturedAt: Number(point && point.capturedAt), price: Number(point && point.price) }))
+      .filter((point) => Number.isFinite(point.capturedAt) && Number.isFinite(point.price))
+      .sort((a, b) => a.capturedAt - b.capturedAt);
+    const bucketMs = Number(bucketMsValue);
+    if (!Number.isFinite(bucketMs) || bucketMs <= 0) {
+      return points.map((point) => ({
+        capturedAt: point.capturedAt,
+        price: point.price,
+        sourceCapturedAt: [point.capturedAt]
+      }));
+    }
+
+    const bucketOffset = Number.isFinite(Number(bucketOffsetValue)) ? Number(bucketOffsetValue) : 0;
+    const buckets = new Map();
+    points.forEach((point) => {
+      const bucketStartedAt = Math.floor((point.capturedAt + bucketOffset) / bucketMs) * bucketMs - bucketOffset;
+      const bucket = buckets.get(bucketStartedAt) || [];
+      bucket.push(point);
+      buckets.set(bucketStartedAt, bucket);
+    });
+
+    return Array.from(buckets.entries())
+      .sort(([left], [right]) => left - right)
+      .map(([capturedAt, bucket]) => {
+        const prices = bucket.map((point) => point.price).sort((left, right) => left - right);
+        const middle = Math.floor(prices.length / 2);
+        const price = prices.length % 2
+          ? prices[middle]
+          : (prices[middle - 1] + prices[middle]) / 2;
+        return {
+          capturedAt,
+          price,
+          sourceCapturedAt: bucket.map((point) => point.capturedAt)
+        };
+      });
+  }
+
+  function expandPriceDomain(previousValue, nextValue) {
+    const previous = previousValue && Number.isFinite(Number(previousValue.min)) && Number.isFinite(Number(previousValue.max))
+      ? { min: Number(previousValue.min), max: Number(previousValue.max) }
+      : null;
+    const next = nextValue && Number.isFinite(Number(nextValue.min)) && Number.isFinite(Number(nextValue.max))
+      ? { min: Number(nextValue.min), max: Number(nextValue.max) }
+      : null;
+    if (!previous) return next;
+    if (!next) return previous;
+    return {
+      min: Math.min(previous.min, next.min),
+      max: Math.max(previous.max, next.max)
+    };
+  }
+
+  function pointIntersectsRange(point, minValue, maxValue) {
+    const minTime = Number(minValue);
+    const maxTime = Number(maxValue);
+    if (!Number.isFinite(minTime) || !Number.isFinite(maxTime) || maxTime < minTime || !point) return false;
+    if (Array.isArray(point.sourceCapturedAt) && point.sourceCapturedAt.length) {
+      return point.sourceCapturedAt.some((value) => Number(value) >= minTime && Number(value) <= maxTime);
+    }
+    const capturedAt = Number(point.capturedAt);
+    if (Number.isFinite(capturedAt) && capturedAt >= minTime && capturedAt <= maxTime) return true;
+    return false;
+  }
+
   function clampVisibleEnd(minValue, maxValue, windowValue, visibleEndValue) {
     const minTime = Number(minValue);
     const maxTime = Number(maxValue);
@@ -129,6 +195,9 @@
     navigationStepMilliseconds,
     beijingDaySlots,
     sampleSlots,
+    aggregatePricePoints,
+    expandPriceDomain,
+    pointIntersectsRange,
     clampVisibleEnd,
     visibleRange,
     shiftVisibleEnd,

@@ -30,6 +30,9 @@ test('application keeps history anomalies fixed while live alerts use shared uti
   assert.match(app, /const PRICE_ALERT = window\.HYBPriceAlert;/);
   assert.match(app, /const PRICE_CHANGE_ALERT_WINDOW = PRICE_ALERT\.WINDOW;/);
   assert.match(app, /function priceAlertSummary\(rows\)\s*\{[\s\S]*?PRICE_ALERT\.evaluate\(\s*rows \|\| computeRows\(\),\s*state\.config\.priceAlertNormalThreshold,\s*state\.config\.priceAlertAnomalyThreshold\s*\)/);
+  assert.match(app, /trendChangeForSeed\(seed\.id, PRICE_CHANGE_ALERT_WINDOW, true\)/);
+  const computeRowsSource = app.match(/function computeRows\(\)[\s\S]*?(?=\n  function )/)?.[0] || '';
+  assert.doesNotMatch(computeRowsSource, /aggregatePricePoints/);
 });
 
 test('same-capture cloud defaults can repair incomplete local alert trends', () => {

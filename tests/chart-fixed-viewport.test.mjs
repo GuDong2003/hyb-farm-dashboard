@@ -15,7 +15,8 @@ test('price chart renders one fixed SVG viewport without native scrolling geomet
 
 test('current range is selected before anomaly filtering and chart statistics', () => {
   assert.match(appSource, /const visibleTimelinePoints = historyPointsInRange\(model\.timelinePoints, range\);/);
-  assert.match(appSource, /visibleTimelinePoints\.filter\(\(point\) => !model\.anomalyTimes\.has\(point\.capturedAt\)\)/);
+  assert.match(appSource, /const filteredTimelinePoints = model\.hideAnomalies/);
+  assert.match(appSource, /historyPointsInRange\(model\.timelinePointsWithoutAnomalies, range\)/);
   assert.match(appSource, /const points = filteredPoints\.length >= 2 \? filteredPoints : visibleTimelinePoints;/);
   assert.match(appSource, /const x = \(time\) => pad\.left\s*\+ \(\(time - range\.start\) \/ Math\.max\(1, range\.end - range\.start\)\)/);
 });
@@ -38,9 +39,25 @@ test('wheel gestures navigate finite windows in time units', () => {
   assert.match(appSource, /addEventListener\('wheel',[\s\S]*?\{ passive: false \}\)/);
 });
 
-test('drag release snaps the visible end to the active time unit', () => {
-  assert.match(appSource, /CHART_TIME\.snapVisibleEnd\(/);
-  assert.match(appSource, /finishTrendChartDrag/);
+test('drag release keeps the continuously selected visible end', () => {
+  const finishSource = appSource.slice(
+    appSource.indexOf('const finishTrendChartDrag'),
+    appSource.indexOf("chartWrap.addEventListener('pointerup'")
+  );
+  assert.match(finishSource, /finishTrendChartDrag/);
+  assert.doesNotMatch(finishSource, /CHART_TIME\.snapVisibleEnd\(/);
+});
+
+test('dragging expands the y-axis domain without rebuilding alert data', () => {
+  assert.match(appSource, /trendChartDragAxis/);
+  assert.match(appSource, /CHART_TIME\.expandPriceDomain\(/);
+  assert.match(appSource, /rawTimelinePoints/);
+  assert.match(appSource, /CHART_TIME\.aggregatePricePoints\(/);
+});
+
+test('chart keeps visible raw anomaly markers inside the y-axis domain', () => {
+  assert.match(appSource, /const visibleEventPrices =/);
+  assert.match(appSource, /visibleEvents\.forEach[\s\S]*?visibleEventPrices\.push/);
 });
 
 test('dragging uses grab affordances without exposing a native scrollbar', () => {
@@ -63,9 +80,11 @@ test('anomalies do not draw a second connection over the real trend path', () =>
   assert.match(appSource, /history-line-marker/);
 });
 
-test('full history samples date ticks without sampling trend data', () => {
+test('full history samples date ticks and aggregates only chart display data', () => {
   assert.match(appSource, /model\.chartWindow === 'all'\s*\? CHART_TIME\.sampleSlots\(dailySlots, 8\)/);
   assert.match(appSource, /const visibleTimelinePoints = historyPointsInRange\(model\.timelinePoints, range\);/);
+  assert.match(appSource, /rawTimelinePoints/);
+  assert.match(appSource, /CHART_TIME\.aggregatePricePoints\(/);
 });
 
 test('all history never advertises drag navigation', () => {

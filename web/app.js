@@ -56,6 +56,7 @@
   let autoRefreshTimer = null;
   let trendChartUpdateFrame = 0;
   let trendChartDrag = null;
+  let trendChartDragAxis = null;
   let trendChartWheelDelta = 0;
   let trendChartWheelResetTimer = null;
   let suppressTrendPointClick = false;
@@ -1459,6 +1460,16 @@
     return Number.isFinite(number) ? `$${number.toFixed(digits)}` : '-';
   }
 
+  function chartDisplayPoints(points, chartWindow) {
+    const bucketMs = chartWindow === '24h'
+      ? CHART_TIME.HOUR_MS
+      : ['7d', '30d', 'all'].includes(chartWindow)
+        ? CHART_TIME.DAY_MS
+        : 0;
+    const bucketOffset = bucketMs === CHART_TIME.DAY_MS ? 8 * CHART_TIME.HOUR_MS : 0;
+    return CHART_TIME.aggregatePricePoints(points, bucketMs, bucketOffset);
+  }
+
   function historyLineChartModel(group, result, options) {
     const chartOptions = options || {};
     const events = (Array.isArray(group && group.events) ? group.events : [])
@@ -1475,10 +1486,16 @@
     const chartWindow = normalizeChartWindow(chartOptions.windowValue);
     const anomalyTimes = thresholdAnomalyTimestamps(allPoints, events, Number(result && result.threshold) || HISTORY_ANOMALY_THRESHOLD);
     const hideAnomalies = Boolean(chartOptions.allowAnomalyToggle && chartOptions.hideAnomalies && anomalyTimes.size);
+    const displayPoints = chartDisplayPoints(allPoints, chartWindow);
+    const displayPointsWithoutAnomalies = hideAnomalies
+      ? chartDisplayPoints(allPoints.filter((point) => !anomalyTimes.has(Number(point.capturedAt))), chartWindow)
+      : displayPoints;
     return {
       chartWindow,
       events,
-      timelinePoints: allPoints,
+      rawTimelinePoints: allPoints,
+      timelinePoints: displayPoints,
+      timelinePointsWithoutAnomalies: displayPointsWithoutAnomalies,
       anomalyTimes,
       hideAnomalies,
       minTime: allPoints.length ? Number(allPoints[0].capturedAt) : 0,
@@ -1496,18 +1513,48 @@
   }
 
   function historyPointsInRange(points, range) {
-    return (Array.isArray(points) ? points : []).filter((point) => point.capturedAt >= range.start && point.capturedAt <= range.end);
+    return (Array.isArray(points) ? points : []).reduce((visible, point) => {
+      if (!CHART_TIME.pointIntersectsRange(point, range.start, range.end)) return visible;
+      const capturedAt = Number(point.capturedAt);
+      const sourceTimes = Array.isArray(point.sourceCapturedAt) ? point.sourceCapturedAt.map(Number) : [];
+      const hasSourceBeforeRange = sourceTimes.some((value) => Number.isFinite(value) && value >= range.start && value <= range.end);
+      const clampedCapturedAt = capturedAt < range.start && hasSourceBeforeRange
+        ? range.start
+        : capturedAt > range.end && hasSourceBeforeRange
+          ? range.end
+          : capturedAt;
+      visible.push(clampedCapturedAt === capturedAt ? point : Object.assign({}, point, { capturedAt: clampedCapturedAt }));
+      return visible;
+    }, []);
   }
 
   function renderHistoryLineChartFrame(model, options, range, width, height) {
     const chartOptions = options || {};
     const visibleTimelinePoints = historyPointsInRange(model.timelinePoints, range);
-    const filteredPoints = model.hideAnomalies
-      ? visibleTimelinePoints.filter((point) => !model.anomalyTimes.has(point.capturedAt))
+    const filteredTimelinePoints = model.hideAnomalies
+      ? historyPointsInRange(model.timelinePointsWithoutAnomalies, range)
       : visibleTimelinePoints;
+    const filteredPoints = filteredTimelinePoints;
     const points = filteredPoints.length >= 2 ? filteredPoints : visibleTimelinePoints;
     const hiddenVisibleCount = visibleTimelinePoints.length - points.length;
-    const prices = points.map((point) => point.price);
+    const windowEvents = model.events.filter((event) => Number(event.capturedAt) >= range.start && Number(event.previousCapturedAt) <= range.end);
+    const visibleEvents = model.hideAnomalies
+      ? windowEvents.filter((event) => !model.anomalyTimes.has(Number(event.previousCapturedAt)) && !model.anomalyTimes.has(Number(event.capturedAt)))
+      : windowEvents;
+    const visibleEventPrices = [];
+    visibleEvents.forEach((event) => {
+      const previousCapturedAt = Number(event.previousCapturedAt);
+      const capturedAt = Number(event.capturedAt);
+      const previousPrice = Number(event.previousPrice);
+      const currentPrice = Number(event.currentPrice);
+      if (Number.isFinite(previousCapturedAt) && previousCapturedAt >= range.start && previousCapturedAt <= range.end && Number.isFinite(previousPrice)) {
+        visibleEventPrices.push(previousPrice);
+      }
+      if (Number.isFinite(capturedAt) && capturedAt >= range.start && capturedAt <= range.end && Number.isFinite(currentPrice)) {
+        visibleEventPrices.push(currentPrice);
+      }
+    });
+    const prices = points.map((point) => point.price).concat(visibleEventPrices);
     let minPrice = prices.length ? Math.min(...prices) : 0;
     let maxPrice = prices.length ? Math.max(...prices) : 1;
     if (minPrice === maxPrice) {
@@ -1517,7 +1564,9 @@
     const pricePad = (maxPrice - minPrice) * 0.12;
     minPrice = Math.max(0, minPrice - pricePad);
     maxPrice += pricePad;
-    const yAxis = niceChartAxis(minPrice, maxPrice, 5);
+    const naturalPriceDomain = { min: minPrice, max: maxPrice };
+    const priceDomain = CHART_TIME.expandPriceDomain(chartOptions.priceDomain, naturalPriceDomain);
+    const yAxis = niceChartAxis(priceDomain.min, priceDomain.max, 5);
     minPrice = yAxis.min;
     maxPrice = yAxis.max;
     const priceRange = Math.max(Number.EPSILON, maxPrice - minPrice);
@@ -1560,10 +1609,6 @@
     const trendLine = hasEnoughPoints
       ? `<path class="history-line-path ${trendDirection}" d="${trendPath}"></path>`
       : `<text class="history-line-label" x="${formatNumber(width / 2, 2)}" y="${formatNumber(height / 2, 2)}" text-anchor="middle">当前区间数据不足</text>`;
-    const windowEvents = model.events.filter((event) => Number(event.capturedAt) >= range.start && Number(event.previousCapturedAt) <= range.end);
-    const visibleEvents = model.hideAnomalies
-      ? windowEvents.filter((event) => !model.anomalyTimes.has(Number(event.previousCapturedAt)) && !model.anomalyTimes.has(Number(event.capturedAt)))
-      : windowEvents;
     const highlights = visibleEvents.map((event) => {
       const previousCapturedAt = Number(event.previousCapturedAt);
       const capturedAt = Number(event.capturedAt);
@@ -1630,7 +1675,8 @@
       plotContent: `<rect class="history-line-bg" x="0" y="0" width="${width}" height="${height}"></rect>${yGridLines}${xTicks}${trendLine}${highlights}${pointMarkers}`,
       chartStats,
       metaContent: `<span>${firstPrice}</span><span class="${Number(totalChange) > 0 ? 'up' : Number(totalChange) < 0 ? 'down' : ''}">${hasChange ? formatSignedPercent(totalChange) : '-'}</span><span>${lastPrice}</span>`,
-      hasEnoughPoints
+      hasEnoughPoints,
+      priceDomain: { min: minPrice, max: maxPrice }
     };
   }
 
@@ -1653,7 +1699,9 @@
     const width = 420;
     const height = 250;
     const range = historyChartRange(model, chartOptions.visibleEnd);
-    const frame = renderHistoryLineChartFrame(model, chartOptions, range, width, height);
+    const frameOptions = Object.assign({}, chartOptions, { priceDomain: trendChartDragAxis });
+    const frame = renderHistoryLineChartFrame(model, frameOptions, range, width, height);
+    trendChartDragAxis = frame.priceDomain;
     const windowMs = chartWindowMilliseconds(model.chartWindow);
     const draggable = Boolean(windowMs && model.maxTime - model.minTime > windowMs);
     const anomalyToggle = chartOptions.allowAnomalyToggle && model.anomalyTimes.size
@@ -1772,6 +1820,14 @@
       if (event.button !== 0 || !chartWrap.hasAttribute('data-history-chart-drag')) return;
       const { model } = activeTrendChartBounds();
       const range = historyChartRange(model, state.trendModalVisibleEnd);
+      const frame = renderHistoryLineChartFrame(
+        model,
+        Object.assign({}, activeTrendChartOptions(), { priceDomain: trendChartDragAxis }),
+        range,
+        420,
+        250
+      );
+      trendChartDragAxis = frame.priceDomain;
       suppressTrendPointClick = false;
       trendChartDrag = {
         pointerId: event.pointerId,
@@ -1807,14 +1863,6 @@
       if (chartWrap.hasPointerCapture(event.pointerId)) chartWrap.releasePointerCapture(event.pointerId);
       chartWrap.classList.remove('dragging');
       if (trendChartDrag.dragged) {
-        const { model } = activeTrendChartBounds();
-        state.trendModalVisibleEnd = CHART_TIME.snapVisibleEnd(
-          state.trendModalVisibleEnd,
-          CHART_TIME.navigationStepMilliseconds(model.chartWindow, trendWindowLabel()),
-          chartWindowMilliseconds(model.chartWindow),
-          model.minTime,
-          model.maxTime
-        );
         scheduleTrendChartViewportRefresh();
       }
       trendChartDrag = null;
@@ -1876,7 +1924,7 @@
     if (!panel || !plot || !axis || !layout || !stats || !meta) return;
 
     const trend = cropTrendData(state.trendModalSeedId);
-    const chartOptions = activeTrendChartOptions();
+    const chartOptions = Object.assign({}, activeTrendChartOptions(), { priceDomain: trendChartDragAxis });
     const model = historyLineChartModel(trend.group, trend.result, chartOptions);
     if (model.timelinePoints.length < 2) return;
 
@@ -1884,6 +1932,7 @@
     const width = 420;
     const range = historyChartRange(model, state.trendModalVisibleEnd);
     const frame = renderHistoryLineChartFrame(model, chartOptions, range, width, height);
+    trendChartDragAxis = frame.priceDomain;
     state.trendModalVisibleEnd = range.end;
     layout.style.setProperty('--history-axis-width', `${frame.axisWidth}px`);
     axis.innerHTML = frame.axisContent;
@@ -2053,6 +2102,7 @@
 
   function clearCropTrendModalState() {
     resetTrendChartWheel();
+    trendChartDragAxis = null;
     state.trendModalSeedId = '';
     state.trendModalWindow = '';
     state.trendHideAnomalies = false;
@@ -2070,6 +2120,7 @@
     if (!SEED_BY_ID[seedId]) return;
     clearPriceAlertModalState();
     resetTrendChartWheel();
+    trendChartDragAxis = null;
     state.trendModalSeedId = seedId;
     state.trendModalWindow = trendWindowLabel();
     state.trendHideAnomalies = false;
@@ -2479,6 +2530,7 @@
     const trendModalWindow = document.querySelector('[data-trend-window]');
     if (trendModalWindow) trendModalWindow.addEventListener('change', () => {
       resetTrendChartWheel();
+      trendChartDragAxis = null;
       state.trendModalWindow = normalizeChartWindow(trendModalWindow.value);
       state.trendModalVisibleEnd = null;
       render();
@@ -2486,11 +2538,13 @@
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
     if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {
       state.trendHideAnomalies = !state.trendHideAnomalies;
+      trendChartDragAxis = null;
       render();
     });
     const trendPointToggle = document.querySelector('[data-trend-point-toggle]');
     if (trendPointToggle) trendPointToggle.addEventListener('click', () => {
       state.trendHidePoints = !state.trendHidePoints;
+      trendChartDragAxis = null;
       render();
     });
     const trendChartWrap = document.querySelector('[data-history-chart-wrap]');

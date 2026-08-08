@@ -95,6 +95,80 @@ test('drag results snap to steps measured back from the latest sample', () => {
   );
 });
 
+test('aggregates price points by time bucket using the median and keeps source timestamps', () => {
+  const base = Date.parse('2026-08-08T00:00:00.000Z');
+  const points = [
+    { capturedAt: base + 5 * 60 * 1000, price: 100 },
+    { capturedAt: base + 20 * 60 * 1000, price: 500 },
+    { capturedAt: base + 50 * 60 * 1000, price: 110 },
+    { capturedAt: base + chartTime.HOUR_MS + 5 * 60 * 1000, price: 240 }
+  ];
+
+  assert.deepEqual(
+    chartTime.aggregatePricePoints(points, chartTime.HOUR_MS),
+    [
+      {
+        capturedAt: base,
+        price: 110,
+        sourceCapturedAt: [
+          base + 5 * 60 * 1000,
+          base + 20 * 60 * 1000,
+          base + 50 * 60 * 1000
+        ]
+      },
+      {
+        capturedAt: base + chartTime.HOUR_MS,
+        price: 240,
+        sourceCapturedAt: [base + chartTime.HOUR_MS + 5 * 60 * 1000]
+      }
+    ]
+  );
+});
+
+test('expanding price domains never shrink while the viewport moves', () => {
+  assert.deepEqual(
+    chartTime.expandPriceDomain({ min: 10, max: 20 }, { min: 12, max: 18 }),
+    { min: 10, max: 20 }
+  );
+  assert.deepEqual(
+    chartTime.expandPriceDomain({ min: 10, max: 20 }, { min: 5, max: 24 }),
+    { min: 5, max: 24 }
+  );
+});
+
+test('aggregation keeps a single bucket instead of exposing an unaggregated spike', () => {
+  const base = Date.parse('2026-08-08T00:00:00.000Z');
+  const points = [
+    { capturedAt: base + 5 * 60 * 1000, price: 100 },
+    { capturedAt: base + 20 * 60 * 1000, price: 500 }
+  ];
+  const aggregated = chartTime.aggregatePricePoints(points, chartTime.HOUR_MS);
+  assert.equal(aggregated.length, 1);
+  assert.equal(aggregated[0].price, 300);
+});
+
+test('bucketed points intersect a range when any source sample is inside it', () => {
+  const base = Date.parse('2026-08-08T00:00:00.000Z');
+  const point = {
+    capturedAt: base,
+    price: 110,
+    sourceCapturedAt: [base + 50 * 60 * 1000]
+  };
+  assert.equal(chartTime.pointIntersectsRange(point, base + 30 * 60 * 1000, base + 90 * 60 * 1000), true);
+  assert.equal(chartTime.pointIntersectsRange(point, base + chartTime.HOUR_MS, base + 2 * chartTime.HOUR_MS), false);
+});
+
+test('bucket source timestamps override the bucket start at range boundaries', () => {
+  const base = Date.parse('2026-08-08T00:00:00.000Z');
+  const bucket = {
+    capturedAt: base + 30 * 60 * 1000,
+    price: 110,
+    sourceCapturedAt: [base + 2 * chartTime.HOUR_MS]
+  };
+  assert.equal(chartTime.pointIntersectsRange(bucket, base, base + chartTime.HOUR_MS), false);
+  assert.equal(chartTime.pointIntersectsRange(bucket, base + chartTime.HOUR_MS, base + 3 * chartTime.HOUR_MS), true);
+});
+
 test('slot sampling preserves the first and last date', () => {
   const slots = Array.from({ length: 40 }, (_, index) => ({ label: String(index) }));
   const sampled = chartTime.sampleSlots(slots, 8);
