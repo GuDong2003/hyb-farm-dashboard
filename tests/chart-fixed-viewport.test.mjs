@@ -42,6 +42,9 @@ test('wheel gestures zoom the unified timeline around the cursor', () => {
   assert.match(appSource, /if \(atLeftEdge && !atRightEdge\) pointerRatio = 0;/);
   assert.match(appSource, /if \(atRightEdge && !atLeftEdge\) pointerRatio = 1;/);
   assert.match(appSource, /const nextWindowMs =/);
+  assert.match(appSource, /const anchorPoint = pointerPoint \|\| activePoint;/);
+  assert.match(appSource, /const anchorTime = Number\(anchorPoint && anchorPoint\.dataset\.historyPointAt\);/);
+  assert.match(appSource, /pointerRatio = \(anchorTime - range\.start\) \/ Math\.max\(1, currentWindowMs\);/);
   assert.match(appSource, /state\.trendModalVisibleWindowMs = nextWindowMs;/);
   assert.match(appSource, /if \(!chartWrap\.hasAttribute\('data-history-chart-drag'\)\) return;/);
   assert.match(appSource, /addEventListener\('wheel',[\s\S]*?\{ passive: false \}\)/);
@@ -134,9 +137,19 @@ test('anomaly details and crosshair are gated by the zoom level', () => {
   assert.match(appSource, /showAnomalyDetails: visibleWindowMs <= CHART_TIME\.DAY_MS/);
   assert.match(appSource, /const visibleEvents = model\.showAnomalyDetails && !model\.hideAnomalies/);
   assert.match(appSource, /data-history-crosshair/);
-  assert.match(appSource, /function showTrendCrosshair\(chartWrap, point\)/);
+  assert.match(appSource, /function showTrendCrosshair\(chartWrap, point, pointer\)/);
   assert.match(appSource, /function nearestTrendPoint\(chartWrap, clientX\)/);
   assert.match(styleSource, /\.history-line-crosshair\.visible\s*\{[^}]*opacity: 1;/s);
+});
+
+test('crosshair vertical snaps to the point while horizontal follows the pointer', () => {
+  assert.match(appSource, /function trendCrosshairYFromPointer\(chartWrap, pointer, fallbackY\)/);
+  assert.match(appSource, /const crosshairY = trendCrosshairYFromPointer\(chartWrap, pointer, pointY\);/);
+  assert.match(appSource, /horizontal\.setAttribute\('y1', String\(crosshairY\)\);/);
+  assert.match(appSource, /showTrendPointTooltip\(chartWrap, point, pointer\);/);
+  assert.match(appSource, /const pointerX = Number\.isFinite\(Number\(pointer && pointer\.clientX\)\)/);
+  assert.match(appSource, /const pointerY = Number\.isFinite\(Number\(pointer && pointer\.clientY\)\)/);
+  assert.match(appSource, /data-history-point-at=/);
 });
 
 test('adaptive trend gaps use dashed connectors without changing the short-window path', () => {
@@ -161,7 +174,7 @@ test('point tooltip is one fixed-size HTML overlay outside the SVG', () => {
 });
 
 test('tooltip is populated and positioned from the active SVG point', () => {
-  assert.match(appSource, /function showTrendPointTooltip\(chartWrap, point\)/);
+  assert.match(appSource, /function showTrendPointTooltip\(chartWrap, point, pointer\)/);
   assert.match(appSource, /point\.getBoundingClientRect\(\)/);
   assert.match(appSource, /tooltip\.style\.left/);
   assert.match(appSource, /tooltip\.style\.top/);

@@ -1804,7 +1804,7 @@
       const title = `${formatTime(previousCapturedAt)} → ${formatTime(capturedAt)}，${formatUsd(previousPrice)} → ${formatUsd(currentPrice)}（${formatSignedPercent(event.changeRate)}）`;
       const anomalyTimeText = formatTime(capturedAt);
       const anomalyPriceText = `$${currentPrice.toFixed(5)}`;
-      return `<g class="history-line-anomaly ${direction}"><title>${escapeHtml(title)}</title><rect class="history-line-anomaly-band" x="${formatNumber(Math.min(startX, endX), 2)}" y="${pad.top}" width="${formatNumber(Math.max(2, Math.abs(endX - startX)), 2)}" height="${plotHeight}"></rect><circle class="history-line-marker ${direction}" data-history-point data-history-point-time="${escapeHtml(anomalyTimeText)}" data-history-point-price="${escapeHtml(anomalyPriceText)}" cx="${formatNumber(endX, 2)}" cy="${formatNumber(y(currentPrice), 2)}" r="4" tabindex="0" role="img" aria-label="${escapeHtml(`${anomalyTimeText}，异常价格 ${anomalyPriceText}`)}"></circle></g>`;
+      return `<g class="history-line-anomaly ${direction}"><title>${escapeHtml(title)}</title><rect class="history-line-anomaly-band" x="${formatNumber(Math.min(startX, endX), 2)}" y="${pad.top}" width="${formatNumber(Math.max(2, Math.abs(endX - startX)), 2)}" height="${plotHeight}"></rect><circle class="history-line-marker ${direction}" data-history-point data-history-point-at="${formatNumber(capturedAt, 0)}" data-history-point-time="${escapeHtml(anomalyTimeText)}" data-history-point-price="${escapeHtml(anomalyPriceText)}" cx="${formatNumber(endX, 2)}" cy="${formatNumber(y(currentPrice), 2)}" r="4" tabindex="0" role="img" aria-label="${escapeHtml(`${anomalyTimeText}，异常价格 ${anomalyPriceText}`)}"></circle></g>`;
     }).join('');
     const yGridLines = yTickRatios.map((ratio) => {
       const tickY = pad.top + ratio * plotHeight;
@@ -1843,7 +1843,7 @@
       const pointLabel = `${timeText}，价格 ${priceText}`;
       return `
         <g class="history-line-point-wrap">
-          <circle class="history-line-point-hit" data-history-point data-history-point-time="${escapeHtml(timeText)}" data-history-point-price="${escapeHtml(priceText)}" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="8" tabindex="0" role="img" aria-label="${escapeHtml(pointLabel)}"></circle>
+          <circle class="history-line-point-hit" data-history-point data-history-point-at="${formatNumber(point.capturedAt, 0)}" data-history-point-time="${escapeHtml(timeText)}" data-history-point-price="${escapeHtml(priceText)}" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="8" tabindex="0" role="img" aria-label="${escapeHtml(pointLabel)}"></circle>
           ${hidePoints ? '' : `<circle class="history-line-point" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="2.5" aria-hidden="true"></circle>`}
         </g>
       `;
@@ -1984,7 +1984,7 @@
     chartWrap?.querySelectorAll('.crosshair-active').forEach((node) => node.classList.remove('crosshair-active'));
   }
 
-  function showTrendPointTooltip(chartWrap, point) {
+  function showTrendPointTooltip(chartWrap, point, pointer) {
     const tooltip = chartWrap && chartWrap.querySelector('[data-history-point-tooltip]');
     const time = point && point.dataset.historyPointTime;
     const price = point && point.dataset.historyPointPrice;
@@ -1999,24 +1999,46 @@
     timeNode.textContent = time;
     priceNode.textContent = `价格：${price}`;
 
-    const pointRect = point.getBoundingClientRect();
     const wrapRect = chartWrap.getBoundingClientRect();
     const tooltipWidth = tooltip.offsetWidth || 154;
     const tooltipHeight = tooltip.offsetHeight || 42;
+    const pointRect = point.getBoundingClientRect();
     const pointX = pointRect.left - wrapRect.left + pointRect.width / 2;
     const pointY = pointRect.top - wrapRect.top + pointRect.height / 2;
+    const pointerX = Number.isFinite(Number(pointer && pointer.clientX))
+      ? Number(pointer.clientX) - wrapRect.left
+      : pointX;
+    const pointerY = Number.isFinite(Number(pointer && pointer.clientY))
+      ? Number(pointer.clientY) - wrapRect.top
+      : pointY;
     const maxLeft = Math.max(4, wrapRect.width - tooltipWidth - 4);
     const maxTop = Math.max(4, wrapRect.height - tooltipHeight - 4);
-    const left = Math.min(maxLeft, Math.max(4, pointX - tooltipWidth / 2));
-    const above = pointY - tooltipHeight - 9;
-    const top = above >= 4 ? above : Math.min(maxTop, pointY + 9);
+    const rightCandidate = pointerX + 12;
+    const leftCandidate = pointerX - tooltipWidth - 12;
+    const left = rightCandidate <= maxLeft
+      ? Math.max(4, rightCandidate)
+      : Math.min(maxLeft, Math.max(4, leftCandidate));
+    const belowCandidate = pointerY + 12;
+    const aboveCandidate = pointerY - tooltipHeight - 12;
+    const top = belowCandidate <= maxTop
+      ? Math.max(4, belowCandidate)
+      : Math.min(maxTop, Math.max(4, aboveCandidate));
     tooltip.style.left = `${Math.round(left)}px`;
     tooltip.style.top = `${Math.round(top)}px`;
     tooltip.classList.add('visible');
     tooltip.setAttribute('aria-hidden', 'false');
   }
 
-  function showTrendCrosshair(chartWrap, point) {
+  function trendCrosshairYFromPointer(chartWrap, pointer, fallbackY) {
+    const svg = chartWrap && chartWrap.querySelector('[data-history-plot]');
+    const svgRect = svg && svg.getBoundingClientRect();
+    const clientY = Number(pointer && pointer.clientY);
+    if (!svgRect || !svgRect.height || !Number.isFinite(clientY)) return fallbackY;
+    const viewBoxHeight = Number(svg.viewBox?.baseVal?.height) || 250;
+    return Math.min(viewBoxHeight, Math.max(0, ((clientY - svgRect.top) / svgRect.height) * viewBoxHeight));
+  }
+
+  function showTrendCrosshair(chartWrap, point, pointer) {
     const crosshair = chartWrap && chartWrap.querySelector('[data-history-crosshair]');
     if (!crosshair || !point) return;
     const pointX = Number(point.getAttribute('cx'));
@@ -2026,16 +2048,17 @@
     const horizontal = crosshair.querySelector('[data-history-crosshair-y]');
     const marker = crosshair.querySelector('[data-history-crosshair-point]');
     if (!vertical || !horizontal || !marker) return;
+    const crosshairY = trendCrosshairYFromPointer(chartWrap, pointer, pointY);
     vertical.setAttribute('x1', String(pointX));
     vertical.setAttribute('x2', String(pointX));
-    horizontal.setAttribute('y1', String(pointY));
-    horizontal.setAttribute('y2', String(pointY));
-    marker.setAttribute('transform', `translate(${pointX} ${pointY})`);
+    horizontal.setAttribute('y1', String(crosshairY));
+    horizontal.setAttribute('y2', String(crosshairY));
+    marker.setAttribute('transform', `translate(${pointX} ${crosshairY})`);
     chartWrap.querySelectorAll('.crosshair-active').forEach((node) => node.classList.remove('crosshair-active'));
     point.parentElement?.classList.add('crosshair-active');
     crosshair.classList.add('visible');
     crosshair.setAttribute('aria-hidden', 'false');
-    showTrendPointTooltip(chartWrap, point);
+    showTrendPointTooltip(chartWrap, point, pointer);
   }
 
   function nearestTrendPoint(chartWrap, clientX) {
@@ -2053,7 +2076,7 @@
     chartWrap.addEventListener('pointermove', (event) => {
       if (trendChartDrag) return hideTrendPointTooltip(chartWrap);
       const point = nearestTrendPoint(chartWrap, event.clientX);
-      if (point) showTrendCrosshair(chartWrap, point);
+      if (point) showTrendCrosshair(chartWrap, point, event);
       else hideTrendPointTooltip(chartWrap);
     });
     chartWrap.addEventListener('pointerleave', () => hideTrendPointTooltip(chartWrap));
@@ -2139,9 +2162,16 @@
       const nextWindowMs = Math.min(maxWindowMs, Math.max(minWindowMs, currentWindowMs * zoomFactor));
       if (nextWindowMs === currentWindowMs) return;
       const wrapRect = chartWrap.getBoundingClientRect();
+      const pointerPoint = nearestTrendPoint(chartWrap, event.clientX);
+      const activePoint = chartWrap.querySelector('.crosshair-active [data-history-point]');
+      const anchorPoint = pointerPoint || activePoint;
+      const anchorTime = Number(anchorPoint && anchorPoint.dataset.historyPointAt);
       let pointerRatio = wrapRect.width > 0
         ? Math.min(1, Math.max(0, (event.clientX - wrapRect.left) / wrapRect.width))
         : 0.5;
+      if (Number.isFinite(anchorTime) && anchorTime >= range.start && anchorTime <= range.end) {
+        pointerRatio = (anchorTime - range.start) / Math.max(1, currentWindowMs);
+      }
       const edgeTolerance = Math.max(1, currentWindowMs * 0.001);
       const atLeftEdge = range.start <= model.minTime + edgeTolerance;
       const atRightEdge = range.end >= model.maxTime - edgeTolerance;
