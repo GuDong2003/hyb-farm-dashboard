@@ -22,6 +22,16 @@
   const HISTORY_ANOMALY_THRESHOLD = 20;
   const TREND_CHART_AXIS_TRANSITION_MS = 220;
   const TREND_CHART_FIXED_AXIS_WIDTH = 86;
+  const TREND_SCALE_OPTIONS = [
+    { value: '6h', label: '6h' },
+    { value: '12h', label: '12h' },
+    { value: '1d', label: '1日' },
+    { value: '3d', label: '3日' },
+    { value: '7d', label: '7日' },
+    { value: '30d', label: '1个月' },
+    { value: '90d', label: '3个月' },
+    { value: 'all', label: '所有' }
+  ];
   const PRICE_ALERT = window.HYBPriceAlert;
   const PRICE_CHANGE_ALERT_WINDOW = PRICE_ALERT.WINDOW;
   const CHART_TIME = window.HYBChartTime;
@@ -131,7 +141,6 @@
       trendHidePoints: false,
       trendModalVisibleEnd: null,
       trendModalVisibleWindowMs: null,
-      trendModalDate: '',
       trendModalCenterAt: null,
       error: ''
     };
@@ -921,29 +930,14 @@
     return CHART_TIME.windowMilliseconds(value, trendWindowLabel());
   }
 
-  function beijingDateValue(timestampValue) {
-    const timestamp = Number(timestampValue);
-    if (!Number.isFinite(timestamp)) return '';
-    const shifted = new Date(timestamp + 8 * CHART_TIME.HOUR_MS);
-    const year = shifted.getUTCFullYear();
-    const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(shifted.getUTCDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-
-  function beijingDateStart(value) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return null;
-    const timestamp = Date.parse(`${value}T00:00:00+08:00`);
-    return Number.isFinite(timestamp) ? timestamp : null;
-  }
-
   function defaultTrendVisibleWindowMs() {
     const configured = chartWindowMilliseconds(trendWindowLabel());
-    return configured > 0 ? configured : 24 * CHART_TIME.HOUR_MS;
+    const minimumScale = 6 * CHART_TIME.HOUR_MS;
+    return configured > 0 ? Math.max(minimumScale, configured) : 24 * CHART_TIME.HOUR_MS;
   }
 
   function isAdaptiveTrendWindow(value) {
-    return ['24h', '7d', '30d', 'all'].includes(normalizeChartWindow(value));
+    return ['24h', '1d', '3d', '7d', '30d', '90d', 'all'].includes(normalizeChartWindow(value));
   }
 
   function chartVisibleWindowMilliseconds(chartWindow, requestedWindowMs, historySpanMs) {
@@ -1001,11 +995,26 @@
     return historyWindowChange(points, value);
   }
 
-  function renderChartDatePicker(model) {
-    const value = state.trendModalDate || beijingDateValue(model.maxTime);
-    const min = beijingDateValue(model.minTime);
-    const max = beijingDateValue(model.maxTime);
-    return `<input class="history-date-picker" type="date" data-trend-date aria-label="选择趋势日期" title="选择趋势日期" value="${escapeHtml(value)}" min="${escapeHtml(min)}" max="${escapeHtml(max)}" />`;
+  function trendScaleMilliseconds(value) {
+    return CHART_TIME.windowMilliseconds(value, '1d');
+  }
+
+  function trendScaleIsActive(model, value) {
+    const historySpan = Math.max(0, Number(model.maxTime) - Number(model.minTime));
+    const currentWindow = Number(model.visibleWindowMs);
+    if (!Number.isFinite(currentWindow)) return false;
+    if (value === 'all') return historySpan > 0 && currentWindow >= historySpan - 1;
+    const requestedWindow = trendScaleMilliseconds(value);
+    const effectiveWindow = Math.min(historySpan || requestedWindow, requestedWindow);
+    return Math.abs(currentWindow - effectiveWindow) <= Math.max(CHART_TIME.HOUR_MS / 10, effectiveWindow * 1e-6);
+  }
+
+  function renderChartScalePicker(model) {
+    const buttons = TREND_SCALE_OPTIONS.map((option) => {
+      const active = trendScaleIsActive(model, option.value);
+      return `<button class="history-chart-scale ${active ? 'active' : ''}" type="button" data-trend-scale="${option.value}" aria-pressed="${active ? 'true' : 'false'}">${option.label}</button>`;
+    }).join('');
+    return `<div class="history-chart-scale-picker" data-trend-scale-picker role="group" aria-label="趋势时间尺度">${buttons}</div>`;
   }
 
   function trendWindowConfig(value) {
@@ -1658,15 +1667,37 @@
     }, []);
   }
 
+  function historyPointsWithContext(points, range) {
+    const sortedPoints = (Array.isArray(points) ? points : [])
+      .slice()
+      .sort((left, right) => Number(left.capturedAt) - Number(right.capturedAt));
+    const visibleIndexes = sortedPoints.reduce((indexes, point, index) => {
+      if (CHART_TIME.pointIntersectsRange(point, range.start, range.end)) indexes.push(index);
+      return indexes;
+    }, []);
+    if (!visibleIndexes.length) return { points: [], visiblePoints: [] };
+    const visiblePoints = historyPointsInRange(sortedPoints, range);
+    const firstVisibleIndex = visibleIndexes[0];
+    const lastVisibleIndex = visibleIndexes[visibleIndexes.length - 1];
+    const contextPoints = [];
+    if (firstVisibleIndex > 0) contextPoints.push(sortedPoints[firstVisibleIndex - 1]);
+    contextPoints.push(...visiblePoints);
+    if (lastVisibleIndex < sortedPoints.length - 1) contextPoints.push(sortedPoints[lastVisibleIndex + 1]);
+    return { points: contextPoints, visiblePoints };
+  }
+
   function renderHistoryLineChartFrame(model, options, range, width, height) {
     const chartOptions = options || {};
-    const visibleTimelinePoints = historyPointsInRange(model.timelinePoints, range);
-    const filteredTimelinePoints = model.hideAnomalies
-      ? historyPointsInRange(model.timelinePointsWithoutAnomalies, range)
-      : visibleTimelinePoints;
-    const filteredPoints = filteredTimelinePoints;
-    const points = filteredPoints.length >= 2 ? filteredPoints : visibleTimelinePoints;
-    const hiddenVisibleCount = visibleTimelinePoints.length - points.length;
+    const visibleTimelineContext = historyPointsWithContext(model.timelinePoints, range);
+    const visibleTimelinePoints = visibleTimelineContext.visiblePoints;
+    const filteredTimelineContext = model.hideAnomalies
+      ? historyPointsWithContext(model.timelinePointsWithoutAnomalies, range)
+      : visibleTimelineContext;
+    const filteredTimelinePoints = filteredTimelineContext.visiblePoints;
+    const filteredPoints = filteredTimelineContext.points;
+    const points = filteredPoints.length >= 2 ? filteredPoints : visibleTimelineContext.points;
+    const statsPoints = filteredTimelinePoints.length >= 2 ? filteredTimelinePoints : visibleTimelinePoints;
+    const hiddenVisibleCount = visibleTimelinePoints.length - filteredTimelinePoints.length;
     const windowEvents = model.events.filter((event) => Number(event.capturedAt) >= range.start && Number(event.previousCapturedAt) <= range.end);
     const visibleEvents = model.showAnomalyDetails && !model.hideAnomalies
       ? windowEvents
@@ -1731,8 +1762,8 @@
       + ((time - range.start) / Math.max(1, range.end - range.start))
       * (width - pad.left - pad.right);
     const y = (price) => pad.top + (1 - ((price - minPrice) / priceRange)) * plotHeight;
-    const first = points[0] || null;
-    const last = points[points.length - 1] || null;
+    const first = statsPoints[0] || points[0] || null;
+    const last = statsPoints[statsPoints.length - 1] || points[points.length - 1] || null;
     const hasEnoughPoints = points.length >= 2;
     const hasChange = hasEnoughPoints && first.price > 0;
     const totalChange = hasChange ? ((last.price - first.price) / first.price) * 100 : null;
@@ -1804,7 +1835,7 @@
         `
         : '';
     const hidePoints = Boolean(chartOptions.allowPointToggle && chartOptions.hidePoints);
-    const pointMarkers = points.map((point) => {
+    const pointMarkers = statsPoints.map((point) => {
       const pointX = x(point.capturedAt);
       const pointY = y(point.price);
       const timeText = formatTime(point.capturedAt);
@@ -1820,7 +1851,7 @@
     const crosshair = `<g class="history-line-crosshair" data-history-crosshair aria-hidden="true"><line data-history-crosshair-x x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}"></line><line data-history-crosshair-y x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}"></line><g data-history-crosshair-point transform="translate(${pad.left} ${height - pad.bottom})"><line x1="-5" y1="0" x2="5" y2="0"></line><line x1="0" y1="-5" x2="0" y2="5"></line></g></g>`;
     const chartStats = hiddenVisibleCount
       ? `${windowEvents.length} 处异常 · 已隐藏 ${hiddenVisibleCount} 个区间点`
-      : `${points.length} 点 · ${windowEvents.length} 处异常`;
+      : `${statsPoints.length} 点 · ${windowEvents.length} 处异常`;
     const firstPrice = first ? formatUsd(first.price) : '-';
     const lastPrice = last ? formatUsd(last.price) : '-';
     return {
@@ -1857,12 +1888,12 @@
   function renderHistoryLineChart(group, result, options) {
     const chartOptions = options || {};
     const model = historyLineChartModel(group, result, chartOptions);
-    const datePicker = renderChartDatePicker(model);
+    const scalePicker = renderChartScalePicker(model);
     if (model.timelinePoints.length < 2) {
       return `
         <aside class="history-line-panel">
           <div class="history-line-head">
-            <div class="history-line-title"><strong>价格趋势</strong>${datePicker}</div>
+            <div class="history-line-title"><strong>价格趋势</strong>${scalePicker}</div>
             <span>暂无</span>
           </div>
           <div class="history-line-empty">趋势数据不足</div>
@@ -1890,7 +1921,7 @@
     return `
       <aside class="history-line-panel" data-history-line-panel>
         <div class="history-line-head">
-          <div class="history-line-title"><strong>价格趋势</strong>${datePicker}</div>
+          <div class="history-line-title"><strong>价格趋势</strong>${scalePicker}</div>
           <div class="history-line-head-actions"><span data-history-chart-stats>${frame.chartStats}</span>${pointToggle}${anomalyToggle}</div>
         </div>
         <div class="history-line-chart-layout" data-history-chart-layout style="--history-axis-width:${frame.axisWidth}px">
@@ -2153,7 +2184,7 @@
     const layout = panel && panel.querySelector('[data-history-chart-layout]');
     const stats = panel && panel.querySelector('[data-history-chart-stats]');
     const meta = panel && panel.querySelector('[data-history-chart-meta]');
-    const datePicker = panel && panel.querySelector('[data-trend-date]');
+    const scalePicker = panel && panel.querySelector('[data-trend-scale-picker]');
     if (!panel || !plot || !axis || !layout || !stats || !meta) return;
 
     const trend = cropTrendData(state.trendModalSeedId);
@@ -2167,7 +2198,6 @@
     const frame = renderAnimatedHistoryLineChartFrame(model, chartOptions, range, width, height);
     state.trendModalVisibleEnd = range.end;
     state.trendModalCenterAt = (range.start + range.end) / 2;
-    state.trendModalDate = beijingDateValue((range.start + range.end) / 2);
     const draggable = Boolean(model.visibleWindowMs && model.maxTime - model.minTime > model.visibleWindowMs);
     const interactive = Boolean(model.maxTime > model.minTime && (draggable || isAdaptiveTrendWindow(model.chartWindow)));
     chartWrap.classList.toggle('draggable', draggable);
@@ -2178,10 +2208,12 @@
     plot.innerHTML = frame.plotContent;
     stats.textContent = frame.chartStats;
     meta.innerHTML = frame.metaContent;
-    if (datePicker) {
-      datePicker.value = state.trendModalDate;
-      datePicker.min = beijingDateValue(model.minTime);
-      datePicker.max = beijingDateValue(model.maxTime);
+    if (scalePicker) {
+      scalePicker.querySelectorAll('[data-trend-scale]').forEach((button) => {
+        const active = trendScaleIsActive(model, button.dataset.trendScale);
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
     }
   }
 
@@ -2352,7 +2384,6 @@
     state.trendHidePoints = false;
     state.trendModalVisibleEnd = null;
     state.trendModalVisibleWindowMs = null;
-    state.trendModalDate = '';
     state.trendModalCenterAt = null;
   }
 
@@ -2372,7 +2403,6 @@
     state.trendHidePoints = false;
     state.trendModalVisibleEnd = null;
     state.trendModalVisibleWindowMs = defaultTrendVisibleWindowMs();
-    state.trendModalDate = '';
     state.trendModalCenterAt = null;
     const historyPromise = loadHistoryAlerts(false);
     render();
@@ -2775,24 +2805,27 @@
     });
     const trendClose = document.querySelector('[data-trend-close]');
     if (trendClose) trendClose.addEventListener('click', closeCropTrendModal);
-    const trendDatePicker = document.querySelector('[data-trend-date]');
-    if (trendDatePicker) trendDatePicker.addEventListener('change', () => {
-      resetTrendChartWheel();
-      resetTrendChartAxisTransition();
-      const selectedStart = beijingDateStart(trendDatePicker.value);
-      if (!Number.isFinite(selectedStart)) return;
-      const { model } = activeTrendChartBounds();
-      const windowMs = Math.max(CHART_TIME.HOUR_MS, Number(model.visibleWindowMs) || defaultTrendVisibleWindowMs());
-      const selectedCenter = selectedStart + CHART_TIME.DAY_MS / 2;
-      state.trendModalDate = trendDatePicker.value;
-      state.trendModalVisibleEnd = CHART_TIME.clampVisibleEnd(
-        model.minTime,
-        model.maxTime,
-        windowMs,
-        selectedCenter + windowMs / 2
-      );
-      state.trendModalCenterAt = state.trendModalVisibleEnd - windowMs / 2;
-      render();
+    document.querySelectorAll('[data-trend-scale]').forEach((button) => {
+      button.addEventListener('click', () => {
+        resetTrendChartWheel();
+        resetTrendChartAxisTransition();
+        const { model } = activeTrendChartBounds();
+        const historySpan = Math.max(0, model.maxTime - model.minTime);
+        const requestedWindow = button.dataset.trendScale === 'all'
+          ? historySpan
+          : trendScaleMilliseconds(button.dataset.trendScale);
+        const windowMs = Math.min(historySpan || requestedWindow, Math.max(CHART_TIME.HOUR_MS, requestedWindow));
+        if (!Number.isFinite(windowMs) || windowMs <= 0) return;
+        state.trendModalVisibleWindowMs = windowMs;
+        state.trendModalVisibleEnd = CHART_TIME.clampVisibleEnd(
+          model.minTime,
+          model.maxTime,
+          windowMs,
+          model.maxTime
+        );
+        state.trendModalCenterAt = state.trendModalVisibleEnd - windowMs / 2;
+        render();
+      });
     });
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
     if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {

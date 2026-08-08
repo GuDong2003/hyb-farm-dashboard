@@ -430,7 +430,10 @@ tr:hover td { background: var(--row-hover); }
 .history-line-head, .history-line-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
 .history-line-head strong { color: var(--text); font-size: 13px; }
 .history-line-title { display: flex; align-items: center; gap: 8px; }
-.history-date-picker { height: 26px; padding: 0 6px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--text); background: var(--control-bg); cursor: pointer; font-size: 12px; }
+.history-chart-scale-picker { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; overflow-x: auto; }
+.history-chart-scale { flex: none; height: 26px; padding: 0 7px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--muted); background: var(--control-bg); cursor: pointer; font-size: 12px; line-height: 24px; }
+.history-chart-scale:hover, .history-chart-scale:focus-visible { color: var(--text); background: var(--control-hover); }
+.history-chart-scale.active { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); font-weight: 800; }
 .history-line-head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .history-chart-toggle { flex: none; height: 26px; padding: 0 9px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--muted); background: var(--control-bg); cursor: pointer; font-size: 12px; }
 .history-chart-toggle:hover, .history-chart-toggle:focus-visible { color: var(--text); background: var(--control-hover); }

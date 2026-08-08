@@ -4,7 +4,7 @@
   const HOUR_MS = 60 * 60 * 1000;
   const DAY_MS = 24 * HOUR_MS;
   const BEIJING_OFFSET_MS = 8 * HOUR_MS;
-  const WINDOWS = ['1h', '6h', '12h', '24h', '7d', '30d', 'all'];
+  const WINDOWS = ['1h', '6h', '12h', '24h', '1d', '3d', '7d', '30d', '90d', 'all'];
 
   function adaptiveBucketMilliseconds(windowValue) {
     const windowMs = Number(windowValue);
@@ -27,15 +27,14 @@
   function windowMilliseconds(value, fallback) {
     const normalized = normalizeWindow(value, fallback);
     if (normalized === 'all') return 0;
-    if (normalized === '7d') return 7 * DAY_MS;
-    if (normalized === '30d') return 30 * DAY_MS;
+    if (normalized.endsWith('d')) return Number(normalized.replace('d', '')) * DAY_MS;
     return Number(normalized.replace('h', '')) * HOUR_MS;
   }
 
   function navigationStepMilliseconds(value, fallback) {
     const normalized = normalizeWindow(value, fallback);
     if (normalized === 'all') return 0;
-    return normalized === '7d' || normalized === '30d' ? DAY_MS : HOUR_MS;
+    return normalized.endsWith('d') ? DAY_MS : HOUR_MS;
   }
 
   function formatBeijingDay(dayStartedAt) {

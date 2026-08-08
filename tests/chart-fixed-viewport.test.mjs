@@ -14,10 +14,13 @@ test('price chart renders one fixed SVG viewport without native scrolling geomet
 });
 
 test('current range is selected before anomaly filtering and chart statistics', () => {
-  assert.match(appSource, /const visibleTimelinePoints = historyPointsInRange\(model\.timelinePoints, range\);/);
-  assert.match(appSource, /const filteredTimelinePoints = model\.hideAnomalies/);
-  assert.match(appSource, /historyPointsInRange\(model\.timelinePointsWithoutAnomalies, range\)/);
-  assert.match(appSource, /const points = filteredPoints\.length >= 2 \? filteredPoints : visibleTimelinePoints;/);
+  assert.match(appSource, /const visibleTimelineContext = historyPointsWithContext\(model\.timelinePoints, range\);/);
+  assert.match(appSource, /const visibleTimelinePoints = visibleTimelineContext\.visiblePoints;/);
+  assert.match(appSource, /const filteredTimelineContext = model\.hideAnomalies/);
+  assert.match(appSource, /const filteredTimelinePoints = filteredTimelineContext\.visiblePoints;/);
+  assert.match(appSource, /historyPointsWithContext\(model\.timelinePointsWithoutAnomalies, range\)/);
+  assert.match(appSource, /const points = filteredPoints\.length >= 2 \? filteredPoints : visibleTimelineContext\.points;/);
+  assert.match(appSource, /function historyPointsWithContext\(points, range\)/);
   assert.match(appSource, /const x = \(time\) => pad\.left\s*\+ \(\(time - range\.start\) \/ Math\.max\(1, range\.end - range\.start\)\)/);
 });
 
@@ -70,17 +73,22 @@ test('trend chart keeps a fixed axis column while the y-axis animates', () => {
   assert.match(styleSource, /\.history-line-chart-layout\s*\{[^}]*grid-template-columns:\s*86px\s+minmax\(0, 1fr\);/s);
 });
 
-test('trend popup replaces range selection with a Beijing date picker', () => {
-  assert.match(appSource, /function renderChartDatePicker\(model\)/);
-  assert.match(appSource, /data-trend-date/);
-  assert.match(appSource, /function beijingDateValue\(timestampValue\)/);
-  assert.match(appSource, /function beijingDateStart\(value\)/);
+test('trend popup exposes the requested fixed time scales', () => {
+  assert.match(appSource, /const TREND_SCALE_OPTIONS = \[/);
+  for (const value of ['6h', '12h', '1d', '3d', '7d', '30d', '90d', 'all']) {
+    assert.match(appSource, new RegExp(`value: '${value}'`));
+  }
+  assert.match(appSource, /function renderChartScalePicker\(model\)/);
+  assert.match(appSource, /data-trend-scale/);
+  assert.match(appSource, /trendScaleMilliseconds\(button\.dataset\.trendScale\)/);
+  assert.doesNotMatch(appSource, /data-trend-date/);
+  assert.doesNotMatch(appSource, /function beijingDateValue\(/);
+  assert.doesNotMatch(appSource, /function beijingDateStart\(/);
   assert.doesNotMatch(appSource, /data-trend-window/);
   assert.doesNotMatch(appSource, /function renderChartWindowSelect\(/);
   assert.doesNotMatch(appSource, /preserveTrendChartCenterForWindow/);
   assert.match(appSource, /trendModalCenterAt: null/);
   assert.match(appSource, /state\.trendModalCenterAt = \(range\.start \+ range\.end\) \/ 2;/);
-  assert.match(appSource, /const selectedStart = beijingDateStart\(trendDatePicker\.value\);/);
   assert.match(appSource, /state\.trendModalVisibleEnd = CHART_TIME\.clampVisibleEnd\(/);
 });
 
@@ -111,7 +119,7 @@ test('anomalies do not draw a second connection over the real trend path', () =>
 
 test('full history samples date ticks and aggregates only chart display data', () => {
   assert.match(appSource, /model\.chartWindow === 'all'\s*\? CHART_TIME\.sampleSlots\(dailySlots, 8\)/);
-  assert.match(appSource, /const visibleTimelinePoints = historyPointsInRange\(model\.timelinePoints, range\);/);
+  assert.match(appSource, /const visibleTimelineContext = historyPointsWithContext\(model\.timelinePoints, range\);/);
   assert.match(appSource, /rawTimelinePoints/);
   assert.match(appSource, /CHART_TIME\.aggregatePricePoints\(/);
 });
@@ -135,6 +143,13 @@ test('adaptive trend gaps use dashed connectors without changing the short-windo
   assert.match(appSource, /const gapThreshold = model\.displayBucketMs > 0 \? model\.displayBucketMs \* 1\.5 : 0;/);
   assert.match(appSource, /history-line-gap-path/);
   assert.match(styleSource, /\.history-line-gap-path\s*\{[^}]*stroke-dasharray: 5 4;/s);
+});
+
+test('zoomed chart includes one adjacent point on either side of the visible range', () => {
+  assert.match(appSource, /if \(firstVisibleIndex > 0\) contextPoints\.push\(sortedPoints\[firstVisibleIndex - 1\]\);/);
+  assert.match(appSource, /if \(lastVisibleIndex < sortedPoints\.length - 1\) contextPoints\.push\(sortedPoints\[lastVisibleIndex \+ 1\]\);/);
+  assert.match(appSource, /const statsPoints = filteredTimelinePoints\.length >= 2/);
+  assert.match(appSource, /const pointMarkers = statsPoints\.map/);
 });
 
 test('point tooltip is one fixed-size HTML overlay outside the SVG', () => {
