@@ -131,6 +131,7 @@
       trendHideAnomalies: false,
       trendHidePoints: false,
       trendModalVisibleEnd: null,
+      trendModalCenterAt: null,
       error: ''
     };
 
@@ -1810,6 +1811,9 @@
     const width = 420;
     const height = 250;
     const range = historyChartRange(model, chartOptions.visibleEnd);
+    if (state.trendModalSeedId && chartOptions.allowAnomalyToggle) {
+      state.trendModalCenterAt = (range.start + range.end) / 2;
+    }
     const frame = renderAnimatedHistoryLineChartFrame(model, chartOptions, range, width, height);
     const windowMs = chartWindowMilliseconds(model.chartWindow);
     const draggable = Boolean(windowMs && model.maxTime - model.minTime > windowMs);
@@ -1862,7 +1866,10 @@
     const model = historyLineChartModel(trend.group, trend.result, activeTrendChartOptions());
     if (!Number.isFinite(model.minTime) || !Number.isFinite(model.maxTime) || model.maxTime <= model.minTime) return null;
     const currentRange = historyChartRange(model, state.trendModalVisibleEnd);
-    const center = (Number(currentRange.start) + Number(currentRange.end)) / 2;
+    const rememberedCenter = Number(state.trendModalCenterAt);
+    const center = Number.isFinite(rememberedCenter)
+      ? rememberedCenter
+      : (Number(currentRange.start) + Number(currentRange.end)) / 2;
     const nextWindowMs = chartWindowMilliseconds(nextWindowValue);
     if (!Number.isFinite(center) || !Number.isFinite(nextWindowMs) || nextWindowMs <= 0) return null;
     return CHART_TIME.clampVisibleEnd(
@@ -1971,6 +1978,7 @@
         model.minTime,
         model.maxTime
       );
+      state.trendModalCenterAt = state.trendModalVisibleEnd - chartWindowMilliseconds(model.chartWindow) / 2;
       chartWrap.classList.add('dragging');
       if (event.cancelable) event.preventDefault();
       scheduleTrendChartViewportRefresh();
@@ -2013,6 +2021,7 @@
         model.minTime,
         model.maxTime
       );
+      state.trendModalCenterAt = state.trendModalVisibleEnd - chartWindowMilliseconds(model.chartWindow) / 2;
       scheduleTrendChartViewportRefresh();
     }, { passive: false });
 
@@ -2052,6 +2061,7 @@
     const range = historyChartRange(model, state.trendModalVisibleEnd);
     const frame = renderAnimatedHistoryLineChartFrame(model, chartOptions, range, width, height);
     state.trendModalVisibleEnd = range.end;
+    state.trendModalCenterAt = (range.start + range.end) / 2;
     layout.style.setProperty('--history-axis-width', `${frame.axisWidth}px`);
     axis.innerHTML = frame.axisContent;
     plot.innerHTML = frame.plotContent;
@@ -2226,6 +2236,7 @@
     state.trendHideAnomalies = false;
     state.trendHidePoints = false;
     state.trendModalVisibleEnd = null;
+    state.trendModalCenterAt = null;
   }
 
   function closeCropTrendModal() {
@@ -2244,6 +2255,7 @@
     state.trendHideAnomalies = false;
     state.trendHidePoints = false;
     state.trendModalVisibleEnd = null;
+    state.trendModalCenterAt = null;
     const historyPromise = loadHistoryAlerts(false);
     render();
     historyPromise.finally(() => {

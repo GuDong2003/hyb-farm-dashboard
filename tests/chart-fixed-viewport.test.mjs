@@ -67,6 +67,10 @@ test('trend chart keeps a fixed axis column while the y-axis animates', () => {
 
 test('chart window changes preserve the current viewport center across detail levels', () => {
   assert.match(appSource, /function preserveTrendChartCenterForWindow\(nextWindowValue\)/);
+  assert.match(appSource, /trendModalCenterAt: null/);
+  assert.match(appSource, /const rememberedCenter = Number\(state\.trendModalCenterAt\);/);
+  assert.match(appSource, /state\.trendModalCenterAt = \(range\.start \+ range\.end\) \/ 2;/);
+  assert.match(appSource, /state\.trendModalCenterAt = state\.trendModalVisibleEnd - chartWindowMilliseconds\(model\.chartWindow\) \/ 2;/);
   assert.match(appSource, /const currentRange = historyChartRange\(model, state\.trendModalVisibleEnd\);/);
   assert.match(appSource, /CHART_TIME\.clampVisibleEnd\(\s*model\.minTime,\s*model\.maxTime,\s*nextWindowMs,/s);
   assert.match(appSource, /const preservedVisibleEnd = preserveTrendChartCenterForWindow\(nextWindow\);/);
