@@ -42,7 +42,7 @@ test('wheel gestures zoom the unified timeline around the cursor', () => {
   assert.match(appSource, /if \(atLeftEdge && !atRightEdge\) pointerRatio = 0;/);
   assert.match(appSource, /if \(atRightEdge && !atLeftEdge\) pointerRatio = 1;/);
   assert.match(appSource, /const nextWindowMs =/);
-  assert.match(appSource, /const anchorPoint = pointerPoint \|\| activePoint;/);
+  assert.match(appSource, /const anchorPoint = activePoint \|\| pointerPoint;/);
   assert.match(appSource, /const anchorTime = Number\(anchorPoint && anchorPoint\.dataset\.historyPointAt\);/);
   assert.match(appSource, /pointerRatio = \(anchorTime - range\.start\) \/ Math\.max\(1, currentWindowMs\);/);
   assert.match(appSource, /state\.trendModalVisibleWindowMs = nextWindowMs;/);
@@ -163,6 +163,13 @@ test('zoomed chart includes one adjacent point on either side of the visible ran
   assert.match(appSource, /if \(lastVisibleIndex < sortedPoints\.length - 1\) contextPoints\.push\(sortedPoints\[lastVisibleIndex \+ 1\]\);/);
   assert.match(appSource, /const statsPoints = filteredTimelinePoints\.length >= 2/);
   assert.match(appSource, /const pointMarkers = statsPoints\.map/);
+});
+
+test('bucketed boundary samples align with exact range edges', () => {
+  assert.match(appSource, /const hasSourceAtRangeStart = sourceTimes\.some/);
+  assert.match(appSource, /const hasSourceAtRangeEnd = sourceTimes\.some/);
+  assert.match(appSource, /const boundaryCapturedAt = hasSourceAtRangeEnd && !hasSourceAtRangeStart/);
+  assert.match(appSource, /boundaryCapturedAt != null/);
 });
 
 test('point tooltip is one fixed-size HTML overlay outside the SVG', () => {

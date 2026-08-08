@@ -1657,11 +1657,20 @@
       const capturedAt = Number(point.capturedAt);
       const sourceTimes = Array.isArray(point.sourceCapturedAt) ? point.sourceCapturedAt.map(Number) : [];
       const hasSourceBeforeRange = sourceTimes.some((value) => Number.isFinite(value) && value >= range.start && value <= range.end);
-      const clampedCapturedAt = capturedAt < range.start && hasSourceBeforeRange
-        ? range.start
-        : capturedAt > range.end && hasSourceBeforeRange
-          ? range.end
-          : capturedAt;
+      const hasSourceAtRangeStart = sourceTimes.some((value) => Number.isFinite(value) && Math.abs(value - range.start) <= 1);
+      const hasSourceAtRangeEnd = sourceTimes.some((value) => Number.isFinite(value) && Math.abs(value - range.end) <= 1);
+      const boundaryCapturedAt = hasSourceAtRangeEnd && !hasSourceAtRangeStart
+        ? range.end
+        : hasSourceAtRangeStart && !hasSourceAtRangeEnd
+          ? range.start
+          : null;
+      const clampedCapturedAt = boundaryCapturedAt != null
+        ? boundaryCapturedAt
+        : capturedAt < range.start && hasSourceBeforeRange
+          ? range.start
+          : capturedAt > range.end && hasSourceBeforeRange
+            ? range.end
+            : capturedAt;
       visible.push(clampedCapturedAt === capturedAt ? point : Object.assign({}, point, { capturedAt: clampedCapturedAt }));
       return visible;
     }, []);
@@ -2164,7 +2173,7 @@
       const wrapRect = chartWrap.getBoundingClientRect();
       const pointerPoint = nearestTrendPoint(chartWrap, event.clientX);
       const activePoint = chartWrap.querySelector('.crosshair-active [data-history-point]');
-      const anchorPoint = pointerPoint || activePoint;
+      const anchorPoint = activePoint || pointerPoint;
       const anchorTime = Number(anchorPoint && anchorPoint.dataset.historyPointAt);
       let pointerRatio = wrapRect.width > 0
         ? Math.min(1, Math.max(0, (event.clientX - wrapRect.left) / wrapRect.width))
