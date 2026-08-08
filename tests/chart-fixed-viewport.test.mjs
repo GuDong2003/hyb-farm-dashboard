@@ -58,6 +58,13 @@ test('chart animates natural y-axis domains without rebuilding alert data', () =
   assert.match(appSource, /CHART_TIME\.aggregatePricePoints\(/);
 });
 
+test('trend chart keeps a fixed axis column while the y-axis animates', () => {
+  assert.match(appSource, /const TREND_CHART_FIXED_AXIS_WIDTH = 86;/);
+  assert.match(appSource, /const axisWidth = TREND_CHART_FIXED_AXIS_WIDTH;/);
+  assert.doesNotMatch(appSource, /axisWidth = Math\.min\(86, Math\.max\(48, 14 \+ widestYTick \* 6\.5\)\)/);
+  assert.match(styleSource, /\.history-line-chart-layout\s*\{[^}]*grid-template-columns:\s*86px\s+minmax\(0, 1fr\);/s);
+});
+
 test('chart keeps visible raw anomaly markers inside the y-axis domain', () => {
   assert.match(appSource, /const visibleEventPrices =/);
   assert.match(appSource, /visibleEvents\.forEach[\s\S]*?visibleEventPrices\.push/);

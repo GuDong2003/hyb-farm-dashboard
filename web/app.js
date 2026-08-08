@@ -21,6 +21,7 @@
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const HISTORY_ANOMALY_THRESHOLD = 20;
   const TREND_CHART_AXIS_TRANSITION_MS = 220;
+  const TREND_CHART_FIXED_AXIS_WIDTH = 86;
   const PRICE_ALERT = window.HYBPriceAlert;
   const PRICE_CHANGE_ALERT_WINDOW = PRICE_ALERT.WINDOW;
   const CHART_TIME = window.HYBChartTime;
@@ -1662,8 +1663,10 @@
     const yTickRatios = yTickValues.map((_, index) => index / Math.max(1, yTickValues.length - 1));
     const yTickDigits = chartAxisPrecision(yTickValues, yAxis.step);
     const yTickLabels = yTickValues.map((value) => formatChartAxisUsd(value, yTickDigits));
-    const widestYTick = Math.max(...yTickLabels.map((label) => label.length));
-    const axisWidth = Math.min(86, Math.max(48, 14 + widestYTick * 6.5));
+    // Keep the axis column fixed while labels animate between domains. A
+    // changing label width would otherwise move the plot and resize the
+    // apparent chart frame by a few pixels on every transition frame.
+    const axisWidth = TREND_CHART_FIXED_AXIS_WIDTH;
     const showDailySlots = ['7d', '30d', 'all'].includes(model.chartWindow)
       && range.end - range.start >= CHART_TIME.DAY_MS;
     const dailySlots = showDailySlots ? CHART_TIME.beijingDaySlots(range.start, range.end) : [];
