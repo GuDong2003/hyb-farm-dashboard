@@ -100,7 +100,7 @@ test('trend popup exposes the requested fixed time scales', () => {
 
 test('trend chart exposes visible interaction guidance', () => {
   assert.match(appSource, /class="history-chart-help"/);
-  assert.match(appSource, /滚轮：放大\/缩小 · 左键拖动：移动时间/);
+  assert.match(appSource, /滚轮：放大\/缩小 · 左键：拖动/);
   assert.doesNotMatch(appSource, /悬浮：查看十字线/);
   assert.match(styleSource, /\.history-chart-help\s*\{[^}]*font-size:\s*11px;/s);
 });

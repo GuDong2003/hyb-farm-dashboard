@@ -1983,7 +1983,7 @@
       return `
         <aside class="history-line-panel">
           <div class="history-line-head">
-            <div class="history-line-title"><strong>价格趋势</strong>${scalePicker}<span class="history-chart-help">滚轮：放大/缩小 · 左键拖动：移动时间</span></div>
+            <div class="history-line-title"><strong>价格趋势</strong>${scalePicker}<span class="history-chart-help">滚轮：放大/缩小 · 左键：拖动</span></div>
             <span>暂无</span>
           </div>
           <div class="history-line-empty">趋势数据不足</div>
@@ -2007,7 +2007,7 @@
     return `
       <aside class="history-line-panel" data-history-line-panel>
         <div class="history-line-head">
-          <div class="history-line-title"><strong>价格趋势</strong>${scalePicker}<span class="history-chart-help">滚轮：放大/缩小 · 左键拖动：移动时间</span></div>
+          <div class="history-line-title"><strong>价格趋势</strong>${scalePicker}<span class="history-chart-help">滚轮：放大/缩小 · 左键：拖动</span></div>
           <div class="history-line-head-actions"><span data-history-chart-stats>${frame.chartStats}</span>${anomalyToggle}</div>
         </div>
         <div class="history-line-chart-layout" data-history-chart-layout style="--history-axis-width:${frame.axisWidth}px">
