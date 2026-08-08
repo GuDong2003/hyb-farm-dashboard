@@ -434,6 +434,7 @@ tr:hover td { background: var(--row-hover); }
 .history-chart-scale { flex: none; height: 26px; padding: 0 7px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--muted); background: var(--control-bg); cursor: pointer; font-size: 12px; line-height: 24px; }
 .history-chart-scale:hover, .history-chart-scale:focus-visible { color: var(--text); background: var(--control-hover); }
 .history-chart-scale.active { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); font-weight: 800; }
+.history-chart-help { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .history-line-head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .history-chart-toggle { flex: none; height: 26px; padding: 0 9px; border: 1px solid var(--control-border); border-radius: 6px; color: var(--muted); background: var(--control-bg); cursor: pointer; font-size: 12px; }
 .history-chart-toggle:hover, .history-chart-toggle:focus-visible { color: var(--text); background: var(--control-hover); }
