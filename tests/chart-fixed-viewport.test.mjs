@@ -45,7 +45,10 @@ test('wheel gestures zoom the unified timeline around the cursor', () => {
   assert.match(appSource, /const anchorPoint = activePoint \|\| pointerPoint;/);
   assert.match(appSource, /const anchorTime = Number\(anchorPoint && anchorPoint\.dataset\.historyPointAt\);/);
   assert.match(appSource, /pointerRatio = \(anchorTime - range\.start\) \/ Math\.max\(1, currentWindowMs\);/);
-  assert.match(appSource, /state\.trendModalVisibleWindowMs = nextWindowMs;/);
+  assert.match(appSource, /startTrendChartViewportTransition\(model, nextWindowMs, nextVisibleEnd\);/);
+  assert.match(appSource, /function startTrendChartViewportTransition\(model, visibleWindowMs, visibleEnd\)/);
+  assert.match(appSource, /function sampleTrendChartViewportTransition\(nowValue\)/);
+  assert.match(appSource, /TREND_CHART_VIEWPORT_TRANSITION_MS = 180;/);
   assert.match(appSource, /if \(!chartWrap\.hasAttribute\('data-history-chart-drag'\)\) return;/);
   assert.match(appSource, /addEventListener\('wheel',[\s\S]*?\{ passive: false \}\)/);
 });

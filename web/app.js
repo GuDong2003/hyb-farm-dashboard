@@ -21,6 +21,7 @@
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const HISTORY_ANOMALY_THRESHOLD = 20;
   const TREND_CHART_AXIS_TRANSITION_MS = 220;
+  const TREND_CHART_VIEWPORT_TRANSITION_MS = 180;
   const TREND_CHART_FIXED_AXIS_WIDTH = 86;
   const TREND_SCALE_OPTIONS = [
     { value: '6h', label: '6h' },
@@ -68,9 +69,12 @@
   let autoRefreshTimer = null;
   let trendChartUpdateFrame = 0;
   let trendChartAxisAnimationFrame = 0;
+  let trendChartViewportAnimationFrame = 0;
   let trendChartDrag = null;
   let trendChartAxisCurrent = null;
   let trendChartAxisTransition = null;
+  let trendChartViewportCurrent = null;
+  let trendChartViewportTransition = null;
   let trendChartWheelDelta = 0;
   let trendChartWheelResetTimer = null;
   let suppressTrendPointClick = false;
@@ -1275,6 +1279,7 @@
       window.cancelAnimationFrame(trendChartUpdateFrame);
       trendChartUpdateFrame = 0;
     }
+    cancelTrendChartViewportTransition();
     trendChartDrag = null;
     suppressTrendPointClick = false;
     const app = document.getElementById('app');
@@ -1527,6 +1532,84 @@
     trendChartAxisAnimationFrame = 0;
     trendChartAxisCurrent = null;
     trendChartAxisTransition = null;
+  }
+
+  function sampleTrendChartViewportTransition(nowValue) {
+    const transition = trendChartViewportTransition;
+    if (!transition) return null;
+    const now = Number.isFinite(Number(nowValue)) ? Number(nowValue) : performance.now();
+    const progress = Math.min(1, Math.max(0, (now - transition.startedAt) / TREND_CHART_VIEWPORT_TRANSITION_MS));
+    const eased = CHART_TIME.easeOutCubic(progress);
+    const current = {
+      visibleWindowMs: transition.from.visibleWindowMs
+        + (transition.to.visibleWindowMs - transition.from.visibleWindowMs) * eased,
+      visibleEnd: transition.from.visibleEnd
+        + (transition.to.visibleEnd - transition.from.visibleEnd) * eased
+    };
+    trendChartViewportCurrent = current;
+    if (progress >= 1) {
+      state.trendModalVisibleWindowMs = transition.to.visibleWindowMs;
+      state.trendModalVisibleEnd = transition.to.visibleEnd;
+      state.trendModalCenterAt = transition.to.visibleEnd - transition.to.visibleWindowMs / 2;
+      trendChartViewportCurrent = null;
+      trendChartViewportTransition = null;
+      return transition.to;
+    }
+    return current;
+  }
+
+  function cancelTrendChartViewportTransition() {
+    const current = sampleTrendChartViewportTransition(performance.now());
+    if (current) {
+      state.trendModalVisibleWindowMs = current.visibleWindowMs;
+      state.trendModalVisibleEnd = current.visibleEnd;
+      state.trendModalCenterAt = current.visibleEnd - current.visibleWindowMs / 2;
+    }
+    if (trendChartViewportAnimationFrame) window.cancelAnimationFrame(trendChartViewportAnimationFrame);
+    trendChartViewportAnimationFrame = 0;
+    trendChartViewportCurrent = null;
+    trendChartViewportTransition = null;
+  }
+
+  function scheduleTrendChartViewportAnimation() {
+    if (!trendChartViewportTransition || trendChartViewportAnimationFrame) return;
+    trendChartViewportAnimationFrame = window.requestAnimationFrame(() => {
+      trendChartViewportAnimationFrame = 0;
+      const chartWrap = document.querySelector('[data-history-chart-wrap]');
+      if (chartWrap) updateTrendChartViewport(chartWrap);
+      if (trendChartViewportTransition) scheduleTrendChartViewportAnimation();
+    });
+  }
+
+  function startTrendChartViewportTransition(model, visibleWindowMs, visibleEnd) {
+    const current = trendChartViewportCurrent || (() => {
+      const range = historyChartRange(model, state.trendModalVisibleEnd);
+      return {
+        visibleWindowMs: model.visibleWindowMs,
+        visibleEnd: range.end
+      };
+    })();
+    const target = {
+      visibleWindowMs,
+      visibleEnd
+    };
+    if (Math.abs(current.visibleWindowMs - target.visibleWindowMs) < 1
+      && Math.abs(current.visibleEnd - target.visibleEnd) < 1) {
+      state.trendModalVisibleWindowMs = target.visibleWindowMs;
+      state.trendModalVisibleEnd = target.visibleEnd;
+      state.trendModalCenterAt = target.visibleEnd - target.visibleWindowMs / 2;
+      return;
+    }
+    trendChartViewportCurrent = current;
+    trendChartViewportTransition = {
+      from: current,
+      to: target,
+      startedAt: performance.now()
+    };
+    state.trendModalVisibleWindowMs = target.visibleWindowMs;
+    state.trendModalVisibleEnd = target.visibleEnd;
+    state.trendModalCenterAt = target.visibleEnd - target.visibleWindowMs / 2;
+    scheduleTrendChartViewportAnimation();
   }
 
   function sampleTrendChartAxisTransition(nowValue) {
@@ -1947,12 +2030,14 @@
   }
 
   function activeTrendChartOptions() {
+    const animatedViewport = sampleTrendChartViewportTransition(performance.now());
+    const viewport = animatedViewport || trendChartViewportCurrent;
     return {
       allowAnomalyToggle: true,
       hideAnomalies: state.trendHideAnomalies,
       windowValue: 'all',
-      visibleEnd: state.trendModalVisibleEnd,
-      visibleWindowMs: state.trendModalVisibleWindowMs
+      visibleEnd: viewport ? viewport.visibleEnd : state.trendModalVisibleEnd,
+      visibleWindowMs: viewport ? viewport.visibleWindowMs : state.trendModalVisibleWindowMs
     };
   }
 
@@ -2092,6 +2177,7 @@
 
     chartWrap.addEventListener('pointerdown', (event) => {
       if (event.button !== 0 || !chartWrap.hasAttribute('data-history-chart-drag')) return;
+      cancelTrendChartViewportTransition();
       const { model } = activeTrendChartBounds();
       if (!Number.isFinite(model.visibleWindowMs) || model.maxTime - model.minTime <= model.visibleWindowMs) return;
       const range = historyChartRange(model, state.trendModalVisibleEnd);
@@ -2154,7 +2240,10 @@
       const wheelDirection = Math.sign(trendChartWheelDelta);
       trendChartWheelDelta = 0;
       const { model } = activeTrendChartBounds();
-      const range = historyChartRange(model, state.trendModalVisibleEnd);
+      const range = historyChartRange(
+        model,
+        trendChartViewportCurrent ? trendChartViewportCurrent.visibleEnd : state.trendModalVisibleEnd
+      );
       const historySpan = model.maxTime - model.minTime;
       const maxWindowMs = historySpan;
       const minWindowMs = Math.min(CHART_TIME.HOUR_MS, maxWindowMs);
@@ -2179,16 +2268,14 @@
       if (atLeftEdge && !atRightEdge) pointerRatio = 0;
       if (atRightEdge && !atLeftEdge) pointerRatio = 1;
       const anchorAt = range.start + currentWindowMs * pointerRatio;
-      const nextVisibleEnd = anchorAt + nextWindowMs * (1 - pointerRatio);
-      state.trendModalVisibleWindowMs = nextWindowMs;
-      state.trendModalVisibleEnd = CHART_TIME.clampVisibleEnd(
+      const requestedVisibleEnd = anchorAt + nextWindowMs * (1 - pointerRatio);
+      const nextVisibleEnd = CHART_TIME.clampVisibleEnd(
         model.minTime,
         model.maxTime,
         nextWindowMs,
-        nextVisibleEnd
+        requestedVisibleEnd
       );
-      state.trendModalCenterAt = state.trendModalVisibleEnd - nextWindowMs / 2;
-      scheduleTrendChartViewportRefresh();
+      startTrendChartViewportTransition(model, nextWindowMs, nextVisibleEnd);
     }, { passive: false });
 
     chartWrap.addEventListener('click', (event) => {
@@ -2227,8 +2314,10 @@
     const width = 420;
     const range = historyChartRange(model, state.trendModalVisibleEnd);
     const frame = renderAnimatedHistoryLineChartFrame(model, chartOptions, range, width, height);
-    state.trendModalVisibleEnd = range.end;
-    state.trendModalCenterAt = (range.start + range.end) / 2;
+    if (!trendChartViewportTransition) {
+      state.trendModalVisibleEnd = range.end;
+      state.trendModalCenterAt = (range.start + range.end) / 2;
+    }
     const draggable = Boolean(model.visibleWindowMs && model.maxTime - model.minTime > model.visibleWindowMs);
     const interactive = Boolean(model.maxTime > model.minTime && (draggable || isAdaptiveTrendWindow(model.chartWindow)));
     chartWrap.classList.toggle('draggable', draggable);
