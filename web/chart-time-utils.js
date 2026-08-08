@@ -6,6 +6,19 @@
   const BEIJING_OFFSET_MS = 8 * HOUR_MS;
   const WINDOWS = ['1h', '6h', '12h', '24h', '7d', '30d', 'all'];
 
+  function adaptiveBucketMilliseconds(windowValue) {
+    const windowMs = Number(windowValue);
+    if (!Number.isFinite(windowMs) || windowMs <= 0) return DAY_MS;
+    if (windowMs <= DAY_MS) return HOUR_MS;
+    if (windowMs <= 7 * DAY_MS) return 6 * HOUR_MS;
+    if (windowMs <= 30 * DAY_MS) return 12 * HOUR_MS;
+    if (windowMs <= 90 * DAY_MS) return DAY_MS;
+    if (windowMs <= 180 * DAY_MS) return 2 * DAY_MS;
+    if (windowMs <= 365 * DAY_MS) return 3 * DAY_MS;
+    if (windowMs <= 730 * DAY_MS) return 7 * DAY_MS;
+    return 14 * DAY_MS;
+  }
+
   function normalizeWindow(value, fallback) {
     if (WINDOWS.includes(value)) return value;
     return WINDOWS.includes(fallback) ? fallback : '24h';
@@ -215,6 +228,7 @@
     normalizeWindow,
     windowMilliseconds,
     navigationStepMilliseconds,
+    adaptiveBucketMilliseconds,
     beijingDaySlots,
     sampleSlots,
     aggregatePricePoints,

@@ -449,6 +449,10 @@ tr:hover td { background: var(--row-hover); }
 .history-line-path.up { stroke: var(--red); }
 .history-line-path.down { stroke: var(--green); }
 .history-line-path.flat { stroke: var(--muted); }
+.history-line-gap-path { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 5 4; opacity: .78; }
+.history-line-gap-path.up { stroke: var(--red); }
+.history-line-gap-path.down { stroke: var(--green); }
+.history-line-gap-path.flat { stroke: var(--muted); }
 .history-line-point-wrap { cursor: pointer; }
 .history-line-point-hit { fill: transparent; stroke: transparent; }
 .history-line-point-hit:focus { outline: none; }

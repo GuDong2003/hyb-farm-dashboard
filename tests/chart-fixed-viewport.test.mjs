@@ -31,10 +31,14 @@ test('mouse and touch pointer dragging shift the fixed time anchor', () => {
   assert.match(appSource, /setPointerCapture\(event\.pointerId\)/);
 });
 
-test('wheel gestures navigate finite windows in time units', () => {
+test('wheel gestures zoom adaptive windows and retain time navigation for short windows', () => {
   assert.match(appSource, /CHART_TIME\.wheelNavigationDelta\(event\.deltaX, event\.deltaY\)/);
   assert.match(appSource, /CHART_TIME\.navigationStepMilliseconds\(model\.chartWindow/);
   assert.match(appSource, /CHART_TIME\.shiftVisibleEndBySteps\(/);
+  assert.match(appSource, /if \(isAdaptiveTrendWindow\(model\.chartWindow\)\)/);
+  assert.match(appSource, /const pointerRatio =/);
+  assert.match(appSource, /const nextWindowMs =/);
+  assert.match(appSource, /state\.trendModalVisibleWindowMs = nextWindowMs >= maxWindowMs \? null : nextWindowMs;/);
   assert.match(appSource, /if \(!chartWrap\.hasAttribute\('data-history-chart-drag'\)\) return;/);
   assert.match(appSource, /addEventListener\('wheel',[\s\S]*?\{ passive: false \}\)/);
 });
@@ -70,7 +74,8 @@ test('chart window changes preserve the current viewport center across detail le
   assert.match(appSource, /trendModalCenterAt: null/);
   assert.match(appSource, /const rememberedCenter = Number\(state\.trendModalCenterAt\);/);
   assert.match(appSource, /state\.trendModalCenterAt = \(range\.start \+ range\.end\) \/ 2;/);
-  assert.match(appSource, /state\.trendModalCenterAt = state\.trendModalVisibleEnd - chartWindowMilliseconds\(model\.chartWindow\) \/ 2;/);
+  assert.match(appSource, /state\.trendModalCenterAt = state\.trendModalVisibleEnd - model\.visibleWindowMs \/ 2;/);
+  assert.match(appSource, /trendModalVisibleWindowMs: null/);
   assert.match(appSource, /const currentIsDaily = \['7d', '30d', 'all'\]\.includes\(model\.chartWindow\);/);
   assert.match(appSource, /const nextIsHourly = \['1h', '6h', '12h', '24h'\]\.includes\(normalizeChartWindow\(nextWindowValue\)\);/);
   assert.match(appSource, /const dailyPoints = historyPointsInRange\(model\.timelinePoints, currentRange\);/);
@@ -112,8 +117,16 @@ test('full history samples date ticks and aggregates only chart display data', (
   assert.match(appSource, /CHART_TIME\.aggregatePricePoints\(/);
 });
 
-test('all history never advertises drag navigation', () => {
-  assert.match(appSource, /const draggable = Boolean\(windowMs && model\.maxTime - model\.minTime > windowMs\);/);
+test('all history enables wheel interaction and gains dragging after zoom', () => {
+  assert.match(appSource, /const draggable = Boolean\(model\.visibleWindowMs && model\.maxTime - model\.minTime > model\.visibleWindowMs\);/);
+  assert.match(appSource, /const interactive = Boolean\(model\.maxTime > model\.minTime && \(draggable \|\| isAdaptiveTrendWindow\(model\.chartWindow\)\)\);/);
+  assert.match(appSource, /chartWrap\.classList\.toggle\('draggable', draggable\);/);
+});
+
+test('adaptive trend gaps use dashed connectors without changing the short-window path', () => {
+  assert.match(appSource, /const gapThreshold = model\.displayBucketMs > 0 \? model\.displayBucketMs \* 1\.5 : 0;/);
+  assert.match(appSource, /history-line-gap-path/);
+  assert.match(styleSource, /\.history-line-gap-path\s*\{[^}]*stroke-dasharray: 5 4;/s);
 });
 
 test('point tooltip is one fixed-size HTML overlay outside the SVG', () => {

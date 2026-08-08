@@ -10,6 +10,14 @@ test('30d maps to a thirty-day window', () => {
   assert.equal(chartTime.windowMilliseconds('30d', '24h'), 30 * 24 * 60 * 60 * 1000);
 });
 
+test('adaptive chart buckets follow the visible time span', () => {
+  assert.equal(chartTime.adaptiveBucketMilliseconds(12 * chartTime.HOUR_MS), chartTime.HOUR_MS);
+  assert.equal(chartTime.adaptiveBucketMilliseconds(7 * chartTime.DAY_MS), 6 * chartTime.HOUR_MS);
+  assert.equal(chartTime.adaptiveBucketMilliseconds(30 * chartTime.DAY_MS), 12 * chartTime.HOUR_MS);
+  assert.equal(chartTime.adaptiveBucketMilliseconds(90 * chartTime.DAY_MS), chartTime.DAY_MS);
+  assert.equal(chartTime.adaptiveBucketMilliseconds(365 * chartTime.DAY_MS), 3 * chartTime.DAY_MS);
+});
+
 test('hour windows step by one hour while long windows step by one day', () => {
   for (const value of ['1h', '6h', '12h', '24h']) {
     assert.equal(chartTime.navigationStepMilliseconds(value, '24h'), chartTime.HOUR_MS);
