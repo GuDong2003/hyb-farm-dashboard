@@ -138,7 +138,6 @@
       priceAlertModalOpener: '',
       trendModalSeedId: '',
       trendHideAnomalies: false,
-      trendHidePoints: false,
       trendModalVisibleEnd: null,
       trendModalVisibleWindowMs: null,
       trendModalCenterAt: null,
@@ -1843,7 +1842,6 @@
           <text class="history-line-label" x="${formatNumber(x(last.capturedAt), 2)}" y="${height - 8}" text-anchor="end">${escapeHtml(formatChartDate(last.capturedAt, range.end - range.start))}</text>
         `
         : '';
-    const hidePoints = Boolean(chartOptions.allowPointToggle && chartOptions.hidePoints);
     const pointMarkers = statsPoints.map((point) => {
       const pointX = x(point.capturedAt);
       const pointY = y(point.price);
@@ -1853,7 +1851,7 @@
       return `
         <g class="history-line-point-wrap">
           <circle class="history-line-point-hit" data-history-point data-history-point-at="${formatNumber(point.capturedAt, 0)}" data-history-point-time="${escapeHtml(timeText)}" data-history-point-price="${escapeHtml(priceText)}" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="8" tabindex="0" role="img" aria-label="${escapeHtml(pointLabel)}"></circle>
-          ${hidePoints ? '' : `<circle class="history-line-point" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="2.5" aria-hidden="true"></circle>`}
+          <circle class="history-line-point" cx="${formatNumber(pointX, 2)}" cy="${formatNumber(pointY, 2)}" r="2.5" aria-hidden="true"></circle>
         </g>
       `;
     }).join('');
@@ -1923,15 +1921,11 @@
     const anomalyToggle = chartOptions.allowAnomalyToggle && model.anomalyTimes.size
       ? `<button class="history-chart-toggle ${model.hideAnomalies ? 'active' : ''}" type="button" data-trend-anomaly-toggle aria-pressed="${model.hideAnomalies ? 'true' : 'false'}">${model.hideAnomalies ? '显示异常值' : '隐藏异常值'}</button>`
       : '';
-    const hidePoints = Boolean(chartOptions.allowPointToggle && chartOptions.hidePoints);
-    const pointToggle = chartOptions.allowPointToggle
-      ? `<button class="history-chart-toggle ${hidePoints ? 'active' : ''}" type="button" data-trend-point-toggle aria-pressed="${hidePoints ? 'true' : 'false'}">${hidePoints ? '显示数据点' : '隐藏数据点'}</button>`
-      : '';
     return `
       <aside class="history-line-panel" data-history-line-panel>
         <div class="history-line-head">
           <div class="history-line-title"><strong>价格趋势</strong>${scalePicker}</div>
-          <div class="history-line-head-actions"><span data-history-chart-stats>${frame.chartStats}</span>${pointToggle}${anomalyToggle}</div>
+          <div class="history-line-head-actions"><span data-history-chart-stats>${frame.chartStats}</span>${anomalyToggle}</div>
         </div>
         <div class="history-line-chart-layout" data-history-chart-layout style="--history-axis-width:${frame.axisWidth}px">
           <div class="history-line-y-axis" data-history-y-axis aria-hidden="true">
@@ -1955,9 +1949,7 @@
   function activeTrendChartOptions() {
     return {
       allowAnomalyToggle: true,
-      allowPointToggle: true,
       hideAnomalies: state.trendHideAnomalies,
-      hidePoints: state.trendHidePoints,
       windowValue: 'all',
       visibleEnd: state.trendModalVisibleEnd,
       visibleWindowMs: state.trendModalVisibleWindowMs
@@ -2420,7 +2412,6 @@
     resetTrendChartAxisTransition();
     state.trendModalSeedId = '';
     state.trendHideAnomalies = false;
-    state.trendHidePoints = false;
     state.trendModalVisibleEnd = null;
     state.trendModalVisibleWindowMs = null;
     state.trendModalCenterAt = null;
@@ -2439,7 +2430,6 @@
     resetTrendChartAxisTransition();
     state.trendModalSeedId = seedId;
     state.trendHideAnomalies = false;
-    state.trendHidePoints = false;
     state.trendModalVisibleEnd = null;
     state.trendModalVisibleWindowMs = defaultTrendVisibleWindowMs();
     state.trendModalCenterAt = null;
@@ -2869,12 +2859,6 @@
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
     if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {
       state.trendHideAnomalies = !state.trendHideAnomalies;
-      resetTrendChartAxisTransition();
-      render();
-    });
-    const trendPointToggle = document.querySelector('[data-trend-point-toggle]');
-    if (trendPointToggle) trendPointToggle.addEventListener('click', () => {
-      state.trendHidePoints = !state.trendHidePoints;
       resetTrendChartAxisTransition();
       render();
     });
