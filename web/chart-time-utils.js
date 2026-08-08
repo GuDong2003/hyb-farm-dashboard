@@ -116,6 +116,28 @@
     };
   }
 
+  function easeOutCubic(value) {
+    const progress = Math.min(1, Math.max(0, Number(value) || 0));
+    return 1 - ((1 - progress) ** 3);
+  }
+
+  function interpolatePriceDomain(fromValue, toValue, progressValue) {
+    const from = fromValue && Number.isFinite(Number(fromValue.min)) && Number.isFinite(Number(fromValue.max))
+      ? { min: Number(fromValue.min), max: Number(fromValue.max) }
+      : null;
+    const to = toValue && Number.isFinite(Number(toValue.min)) && Number.isFinite(Number(toValue.max))
+      ? { min: Number(toValue.min), max: Number(toValue.max) }
+      : null;
+    if (!from && !to) return null;
+    if (!from) return to;
+    if (!to) return from;
+    const progress = Math.min(1, Math.max(0, Number(progressValue) || 0));
+    return {
+      min: from.min + (to.min - from.min) * progress,
+      max: from.max + (to.max - from.max) * progress
+    };
+  }
+
   function pointIntersectsRange(point, minValue, maxValue) {
     const minTime = Number(minValue);
     const maxTime = Number(maxValue);
@@ -197,6 +219,8 @@
     sampleSlots,
     aggregatePricePoints,
     expandPriceDomain,
+    easeOutCubic,
+    interpolatePriceDomain,
     pointIntersectsRange,
     clampVisibleEnd,
     visibleRange,

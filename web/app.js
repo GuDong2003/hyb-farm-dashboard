@@ -20,6 +20,7 @@
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const HISTORY_ANOMALY_THRESHOLD = 20;
+  const TREND_CHART_AXIS_TRANSITION_MS = 220;
   const PRICE_ALERT = window.HYBPriceAlert;
   const PRICE_CHANGE_ALERT_WINDOW = PRICE_ALERT.WINDOW;
   const CHART_TIME = window.HYBChartTime;
@@ -55,8 +56,10 @@
   let priceBridgeRequest = null;
   let autoRefreshTimer = null;
   let trendChartUpdateFrame = 0;
+  let trendChartAxisAnimationFrame = 0;
   let trendChartDrag = null;
-  let trendChartDragAxis = null;
+  let trendChartAxisCurrent = null;
+  let trendChartAxisTransition = null;
   let trendChartWheelDelta = 0;
   let trendChartWheelResetTimer = null;
   let suppressTrendPointClick = false;
@@ -1444,6 +1447,89 @@
     };
   }
 
+  function validChartPriceDomain(value) {
+    if (!value || !Number.isFinite(Number(value.min)) || !Number.isFinite(Number(value.max))) return null;
+    const min = Number(value.min);
+    const max = Number(value.max);
+    if (max <= min) return null;
+    return { min, max };
+  }
+
+  function chartAxisFromPriceDomain(domainValue, tickCount) {
+    const domain = validChartPriceDomain(domainValue);
+    if (!domain) return null;
+    const count = Math.max(2, Math.floor(Number(tickCount)) || 5);
+    const step = (domain.max - domain.min) / (count - 1);
+    return {
+      min: domain.min,
+      max: domain.max,
+      step,
+      values: Array.from({ length: count }, (_, index) => domain.max - index * step)
+    };
+  }
+
+  function chartPriceDomainsMatch(leftValue, rightValue) {
+    const left = validChartPriceDomain(leftValue);
+    const right = validChartPriceDomain(rightValue);
+    if (!left || !right) return left === right;
+    const tolerance = Math.max(Number.EPSILON, Math.max(Math.abs(left.max - left.min), Math.abs(right.max - right.min)) * 1e-7);
+    return Math.abs(left.min - right.min) <= tolerance && Math.abs(left.max - right.max) <= tolerance;
+  }
+
+  function resetTrendChartAxisTransition() {
+    if (trendChartAxisAnimationFrame) window.cancelAnimationFrame(trendChartAxisAnimationFrame);
+    trendChartAxisAnimationFrame = 0;
+    trendChartAxisCurrent = null;
+    trendChartAxisTransition = null;
+  }
+
+  function sampleTrendChartAxisTransition(nowValue) {
+    const transition = trendChartAxisTransition;
+    if (!transition) return trendChartAxisCurrent;
+    const now = Number.isFinite(Number(nowValue)) ? Number(nowValue) : performance.now();
+    const progress = Math.min(1, Math.max(0, (now - transition.startedAt) / TREND_CHART_AXIS_TRANSITION_MS));
+    const eased = CHART_TIME.easeOutCubic(progress);
+    trendChartAxisCurrent = CHART_TIME.interpolatePriceDomain(transition.from, transition.to, eased);
+    if (progress >= 1) trendChartAxisTransition = null;
+    return trendChartAxisCurrent;
+  }
+
+  function scheduleTrendChartAxisAnimation() {
+    if (!trendChartAxisTransition || trendChartAxisAnimationFrame) return;
+    trendChartAxisAnimationFrame = window.requestAnimationFrame(() => {
+      trendChartAxisAnimationFrame = 0;
+      const chartWrap = document.querySelector('[data-history-chart-wrap]');
+      if (chartWrap) updateTrendChartViewport(chartWrap);
+    });
+  }
+
+  function transitionTrendChartAxis(targetValue) {
+    const target = validChartPriceDomain(targetValue);
+    if (!target) return trendChartAxisCurrent;
+    const now = performance.now();
+    let current = sampleTrendChartAxisTransition(now);
+    if (!current) {
+      trendChartAxisCurrent = target;
+      trendChartAxisTransition = null;
+      return target;
+    }
+    if (chartPriceDomainsMatch(current, target)) {
+      trendChartAxisCurrent = target;
+      trendChartAxisTransition = null;
+      return target;
+    }
+    if (!trendChartAxisTransition || !chartPriceDomainsMatch(trendChartAxisTransition.to, target)) {
+      trendChartAxisTransition = {
+        from: current,
+        to: target,
+        startedAt: now
+      };
+    }
+    current = sampleTrendChartAxisTransition(now);
+    scheduleTrendChartAxisAnimation();
+    return current;
+  }
+
   function chartAxisPrecision(values, step) {
     const numericStep = Math.abs(Number(step));
     for (let digits = 2; digits <= 5; digits += 1) {
@@ -1565,8 +1651,10 @@
     minPrice = Math.max(0, minPrice - pricePad);
     maxPrice += pricePad;
     const naturalPriceDomain = { min: minPrice, max: maxPrice };
-    const priceDomain = CHART_TIME.expandPriceDomain(chartOptions.priceDomain, naturalPriceDomain);
-    const yAxis = niceChartAxis(priceDomain.min, priceDomain.max, 5);
+    const naturalAxis = niceChartAxis(naturalPriceDomain.min, naturalPriceDomain.max, 5);
+    const yAxis = validChartPriceDomain(chartOptions.priceDomain)
+      ? chartAxisFromPriceDomain(chartOptions.priceDomain, 5)
+      : naturalAxis;
     minPrice = yAxis.min;
     maxPrice = yAxis.max;
     const priceRange = Math.max(Number.EPSILON, maxPrice - minPrice);
@@ -1680,6 +1768,26 @@
     };
   }
 
+  function renderAnimatedHistoryLineChartFrame(model, options, range, width, height) {
+    const chartOptions = options || {};
+    const naturalFrame = renderHistoryLineChartFrame(
+      model,
+      Object.assign({}, chartOptions, { priceDomain: null }),
+      range,
+      width,
+      height
+    );
+    const displayedDomain = transitionTrendChartAxis(naturalFrame.priceDomain);
+    if (!displayedDomain || chartPriceDomainsMatch(displayedDomain, naturalFrame.priceDomain)) return naturalFrame;
+    return renderHistoryLineChartFrame(
+      model,
+      Object.assign({}, chartOptions, { priceDomain: displayedDomain }),
+      range,
+      width,
+      height
+    );
+  }
+
   function renderHistoryLineChart(group, result, options) {
     const chartOptions = options || {};
     const model = historyLineChartModel(group, result, chartOptions);
@@ -1699,9 +1807,7 @@
     const width = 420;
     const height = 250;
     const range = historyChartRange(model, chartOptions.visibleEnd);
-    const frameOptions = Object.assign({}, chartOptions, { priceDomain: trendChartDragAxis });
-    const frame = renderHistoryLineChartFrame(model, frameOptions, range, width, height);
-    trendChartDragAxis = frame.priceDomain;
+    const frame = renderAnimatedHistoryLineChartFrame(model, chartOptions, range, width, height);
     const windowMs = chartWindowMilliseconds(model.chartWindow);
     const draggable = Boolean(windowMs && model.maxTime - model.minTime > windowMs);
     const anomalyToggle = chartOptions.allowAnomalyToggle && model.anomalyTimes.size
@@ -1820,14 +1926,7 @@
       if (event.button !== 0 || !chartWrap.hasAttribute('data-history-chart-drag')) return;
       const { model } = activeTrendChartBounds();
       const range = historyChartRange(model, state.trendModalVisibleEnd);
-      const frame = renderHistoryLineChartFrame(
-        model,
-        Object.assign({}, activeTrendChartOptions(), { priceDomain: trendChartDragAxis }),
-        range,
-        420,
-        250
-      );
-      trendChartDragAxis = frame.priceDomain;
+      sampleTrendChartAxisTransition(performance.now());
       suppressTrendPointClick = false;
       trendChartDrag = {
         pointerId: event.pointerId,
@@ -1924,15 +2023,14 @@
     if (!panel || !plot || !axis || !layout || !stats || !meta) return;
 
     const trend = cropTrendData(state.trendModalSeedId);
-    const chartOptions = Object.assign({}, activeTrendChartOptions(), { priceDomain: trendChartDragAxis });
+    const chartOptions = activeTrendChartOptions();
     const model = historyLineChartModel(trend.group, trend.result, chartOptions);
     if (model.timelinePoints.length < 2) return;
 
     const height = 250;
     const width = 420;
     const range = historyChartRange(model, state.trendModalVisibleEnd);
-    const frame = renderHistoryLineChartFrame(model, chartOptions, range, width, height);
-    trendChartDragAxis = frame.priceDomain;
+    const frame = renderAnimatedHistoryLineChartFrame(model, chartOptions, range, width, height);
     state.trendModalVisibleEnd = range.end;
     layout.style.setProperty('--history-axis-width', `${frame.axisWidth}px`);
     axis.innerHTML = frame.axisContent;
@@ -2102,7 +2200,7 @@
 
   function clearCropTrendModalState() {
     resetTrendChartWheel();
-    trendChartDragAxis = null;
+    resetTrendChartAxisTransition();
     state.trendModalSeedId = '';
     state.trendModalWindow = '';
     state.trendHideAnomalies = false;
@@ -2120,7 +2218,7 @@
     if (!SEED_BY_ID[seedId]) return;
     clearPriceAlertModalState();
     resetTrendChartWheel();
-    trendChartDragAxis = null;
+    resetTrendChartAxisTransition();
     state.trendModalSeedId = seedId;
     state.trendModalWindow = trendWindowLabel();
     state.trendHideAnomalies = false;
@@ -2530,7 +2628,7 @@
     const trendModalWindow = document.querySelector('[data-trend-window]');
     if (trendModalWindow) trendModalWindow.addEventListener('change', () => {
       resetTrendChartWheel();
-      trendChartDragAxis = null;
+      resetTrendChartAxisTransition();
       state.trendModalWindow = normalizeChartWindow(trendModalWindow.value);
       state.trendModalVisibleEnd = null;
       render();
@@ -2538,13 +2636,13 @@
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
     if (trendAnomalyToggle) trendAnomalyToggle.addEventListener('click', () => {
       state.trendHideAnomalies = !state.trendHideAnomalies;
-      trendChartDragAxis = null;
+      resetTrendChartAxisTransition();
       render();
     });
     const trendPointToggle = document.querySelector('[data-trend-point-toggle]');
     if (trendPointToggle) trendPointToggle.addEventListener('click', () => {
       state.trendHidePoints = !state.trendHidePoints;
-      trendChartDragAxis = null;
+      resetTrendChartAxisTransition();
       render();
     });
     const trendChartWrap = document.querySelector('[data-history-chart-wrap]');

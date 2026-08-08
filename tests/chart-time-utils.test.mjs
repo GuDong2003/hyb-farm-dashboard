@@ -136,6 +136,24 @@ test('expanding price domains never shrink while the viewport moves', () => {
   );
 });
 
+test('price-domain animation eases toward the natural range', () => {
+  assert.equal(chartTime.easeOutCubic(0), 0);
+  assert.equal(chartTime.easeOutCubic(0.5), 0.875);
+  assert.equal(chartTime.easeOutCubic(1), 1);
+  assert.deepEqual(
+    chartTime.interpolatePriceDomain({ min: 10, max: 20 }, { min: 0, max: 40 }, 0.5),
+    { min: 5, max: 30 }
+  );
+  assert.deepEqual(
+    chartTime.interpolatePriceDomain({ min: 10, max: 20 }, { min: 0, max: 40 }, -1),
+    { min: 10, max: 20 }
+  );
+  assert.deepEqual(
+    chartTime.interpolatePriceDomain({ min: 10, max: 20 }, { min: 0, max: 40 }, 2),
+    { min: 0, max: 40 }
+  );
+});
+
 test('aggregation keeps a single bucket instead of exposing an unaggregated spike', () => {
   const base = Date.parse('2026-08-08T00:00:00.000Z');
   const points = [

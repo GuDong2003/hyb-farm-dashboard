@@ -48,9 +48,12 @@ test('drag release keeps the continuously selected visible end', () => {
   assert.doesNotMatch(finishSource, /CHART_TIME\.snapVisibleEnd\(/);
 });
 
-test('dragging expands the y-axis domain without rebuilding alert data', () => {
-  assert.match(appSource, /trendChartDragAxis/);
-  assert.match(appSource, /CHART_TIME\.expandPriceDomain\(/);
+test('chart animates natural y-axis domains without rebuilding alert data', () => {
+  assert.match(appSource, /function transitionTrendChartAxis\(targetValue\)/);
+  assert.match(appSource, /function renderAnimatedHistoryLineChartFrame\(/);
+  assert.match(appSource, /CHART_TIME\.interpolatePriceDomain\(/);
+  assert.doesNotMatch(appSource, /trendChartDragAxis/);
+  assert.doesNotMatch(appSource, /CHART_TIME\.expandPriceDomain\(/);
   assert.match(appSource, /rawTimelinePoints/);
   assert.match(appSource, /CHART_TIME\.aggregatePricePoints\(/);
 });
