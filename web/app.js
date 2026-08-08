@@ -1856,6 +1856,23 @@
     };
   }
 
+  function preserveTrendChartCenterForWindow(nextWindowValue) {
+    if (!state.trendModalSeedId) return null;
+    const trend = cropTrendData(state.trendModalSeedId);
+    const model = historyLineChartModel(trend.group, trend.result, activeTrendChartOptions());
+    if (!Number.isFinite(model.minTime) || !Number.isFinite(model.maxTime) || model.maxTime <= model.minTime) return null;
+    const currentRange = historyChartRange(model, state.trendModalVisibleEnd);
+    const center = (Number(currentRange.start) + Number(currentRange.end)) / 2;
+    const nextWindowMs = chartWindowMilliseconds(nextWindowValue);
+    if (!Number.isFinite(center) || !Number.isFinite(nextWindowMs) || nextWindowMs <= 0) return null;
+    return CHART_TIME.clampVisibleEnd(
+      model.minTime,
+      model.maxTime,
+      nextWindowMs,
+      center + nextWindowMs / 2
+    );
+  }
+
   function activeTrendChartBounds() {
     const trend = cropTrendData(state.trendModalSeedId);
     const model = historyLineChartModel(trend.group, trend.result, activeTrendChartOptions());
@@ -2632,8 +2649,10 @@
     if (trendModalWindow) trendModalWindow.addEventListener('change', () => {
       resetTrendChartWheel();
       resetTrendChartAxisTransition();
-      state.trendModalWindow = normalizeChartWindow(trendModalWindow.value);
-      state.trendModalVisibleEnd = null;
+      const nextWindow = normalizeChartWindow(trendModalWindow.value);
+      const preservedVisibleEnd = preserveTrendChartCenterForWindow(nextWindow);
+      state.trendModalWindow = nextWindow;
+      state.trendModalVisibleEnd = preservedVisibleEnd;
       render();
     });
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');

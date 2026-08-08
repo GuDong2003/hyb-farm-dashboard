@@ -65,6 +65,14 @@ test('trend chart keeps a fixed axis column while the y-axis animates', () => {
   assert.match(styleSource, /\.history-line-chart-layout\s*\{[^}]*grid-template-columns:\s*86px\s+minmax\(0, 1fr\);/s);
 });
 
+test('chart window changes preserve the current viewport center across detail levels', () => {
+  assert.match(appSource, /function preserveTrendChartCenterForWindow\(nextWindowValue\)/);
+  assert.match(appSource, /const currentRange = historyChartRange\(model, state\.trendModalVisibleEnd\);/);
+  assert.match(appSource, /CHART_TIME\.clampVisibleEnd\(\s*model\.minTime,\s*model\.maxTime,\s*nextWindowMs,/s);
+  assert.match(appSource, /const preservedVisibleEnd = preserveTrendChartCenterForWindow\(nextWindow\);/);
+  assert.doesNotMatch(appSource, /state\.trendModalVisibleEnd = null;\s*render\(\);/);
+});
+
 test('chart keeps visible raw anomaly markers inside the y-axis domain', () => {
   assert.match(appSource, /const visibleEventPrices =/);
   assert.match(appSource, /visibleEvents\.forEach[\s\S]*?visibleEventPrices\.push/);
