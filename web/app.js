@@ -12,6 +12,8 @@
   const DB_VERSION = 1;
   const SNAPSHOT_STORE = 'snapshots';
   const PRICE_REFRESH_MS = 60 * 60 * 1000;
+  const PRICE_REFRESH_RETRY_MS = 5 * 60 * 1000;
+  const PRICE_REFRESH_MIN_TIMER_MS = 1000;
   const HISTORY_PAGE_SIZE = 50;
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
@@ -665,19 +667,35 @@
     return reason || '校验未通过';
   }
 
+  function autoRefreshDue(now) {
+    if (!state.config.autoRefreshPrices) return false;
+    const importedAt = Number(state.lastImportedAt) || 0;
+    return !importedAt || Number(now) - importedAt >= PRICE_REFRESH_MS;
+  }
+
+  function autoRefreshDelay(now) {
+    const importedAt = Number(state.lastImportedAt) || 0;
+    if (!importedAt) return PRICE_REFRESH_RETRY_MS;
+    const elapsed = Math.max(0, Number(now) - importedAt);
+    if (elapsed >= PRICE_REFRESH_MS) return PRICE_REFRESH_RETRY_MS;
+    return Math.max(PRICE_REFRESH_MIN_TIMER_MS, PRICE_REFRESH_MS - elapsed);
+  }
+
   function shouldAutoRequestPrices(force) {
     if (force) return true;
     if (!state.config.autoRefreshPrices) return false;
     if (!hasShopPrices()) return true;
-    const importedAt = Number(state.lastImportedAt) || 0;
-    return !importedAt || Date.now() - importedAt >= PRICE_REFRESH_MS;
+    return autoRefreshDue(Date.now());
   }
 
   function installPriceBridgeListener() {
     window.addEventListener('message', (event) => {
       const data = event && event.data;
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_READY) return;
-      if (appReady) requestScriptPrices(false);
+      if (appReady) {
+        runAutoRefresh();
+        scheduleAutoRefresh();
+      }
     });
   }
 
@@ -701,15 +719,17 @@
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_RESPONSE || data.requestId !== requestId) return;
       cleanup();
       if (!data.ok || !data.snapshot) {
-        state.status = `自动获取失败：${String(data.error || '脚本未返回价格')}`;
+        state.status = `自动获取失败：${String(data.error || '脚本未返回价格')}；5分钟后自动重试。`;
         render();
         return;
       }
       applySnapshot(data.snapshot).then(() => {
         state.status = `已自动导入 ${formatTime(state.lastImportedAt)} 的实时价格。`;
+        scheduleAutoRefresh();
         render();
       }).catch((error) => {
         state.status = `自动导入失败：${String(error && error.message || error)}`;
+        scheduleAutoRefresh();
         render();
       });
     };
@@ -717,9 +737,17 @@
     const timer = window.setTimeout(() => {
       cleanup();
       state.status = hasShopPrices()
-        ? (state.lastImportedAt ? `使用上次导入价格：${formatTime(state.lastImportedAt)}。` : '使用当前已保存价格。')
-        : '未检测到自动导入脚本；安装脚本后会在打开页面时自动获取实时价格。';
-      loadCloudDefaultPrices(false).then(() => render()).catch(() => render());
+        ? (state.lastImportedAt ? `使用上次导入价格：${formatTime(state.lastImportedAt)}；5分钟后自动重试。` : '使用当前已保存价格；5分钟后自动重试。')
+        : '未检测到自动导入脚本；安装脚本后会在打开页面时自动获取实时价格，5分钟后自动重试。';
+      loadCloudDefaultPrices(false)
+        .then(() => {
+          scheduleAutoRefresh();
+          render();
+        })
+        .catch(() => {
+          scheduleAutoRefresh();
+          render();
+        });
     }, 18000);
 
     priceBridgeRequest = { id: requestId, timer, onMessage };
@@ -729,18 +757,42 @@
   }
 
   function runAutoRefresh() {
-    if (!state.config.autoRefreshPrices) return;
-    if (!requestScriptPrices(false)) loadCloudDefaultPrices(true);
+    if (!appReady || !state.config.autoRefreshPrices) return false;
+    if (priceBridgeRequest || !shouldAutoRequestPrices(false)) return false;
+    if (!requestScriptPrices(false)) {
+      loadCloudDefaultPrices(true)
+        .then(() => scheduleAutoRefresh())
+        .catch(() => scheduleAutoRefresh());
+    }
+    return true;
+  }
+
+  function handleAutoRefreshWake() {
+    if (!appReady || !state.config.autoRefreshPrices) return;
+    if (document.visibilityState && document.visibilityState !== 'visible') return;
+    runAutoRefresh();
+    scheduleAutoRefresh();
+  }
+
+  function installAutoRefreshLifecycleListeners() {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') handleAutoRefreshWake();
+    });
+    window.addEventListener('focus', handleAutoRefreshWake);
+    window.addEventListener('pageshow', handleAutoRefreshWake);
+    window.addEventListener('online', handleAutoRefreshWake);
   }
 
   function scheduleAutoRefresh() {
     if (autoRefreshTimer) window.clearTimeout(autoRefreshTimer);
     autoRefreshTimer = null;
     if (!state.config.autoRefreshPrices) return;
+    const delay = autoRefreshDelay(Date.now());
     autoRefreshTimer = window.setTimeout(() => {
+      autoRefreshTimer = null;
       runAutoRefresh();
       scheduleAutoRefresh();
-    }, PRICE_REFRESH_MS);
+    }, delay);
   }
 
   function cleanPriceMap(map) {
@@ -3239,6 +3291,7 @@
 
   async function init() {
     installPriceBridgeListener();
+    installAutoRefreshLifecycleListeners();
     window.addEventListener('resize', scheduleTrendChartViewportRefresh, { passive: true });
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
