@@ -1,8 +1,10 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong226.com/
-// @version      0.3.7
-// @description  为 HYB Farm Dashboard 自动导入黑与白农场实时价格。
+// @version      0.5.0
+// @description  为 HYB Farm Dashboard 自动导入实时价格，并同步本地农场经验与地块等级。
+// @updateURL    https://hyb.gudong226.com/userscripts/hyb-farm-dashboard-capture.user.js
+// @downloadURL  https://hyb.gudong226.com/userscripts/hyb-farm-dashboard-capture.user.js
 // @match        https://hyb.gudong.ccwu.cc/*
 // @match        https://hyb.gudong226.com/*
 // @match        https://cdk.hybgzs.com/*
@@ -14,6 +16,7 @@
 (function () {
   'use strict';
 
+  const SCRIPT_VERSION = '0.5.0';
   const DASHBOARD_URL = 'https://hyb.gudong226.com/';
   const DASHBOARD_ORIGINS = new Set([
     'https://hyb.gudong.ccwu.cc',
@@ -23,6 +26,8 @@
   const UNIT_PER_USD = 500000;
   const TREND_HOUR_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=hour&trendRange=25';
   const TREND_DAY_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=day&trendRange=7';
+  const FARM_LEVEL_URL = '/api/farm/level';
+  const FARM_PLOTS_URL = '/api/farm/plots';
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
@@ -35,16 +40,28 @@
     'strawberry',
     'watermelon',
     'mango',
+    'potato',
+    'eggplant',
+    'chili',
+    'sunflower',
+    'honey_peach',
     'golden_wheat',
     'emerald_cabbage',
+    'agate_bean',
+    'platinum_taro',
     'dragon_fruit',
     'starfruit',
     'durian',
     'golden_apple',
+    'amber_pear',
+    'frost_plum',
     'blue_rose',
     'crystal_grape',
+    'stardust_berry',
     'rainbow_pineapple',
     'moonflower',
+    'aurora_melon',
+    'sunfire_lotus',
     'weekly_lotus'
   ]);
 
@@ -245,10 +262,57 @@
     items.forEach((item) => rememberTrendItem(item, seriesKey, shop, shopChangeRates, shopTrends));
   }
 
+  function normalizeFarmProfile(levelJson, plotsJson) {
+    const profile = {};
+    const levelData = levelJson && levelJson.data && typeof levelJson.data === 'object' ? levelJson.data : null;
+    const totalExp = Number(levelData && levelData.totalExp);
+    if (Number.isFinite(totalExp) && totalExp >= 0) profile.currentTotalExp = Math.floor(totalExp);
+
+    const plotsData = plotsJson && plotsJson.data && typeof plotsJson.data === 'object' ? plotsJson.data : null;
+    const levels = plotsData && plotsData.unlockedPlotLevels && typeof plotsData.unlockedPlotLevels === 'object'
+      ? plotsData.unlockedPlotLevels
+      : null;
+    if (plotsData && levels) {
+      const indexes = new Set();
+      const freeSlots = Number(plotsData.freeSlots);
+      if (Number.isInteger(freeSlots) && freeSlots > 0) {
+        for (let index = 0; index < freeSlots; index += 1) indexes.add(String(index));
+      }
+      if (Array.isArray(plotsData.unlockedPlotIndexes)) {
+        plotsData.unlockedPlotIndexes.forEach((index) => indexes.add(String(index)));
+      }
+      const selectedIndexes = indexes.size ? Array.from(indexes) : Object.keys(levels);
+      const landCounts = Array.from({ length: 7 }, () => 0);
+      const seen = new Set();
+      selectedIndexes.forEach((index) => {
+        const key = String(index);
+        if (seen.has(key)) return;
+        seen.add(key);
+        const level = Number(levels[key]);
+        if (Number.isInteger(level) && level >= 1 && level <= 7) landCounts[level - 1] += 1;
+      });
+      profile.landCounts = landCounts;
+    }
+
+    return Object.keys(profile).length ? profile : null;
+  }
+
+  async function captureFarmProfile() {
+    const [levelResult, plotsResult] = await Promise.allSettled([
+      fetchJson(FARM_LEVEL_URL, 15000),
+      fetchJson(FARM_PLOTS_URL, 15000)
+    ]);
+    return normalizeFarmProfile(
+      levelResult.status === 'fulfilled' ? levelResult.value : null,
+      plotsResult.status === 'fulfilled' ? plotsResult.value : null
+    );
+  }
+
   async function captureShopSnapshot() {
-    const [hourJson, dayJson] = await Promise.all([
+    const [hourJson, dayJson, farmProfile] = await Promise.all([
       fetchJson(TREND_HOUR_URL, 15000),
-      fetchJson(TREND_DAY_URL, 15000)
+      fetchJson(TREND_DAY_URL, 15000),
+      captureFarmProfile()
     ]);
 
     const shop = {};
@@ -270,6 +334,7 @@
     };
     if (Object.keys(shopChangeRates).length) payload.priceChangeRates = { shop: shopChangeRates };
     if (Object.keys(shopTrends).length) payload.priceTrends = { shop: shopTrends };
+    if (farmProfile) payload.farmProfile = farmProfile;
     return payload;
   }
 
@@ -329,12 +394,12 @@
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_REQUEST || !data.requestId) return;
       try {
         const snapshot = await captureShopSnapshot();
-        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: true, snapshot }, location.origin);
+        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: true, scriptVersion: SCRIPT_VERSION, snapshot }, location.origin);
       } catch (error) {
-        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: false, error: friendlyError(error) }, location.origin);
+        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: false, scriptVersion: SCRIPT_VERSION, error: friendlyError(error) }, location.origin);
       }
     });
-    window.postMessage({ type: BRIDGE_READY }, location.origin);
+    window.postMessage({ type: BRIDGE_READY, scriptVersion: SCRIPT_VERSION }, location.origin);
   }
 
   function boot() {

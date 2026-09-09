@@ -18,6 +18,8 @@
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
+  const REQUIRED_USERSCRIPT_VERSION = '0.5.0';
+  const USERSCRIPT_URL = '/userscripts/hyb-farm-dashboard-capture.user.js';
   const CLOUD_DEFAULT_ENDPOINT = '/api/default-prices';
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
@@ -25,6 +27,7 @@
   const TREND_CHART_AXIS_TRANSITION_MS = 220;
   const TREND_CHART_VIEWPORT_TRANSITION_MS = 180;
   const TREND_CHART_FIXED_AXIS_WIDTH = 86;
+  const TREND_CHART_Y_TICK_COUNT = 6;
   const TREND_SCALE_OPTIONS = [
     { value: '6h', label: '6h' },
     { value: '12h', label: '12h' },
@@ -40,25 +43,37 @@
   const CHART_TIME = window.HYBChartTime;
 
   const SEEDS = [
-    { id: 'carrot', name: '胡萝卜', price: '500000', growthTime: 1800, harvestQuantity: 2, harvestValue: '500000', experienceValue: 5, isVipOnly: false, sortOrder: 10 },
-    { id: 'tomato', name: '番茄', price: '1000000', growthTime: 3600, harvestQuantity: 5, harvestValue: '500000', experienceValue: 8, isVipOnly: false, sortOrder: 20 },
-    { id: 'corn', name: '玉米', price: '250000', growthTime: 5400, harvestQuantity: 25, harvestValue: '40000', experienceValue: 18, isVipOnly: false, sortOrder: 25 },
-    { id: 'pumpkin', name: '南瓜', price: '2000000', growthTime: 7200, harvestQuantity: 6, harvestValue: '1000000', experienceValue: 15, isVipOnly: false, sortOrder: 30 },
-    { id: 'blueberry', name: '蓝莓', price: '750000', growthTime: 10800, harvestQuantity: 30, harvestValue: '100000', experienceValue: 24, isVipOnly: false, sortOrder: 35 },
-    { id: 'strawberry', name: '草莓', price: '4000000', growthTime: 14400, harvestQuantity: 6, harvestValue: '2000000', experienceValue: 22, isVipOnly: false, sortOrder: 40 },
-    { id: 'watermelon', name: '西瓜', price: '6000000', growthTime: 21600, harvestQuantity: 8, harvestValue: '3000000', experienceValue: 30, isVipOnly: false, sortOrder: 50 },
-    { id: 'mango', name: '芒果', price: '2500000', growthTime: 25200, harvestQuantity: 35, harvestValue: '200000', experienceValue: 33, isVipOnly: false, sortOrder: 50 },
-    { id: 'golden_wheat', name: '黄金麦穗', price: '12000000', growthTime: 72000, harvestQuantity: 30, harvestValue: '800000', experienceValue: 50, isVipOnly: false, sortOrder: 55 },
-    { id: 'emerald_cabbage', name: '翡翠卷心菜', price: '16000000', growthTime: 86400, harvestQuantity: 25, harvestValue: '1200000', experienceValue: 60, isVipOnly: false, sortOrder: 60 },
-    { id: 'dragon_fruit', name: '火龙果', price: '10000000', growthTime: 28800, harvestQuantity: 4, harvestValue: '5000000', experienceValue: 40, isVipOnly: true, sortOrder: 100 },
-    { id: 'starfruit', name: '杨桃', price: '15000000', growthTime: 36000, harvestQuantity: 10, harvestValue: '7500000', experienceValue: 55, isVipOnly: true, sortOrder: 110 },
-    { id: 'durian', name: '榴莲', price: '5000000', growthTime: 43200, harvestQuantity: 25, harvestValue: '750000', experienceValue: 45, isVipOnly: true, sortOrder: 115 },
-    { id: 'golden_apple', name: '金苹果', price: '30000000', growthTime: 43200, harvestQuantity: 6, harvestValue: '10000000', experienceValue: 75, isVipOnly: true, sortOrder: 120 },
-    { id: 'blue_rose', name: '玉露蓝玫瑰', price: '25000000', growthTime: 86400, harvestQuantity: 8, harvestValue: '4500000', experienceValue: 65, isVipOnly: true, sortOrder: 125 },
-    { id: 'crystal_grape', name: '水晶葡萄', price: '8000000', growthTime: 108000, harvestQuantity: 10, harvestValue: '1350000', experienceValue: 50, isVipOnly: true, sortOrder: 130 },
-    { id: 'rainbow_pineapple', name: '彩虹凤梨', price: '50000000', growthTime: 259200, harvestQuantity: 12, harvestValue: '12500000', experienceValue: 100, isVipOnly: true, sortOrder: 135 },
-    { id: 'moonflower', name: '月光花', price: '15000000', growthTime: 172800, harvestQuantity: 10, harvestValue: '2400000', experienceValue: 60, isVipOnly: true, sortOrder: 140 },
-    { id: 'weekly_lotus', name: '七日彩莲', price: '100000000', growthTime: 604800, harvestQuantity: 20, harvestValue: '30000000', experienceValue: 200, isVipOnly: true, sortOrder: 145 }
+    { id: 'carrot', name: '胡萝卜', price: '477010', growthTime: 3600, harvestQuantity: 18, harvestValue: '129575', experienceValue: 1, isVipOnly: false, sortOrder: 10 },
+    { id: 'tomato', name: '番茄', price: '477010', growthTime: 3600, harvestQuantity: 32, harvestValue: '72886', experienceValue: 1, isVipOnly: false, sortOrder: 20 },
+    { id: 'corn', name: '玉米', price: '745123', growthTime: 5400, harvestQuantity: 28, harvestValue: '130118', experienceValue: 16, isVipOnly: false, sortOrder: 25 },
+    { id: 'pumpkin', name: '南瓜', price: '1022494', growthTime: 7200, harvestQuantity: 30, harvestValue: '166651', experienceValue: 3, isVipOnly: false, sortOrder: 30 },
+    { id: 'blueberry', name: '蓝莓', price: '1597207', growthTime: 10800, harvestQuantity: 32, harvestValue: '244050', experienceValue: 23, isVipOnly: false, sortOrder: 35 },
+    { id: 'strawberry', name: '草莓', price: '2191764', growthTime: 14400, harvestQuantity: 35, harvestValue: '306192', experienceValue: 4, isVipOnly: false, sortOrder: 40 },
+    { id: 'watermelon', name: '西瓜', price: '3423687', growthTime: 21600, harvestQuantity: 38, harvestValue: '440533', experienceValue: 6, isVipOnly: false, sortOrder: 45 },
+    { id: 'mango', name: '芒果', price: '4056351', growthTime: 25200, harvestQuantity: 40, harvestValue: '495842', experienceValue: 29, isVipOnly: false, sortOrder: 50 },
+    { id: 'potato', name: '土豆', price: '4698148', growthTime: 28800, harvestQuantity: 40, harvestValue: '574294', experienceValue: 8, isVipOnly: false, sortOrder: 55 },
+    { id: 'eggplant', name: '茄子', price: '6668984', growthTime: 39600, harvestQuantity: 42, harvestValue: '776386', experienceValue: 11, isVipOnly: false, sortOrder: 60 },
+    { id: 'chili', name: '辣椒', price: '8694980', growthTime: 50400, harvestQuantity: 46, harvestValue: '924226', experienceValue: 14, isVipOnly: false, sortOrder: 63 },
+    { id: 'sunflower', name: '向日葵', price: '10765186', growthTime: 61200, harvestQuantity: 50, harvestValue: '1052735', experienceValue: 16, isVipOnly: false, sortOrder: 66 },
+    { id: 'honey_peach', name: '蜜桃', price: '12166249', growthTime: 68400, harvestQuantity: 52, harvestValue: '1143986', experienceValue: 19, isVipOnly: false, sortOrder: 68 },
+    { id: 'golden_wheat', name: '黄金麦穗', price: '12872435', growthTime: 72000, harvestQuantity: 52, harvestValue: '1210389', experienceValue: 29, isVipOnly: false, sortOrder: 70 },
+    { id: 'emerald_cabbage', name: '翡翠卷心菜', price: '15731136', growthTime: 86400, harvestQuantity: 55, harvestValue: '1398508', experienceValue: 27, isVipOnly: false, sortOrder: 75 },
+    { id: 'agate_bean', name: '玛瑙豆', price: '20107640', growthTime: 108000, harvestQuantity: 60, harvestValue: '1638617', experienceValue: 25, isVipOnly: false, sortOrder: 78 },
+    { id: 'platinum_taro', name: '白金芋', price: '24573130', growthTime: 129600, harvestQuantity: 62, harvestValue: '1937922', experienceValue: 31, isVipOnly: false, sortOrder: 80 },
+    { id: 'dragon_fruit', name: '火龙果', price: '6342500', growthTime: 28800, harvestQuantity: 40, harvestValue: '775297', experienceValue: 4, isVipOnly: true, sortOrder: 100 },
+    { id: 'starfruit', name: '杨桃', price: '8107025', growthTime: 36000, harvestQuantity: 42, harvestValue: '943800', experienceValue: 13, isVipOnly: true, sortOrder: 110 },
+    { id: 'durian', name: '榴莲', price: '9907427', growthTime: 43200, harvestQuantity: 60, harvestValue: '807378', experienceValue: 19, isVipOnly: true, sortOrder: 115 },
+    { id: 'golden_apple', name: '金苹果', price: '9907427', growthTime: 43200, harvestQuantity: 30, harvestValue: '1614757', experienceValue: 15, isVipOnly: true, sortOrder: 120 },
+    { id: 'amber_pear', name: '琥珀梨', price: '12663737', growthTime: 54000, harvestQuantity: 48, harvestValue: '1289995', experienceValue: 15, isVipOnly: true, sortOrder: 122 },
+    { id: 'frost_plum', name: '霜华梅', price: '15476090', growthTime: 64800, harvestQuantity: 50, harvestValue: '1513418', experienceValue: 18, isVipOnly: true, sortOrder: 125 },
+    { id: 'blue_rose', name: '玉露蓝玫瑰', price: '21237034', growthTime: 86400, harvestQuantity: 55, harvestValue: '1887986', experienceValue: 9, isVipOnly: true, sortOrder: 130 },
+    { id: 'crystal_grape', name: '水晶葡萄', price: '27145314', growthTime: 108000, harvestQuantity: 60, harvestValue: '2212133', experienceValue: 8, isVipOnly: true, sortOrder: 135 },
+    { id: 'stardust_berry', name: '星尘莓', price: '33173725', growthTime: 129600, harvestQuantity: 62, harvestValue: '2616195', experienceValue: 26, isVipOnly: true, sortOrder: 140 },
+    { id: 'moonflower', name: '月光花', price: '45522579', growthTime: 172800, harvestQuantity: 65, harvestValue: '3424373', experienceValue: 9, isVipOnly: true, sortOrder: 145 },
+    { id: 'aurora_melon', name: '极光蜜瓜', price: '58187255', growthTime: 216000, harvestQuantity: 70, harvestValue: '4064409', experienceValue: 34, isVipOnly: true, sortOrder: 147 },
+    { id: 'rainbow_pineapple', name: '彩虹凤梨', price: '71109437', growthTime: 259200, harvestQuantity: 75, harvestValue: '4635894', experienceValue: 16, isVipOnly: true, sortOrder: 150 },
+    { id: 'sunfire_lotus', name: '赤阳莲', price: '111077891', growthTime: 388800, harvestQuantity: 85, harvestValue: '6389638', experienceValue: 40, isVipOnly: true, sortOrder: 155 },
+    { id: 'weekly_lotus', name: '七日彩莲', price: '180593330', growthTime: 604800, harvestQuantity: 100, harvestValue: '8830174', experienceValue: 40, isVipOnly: true, sortOrder: 160 }
   ].map(normalizeSeed);
 
   const SEED_BY_ID = Object.fromEntries(SEEDS.map((seed) => [seed.id, seed]));
@@ -102,7 +117,7 @@
   function loadState() {
     const base = {
       view: 'table',
-      status: '等待价格数据；点击导入可设置实时价格自动获取。',
+      status: '等待价格数据；点击“立即刷新”获取实时价格。',
       config: {
         source: 'shop',
         viewLevel: 1,
@@ -110,6 +125,7 @@
         activeHours: DEFAULT_ACTIVE_HOURS,
         autoRefreshPrices: true,
         autoUploadPrices: false,
+        allowSyncNode: false,
         priceAlertNormalThreshold: PRICE_ALERT.DEFAULT_NORMAL_THRESHOLD,
         priceAlertAnomalyThreshold: PRICE_ALERT.DEFAULT_ANOMALY_THRESHOLD,
         browserPriceAlerts: false,
@@ -130,6 +146,9 @@
       priceTrends: { shop: {} },
       lastImportedAt: 0,
       cloudDefaultAt: 0,
+      cloudUploadState: 'idle',
+      cloudUploadMessage: '尚未上传',
+      pendingUploadSnapshot: null,
       priceOrigin: '',
       historyCount: 0,
       historyAlerts: null,
@@ -147,14 +166,20 @@
       trendModalVisibleEnd: null,
       trendModalVisibleWindowMs: null,
       trendModalCenterAt: null,
+      userscriptVersion: '',
+      scriptUpdateRequired: false,
+      scriptMissing: false,
+      syncStatusState: 'idle',
+      syncStatusMessage: '等待价格数据',
       error: ''
     };
 
     try {
       const stored = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {};
       const merged = Object.assign({}, base, stored);
-      merged.config = Object.assign({}, base.config, stored.config || {});
-      merged.config = normalizePriceAlertConfig(merged.config);
+    merged.config = Object.assign({}, base.config, stored.config || {});
+    merged.config = normalizePriceAlertConfig(merged.config);
+    merged.config.allowSyncNode = Boolean(merged.config.allowSyncNode);
       merged.config.landCounts = normalizeLandCounts(merged.config.landCounts);
       merged.config.currentTotalExp = normalizeTotalExperience(merged.config.currentTotalExp);
       merged.config.source = 'shop';
@@ -268,6 +293,41 @@
   function normalizeTotalExperience(value) {
     const number = Number(value);
     return Number.isFinite(number) && number >= 0 ? number : 0;
+  }
+
+  function normalizeFarmProfile(profile) {
+    if (!profile || typeof profile !== 'object') return null;
+    const normalized = {};
+    if (Object.prototype.hasOwnProperty.call(profile, 'currentTotalExp')) {
+      const totalExperience = Number(profile.currentTotalExp);
+      if (Number.isFinite(totalExperience) && totalExperience >= 0) normalized.currentTotalExp = Math.floor(totalExperience);
+    }
+    if (Array.isArray(profile.landCounts)) normalized.landCounts = normalizeLandCounts(profile.landCounts);
+    return Object.keys(normalized).length ? normalized : null;
+  }
+
+  function applyFarmProfile(profile) {
+    const normalized = normalizeFarmProfile(profile);
+    if (!normalized) return false;
+    let changed = false;
+    if (Object.prototype.hasOwnProperty.call(normalized, 'currentTotalExp')
+      && state.config.currentTotalExp !== normalized.currentTotalExp) {
+      state.config.currentTotalExp = normalized.currentTotalExp;
+      changed = true;
+    }
+    if (Array.isArray(normalized.landCounts)
+      && normalized.landCounts.some((count, index) => count !== state.config.landCounts[index])) {
+      state.config.landCounts = normalized.landCounts;
+      changed = true;
+    }
+    return changed;
+  }
+
+  function farmProfileStatusSuffix(profile) {
+    const fields = [];
+    if (profile && Object.prototype.hasOwnProperty.call(profile, 'currentTotalExp')) fields.push('经验');
+    if (profile && Array.isArray(profile.landCounts)) fields.push('土地');
+    return fields.length ? `，${fields.join('和')}已同步` : '';
   }
 
   function toUsd(raw) {
@@ -518,7 +578,7 @@
       const snapshot = JSON.parse(decodeBase64Url(encoded));
       await applySnapshot(snapshot);
       history.replaceState(null, '', location.pathname + location.search);
-      state.status = `已导入 ${formatTime(state.lastImportedAt)} 的抓取快照。`;
+      state.status = `已导入 ${formatTime(state.lastImportedAt)} 的抓取快照${farmProfileStatusSuffix(snapshot.farmProfile)}。`;
     } catch (error) {
       state.error = `导入失败：${String(error && error.message || error)}`;
     }
@@ -529,6 +589,7 @@
     const prices = snapshot.prices || {};
     const priceChangeRates = snapshot.priceChangeRates || snapshot.changeRates || snapshot.priceRates || {};
     const priceTrends = snapshot.priceTrends || snapshot.trends || {};
+    applyFarmProfile(snapshot.farmProfile);
     if (prices.shop) {
       state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
       state.prices.shop = cleanPriceMap(prices.shop);
@@ -538,6 +599,9 @@
     state.lastImportedAt = capturedAt;
     state.priceOrigin = 'local';
     state.config.source = 'shop';
+    state.pendingUploadSnapshot = snapshot;
+    state.scriptMissing = false;
+    setSyncStatus('success', `已同步 · ${formatTime(capturedAt)}`);
     snapshot.id = snapshot.id || `snapshot:${capturedAt}`;
     snapshot.capturedAt = capturedAt;
     await putSnapshot(snapshot);
@@ -580,6 +644,7 @@
         state.lastImportedAt = cloudCapturedAt;
         state.priceOrigin = 'cloud';
         state.config.source = 'shop';
+        setSyncStatus('success', `已同步 · ${formatTime(cloudCapturedAt)}`);
         state.status = `使用云端默认价格：${formatTime(state.lastImportedAt)}。`;
         saveState();
         handlePriceAlertsForNewData();
@@ -596,34 +661,29 @@
     return Object.keys(state.prices.shop || {}).length > 0;
   }
 
-  function snapshotFromCurrentPrices() {
-    const prices = cleanPriceMap(state.prices.shop || {});
-    const priceChangeRates = cleanSignedNumberMap((state.priceChangeRates && state.priceChangeRates.shop) || {});
-    const priceTrends = cleanTrendMap((state.priceTrends && state.priceTrends.shop) || {});
-    const matched = Object.keys(prices).length;
-    if (!matched) return null;
-    const capturedAt = Number(state.lastImportedAt) || Date.now();
-    const snapshot = {
-      version: 1,
-      source: 'dashboard-upload',
-      capturedAt,
-      prices: { shop: prices },
-      matched,
-      totalSeeds: SEEDS.length
-    };
-    if (Object.keys(priceChangeRates).length) snapshot.priceChangeRates = { shop: priceChangeRates };
-    if (Object.keys(priceTrends).length) snapshot.priceTrends = { shop: priceTrends };
-    return snapshot;
-  }
-
   function queueCloudSubmission(snapshot) {
+    setCloudUploadStatus('busy', '自动上传中…');
+    render();
     submitSnapshotToCloud(snapshot).then((result) => {
       rememberCloudDefault(result);
-      const text = cloudSubmissionStatusText(result);
-      if (!text) return;
+      const text = cloudSubmissionStatusText(result) || '云端已收到价格数据。';
+      const accepted = result && result.status === 'accepted';
+      const settled = accepted || (result && result.status === 'rejected');
+      if (settled && state.pendingUploadSnapshot === snapshot) state.pendingUploadSnapshot = null;
+      setCloudUploadStatus(accepted ? 'success' : 'warning', text.replace(/。$/, ''));
       state.status = `${state.status.replace(/。$/, '')}；${text}`;
       render();
-    }).catch(() => {});
+    }).catch((error) => {
+      const message = `自动上传失败：${String(error && error.message || error)}`;
+      setCloudUploadStatus('error', message);
+      state.status = `${state.status.replace(/。$/, '')}；${message}`;
+      render();
+    });
+  }
+
+  function setCloudUploadStatus(status, message) {
+    state.cloudUploadState = status;
+    state.cloudUploadMessage = message;
   }
 
   async function submitSnapshotToCloud(snapshot) {
@@ -639,6 +699,7 @@
 
   function snapshotForCloud(snapshot) {
     const out = Object.assign({}, snapshot || {});
+    delete out.farmProfile;
     // 云端默认价格需要同时携带涨跌幅/趋势数据；否则新用户首次打开只能看到价格，涨跌幅会退化成 0/-。
     return out;
   }
@@ -692,6 +753,21 @@
     window.addEventListener('message', (event) => {
       const data = event && event.data;
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_READY) return;
+      const wasMissing = state.scriptMissing;
+      if (data.scriptVersion) markUserscriptVersion(data.scriptVersion);
+      state.scriptMissing = false;
+      renderUserscriptLink();
+      if (state.scriptUpdateRequired) {
+        const error = userscriptUpdateError(data.scriptVersion);
+        setSyncStatus('error', `${error.message}；请点击“更新脚本”安装新版本。`);
+        state.status = `${error.message}；请点击“更新脚本”安装新版本。`;
+        render();
+        return;
+      }
+      if (wasMissing) {
+        setSyncStatus('idle', state.lastImportedAt ? `已同步 · ${formatTime(state.lastImportedAt)}` : '用户脚本已连接，点击“立即刷新”获取价格');
+        state.status = '用户脚本已连接，点击“立即刷新”获取价格。';
+      }
       if (appReady) {
         runAutoRefresh();
         scheduleAutoRefresh();
@@ -699,13 +775,60 @@
     });
   }
 
+  function compareVersions(left, right) {
+    const parse = (value) => String(value || '').split('.').map((part) => Number(part));
+    const a = parse(left);
+    const b = parse(right);
+    if (!a.length || a.some((part) => !Number.isInteger(part) || part < 0)) return -1;
+    if (!b.length || b.some((part) => !Number.isInteger(part) || part < 0)) return 1;
+    const length = Math.max(a.length, b.length);
+    for (let index = 0; index < length; index += 1) {
+      const difference = (a[index] || 0) - (b[index] || 0);
+      if (difference) return difference > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  function userscriptVersionSupported(version) {
+    return Boolean(String(version || '').trim()) && compareVersions(version, REQUIRED_USERSCRIPT_VERSION) >= 0;
+  }
+
+  function userscriptUpdateError(version = '') {
+    const error = new Error(`同步脚本需要更新到 v${REQUIRED_USERSCRIPT_VERSION}`);
+    error.name = 'ScriptUpdateRequired';
+    error.code = 'script_update_required';
+    error.scriptUpdateRequired = true;
+    error.retryable = false;
+    error.scriptVersion = String(version || '');
+    return error;
+  }
+
+  function renderUserscriptLink() {
+    const link = document.getElementById('userscriptInstallLink');
+    if (!link) return;
+    link.href = USERSCRIPT_URL;
+    link.textContent = state.scriptUpdateRequired ? '更新脚本' : '安装脚本';
+    link.classList.toggle('is-update-required', state.scriptUpdateRequired || state.scriptMissing);
+  }
+
+  function markUserscriptVersion(version) {
+    state.userscriptVersion = String(version || '').trim();
+    state.scriptUpdateRequired = !userscriptVersionSupported(state.userscriptVersion);
+    state.scriptMissing = false;
+    renderUserscriptLink();
+    return !state.scriptUpdateRequired;
+  }
+
   function requestScriptPrices(force) {
     if (!shouldAutoRequestPrices(force) || priceBridgeRequest) return false;
 
+    const manual = Boolean(force);
     const requestId = `price:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     state.error = '';
-    state.status = '正在通过脚本获取实时价格...';
-    render();
+    state.scriptMissing = false;
+    state.status = manual ? '正在通过脚本获取实时价格...' : '正在自动获取实时价格...';
+    setSyncStatus('busy', '正在同步…');
+    let timer = null;
 
     function cleanup() {
       if (!priceBridgeRequest || priceBridgeRequest.id !== requestId) return;
@@ -718,53 +841,66 @@
       const data = event && event.data;
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_RESPONSE || data.requestId !== requestId) return;
       cleanup();
+      markUserscriptVersion(data.scriptVersion);
+      if (state.scriptUpdateRequired) {
+        const error = userscriptUpdateError(data.scriptVersion);
+        const message = `${error.message}；请点击“更新脚本”安装新版本。`;
+        setSyncStatus('error', message);
+        state.status = message;
+        render();
+        return;
+      }
       if (!data.ok || !data.snapshot) {
-        state.status = `自动获取失败：${String(data.error || '脚本未返回价格')}；5分钟后自动重试。`;
+        const detail = String(data.error || '脚本未返回价格');
+        const message = manual ? `刷新失败：${detail}` : `自动获取失败：${detail}`;
+        setSyncStatus('error', message);
+        state.status = manual ? message : `${message}；5分钟后自动重试。`;
+        if (!manual) scheduleAutoRefresh();
         render();
         return;
       }
       applySnapshot(data.snapshot).then(() => {
-        state.status = `已自动导入 ${formatTime(state.lastImportedAt)} 的实时价格。`;
+        if (manual) {
+          state.status = `已刷新 ${formatTime(state.lastImportedAt)} 的实时价格${farmProfileStatusSuffix(data.snapshot.farmProfile)}。`;
+        } else {
+          state.status = `已自动导入 ${formatTime(state.lastImportedAt)} 的实时价格${farmProfileStatusSuffix(data.snapshot.farmProfile)}。`;
+        }
         scheduleAutoRefresh();
         render();
       }).catch((error) => {
-        state.status = `自动导入失败：${String(error && error.message || error)}`;
+        const message = manual
+          ? `刷新失败：${String(error && error.message || error)}`
+          : `自动导入失败：${String(error && error.message || error)}`;
+        setSyncStatus('error', message);
+        state.status = message;
         scheduleAutoRefresh();
         render();
       });
     };
 
-    const timer = window.setTimeout(() => {
+    timer = window.setTimeout(() => {
       cleanup();
-      state.status = hasShopPrices()
-        ? (state.lastImportedAt ? `使用上次导入价格：${formatTime(state.lastImportedAt)}；5分钟后自动重试。` : '使用当前已保存价格；5分钟后自动重试。')
-        : '未检测到自动导入脚本；安装脚本后会在打开页面时自动获取实时价格，5分钟后自动重试。';
-      loadCloudDefaultPrices(false)
-        .then(() => {
-          scheduleAutoRefresh();
-          render();
-        })
-        .catch(() => {
-          scheduleAutoRefresh();
-          render();
-        });
+      state.scriptMissing = true;
+      const message = '未检测到同步脚本；请先安装脚本后再刷新';
+      setSyncStatus('error', message);
+      state.status = message;
+      renderUserscriptLink();
+      scheduleAutoRefresh();
+      render();
     }, 18000);
 
     priceBridgeRequest = { id: requestId, timer, onMessage };
     window.addEventListener('message', onMessage);
+    render();
     window.postMessage({ type: BRIDGE_REQUEST, requestId, force: Boolean(force) }, location.origin);
     return true;
   }
 
   function runAutoRefresh() {
     if (!appReady || !state.config.autoRefreshPrices) return false;
+    if (state.scriptMissing || state.scriptUpdateRequired) return false;
     if (priceBridgeRequest || !shouldAutoRequestPrices(false)) return false;
-    if (!requestScriptPrices(false)) {
-      loadCloudDefaultPrices(true)
-        .then(() => scheduleAutoRefresh())
-        .catch(() => scheduleAutoRefresh());
-    }
-    return true;
+    return requestScriptPrices(false);
   }
 
   function handleAutoRefreshWake() {
@@ -786,7 +922,7 @@
   function scheduleAutoRefresh() {
     if (autoRefreshTimer) window.clearTimeout(autoRefreshTimer);
     autoRefreshTimer = null;
-    if (!state.config.autoRefreshPrices) return;
+    if (!state.config.autoRefreshPrices || state.scriptMissing || state.scriptUpdateRequired) return;
     const delay = autoRefreshDelay(Date.now());
     autoRefreshTimer = window.setTimeout(() => {
       autoRefreshTimer = null;
@@ -1501,13 +1637,22 @@
     `;
   }
 
+  function validChartPriceDomain(value) {
+    if (!value || !Number.isFinite(Number(value.min)) || !Number.isFinite(Number(value.max))) return null;
+    const min = Number(value.min);
+    const max = Number(value.max);
+    if (max <= min) return null;
+    return { min, max };
+  }
+
   function niceChartStep(rawStep) {
     const value = Number(rawStep);
     if (!Number.isFinite(value) || value <= 0) return 1;
     const exponent = Math.floor(Math.log10(value));
     const magnitude = 10 ** exponent;
     const fraction = value / magnitude;
-    const niceFraction = [1, 2, 2.5, 5, 10].find((candidate) => fraction <= candidate) || 10;
+    const niceFraction = [1, 1.2, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]
+      .find((candidate) => fraction <= candidate) || 10;
     return niceFraction * magnitude;
   }
 
@@ -1517,20 +1662,23 @@
     const exponent = Math.floor(Math.log10(value));
     const magnitude = 10 ** exponent;
     const fraction = value / magnitude;
-    const nextFraction = [1, 2, 2.5, 5, 10].find((candidate) => candidate > fraction + 1e-10);
+    const niceFractions = [1, 1.2, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+    const nextFraction = niceFractions.find((candidate) => candidate > fraction + 1e-10);
     return nextFraction ? nextFraction * magnitude : 20 * magnitude;
   }
 
   function niceChartAxis(minValue, maxValue, tickCount) {
-    const count = Math.max(2, Math.floor(Number(tickCount)) || 5);
+    const count = Math.max(2, Math.floor(Number(tickCount)) || TREND_CHART_Y_TICK_COUNT);
     const intervals = count - 1;
     const minimum = Number(minValue);
     const maximum = Number(maxValue);
+    if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
+      return { min: 0, max: intervals, step: 1, values: Array.from({ length: count }, (_, index) => intervals - index) };
+    }
     const range = Math.max(Number.EPSILON, maximum - minimum);
-    let step = Math.max(0.00001, niceChartStep(range / intervals));
-
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      const axisMin = Math.floor((minimum + step * 1e-10) / step) * step;
+    let step = Math.max(0.00000001, niceChartStep(range / intervals));
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const axisMin = Math.floor((minimum + step * 1e-9) / step) * step;
       const axisMax = axisMin + intervals * step;
       if (axisMax + step * 1e-9 >= maximum) {
         const values = Array.from({ length: count }, (_, index) => axisMax - index * step)
@@ -1539,7 +1687,6 @@
       }
       step = nextNiceChartStep(step);
     }
-
     const axisMin = Math.floor(minimum / step) * step;
     const axisMax = axisMin + intervals * step;
     return {
@@ -1550,18 +1697,10 @@
     };
   }
 
-  function validChartPriceDomain(value) {
-    if (!value || !Number.isFinite(Number(value.min)) || !Number.isFinite(Number(value.max))) return null;
-    const min = Number(value.min);
-    const max = Number(value.max);
-    if (max <= min) return null;
-    return { min, max };
-  }
-
   function chartAxisFromPriceDomain(domainValue, tickCount) {
     const domain = validChartPriceDomain(domainValue);
     if (!domain) return null;
-    const count = Math.max(2, Math.floor(Number(tickCount)) || 5);
+    const count = Math.max(2, Math.floor(Number(tickCount)) || TREND_CHART_Y_TICK_COUNT);
     const step = (domain.max - domain.min) / (count - 1);
     return {
       min: domain.min,
@@ -1713,13 +1852,14 @@
 
   function chartAxisPrecision(values, step) {
     const numericStep = Math.abs(Number(step));
-    for (let digits = 2; digits <= 5; digits += 1) {
+    const maxDigits = Number.isFinite(numericStep) && numericStep > 0
+      ? Math.min(12, Math.max(2, Math.ceil(-Math.log10(numericStep)) + 2))
+      : 2;
+    for (let digits = 2; digits <= maxDigits; digits += 1) {
       const labels = values.map((value) => Number(value).toFixed(digits));
-      const scaledStep = numericStep * (10 ** digits);
-      const stepIsExact = Math.abs(scaledStep - Math.round(scaledStep)) <= Math.max(1, scaledStep) * 1e-9;
-      if (stepIsExact && new Set(labels).size === labels.length) return digits;
+      if (new Set(labels).size === labels.length) return digits;
     }
-    return 5;
+    return maxDigits;
   }
 
   function formatChartAxisUsd(value, digits) {
@@ -1862,16 +2002,13 @@
     let minPrice = prices.length ? Math.min(...prices) : 0;
     let maxPrice = prices.length ? Math.max(...prices) : 1;
     if (minPrice === maxPrice) {
-      minPrice = Math.max(0, minPrice * 0.9);
-      maxPrice = maxPrice * 1.1 + 1;
+      minPrice = Math.max(0, minPrice - 1);
+      maxPrice += 1;
     }
-    const pricePad = (maxPrice - minPrice) * 0.12;
-    minPrice = Math.max(0, minPrice - pricePad);
-    maxPrice += pricePad;
-    const naturalPriceDomain = { min: minPrice, max: maxPrice };
-    const naturalAxis = niceChartAxis(naturalPriceDomain.min, naturalPriceDomain.max, 5);
+    const naturalAxis = niceChartAxis(minPrice, maxPrice, TREND_CHART_Y_TICK_COUNT);
+    const naturalPriceDomain = { min: naturalAxis.min, max: naturalAxis.max };
     const yAxis = validChartPriceDomain(chartOptions.priceDomain)
-      ? chartAxisFromPriceDomain(chartOptions.priceDomain, 5)
+      ? chartAxisFromPriceDomain(chartOptions.priceDomain, TREND_CHART_Y_TICK_COUNT)
       : naturalAxis;
     minPrice = yAxis.min;
     maxPrice = yAxis.max;
@@ -2620,13 +2757,60 @@
     if (result) result.innerHTML = renderFarmExperienceResult();
   }
 
-  function renderTableView(rows, bestRevenue, bestExpDay, bestExpHour) {
+  function setSyncStatus(status, message) {
+    state.syncStatusState = status || 'idle';
+    state.syncStatusMessage = String(message || '等待价格数据');
+  }
+
+  function syncStatusView() {
+    if (priceBridgeRequest) {
+      return { state: 'busy', text: '正在同步…' };
+    }
+    if (state.scriptUpdateRequired) {
+      return { state: 'error', text: `同步脚本需要更新到 v${REQUIRED_USERSCRIPT_VERSION}` };
+    }
+    if (state.scriptMissing) {
+      return { state: 'error', text: '未检测到同步脚本；请先安装脚本后再刷新' };
+    }
+    if (state.error) {
+      return { state: 'error', text: state.error };
+    }
+    const message = String(state.syncStatusMessage || '').trim();
+    if (message) return { state: state.syncStatusState || 'idle', text: message };
+    if (state.lastImportedAt) return { state: 'success', text: `已同步 · ${formatTime(state.lastImportedAt)}` };
+    return { state: 'idle', text: '等待价格数据' };
+  }
+
+  function syncUploadStatusView() {
+    if (state.cloudUploadState === 'busy') return { state: 'busy', text: state.cloudUploadMessage || '正在上传本地快照…' };
+    if (state.cloudUploadState === 'error') return { state: 'error', text: state.cloudUploadMessage || '上传失败' };
+    if (state.cloudUploadState === 'warning') return { state: 'warning', text: state.cloudUploadMessage || '云端未采用' };
+    if (state.cloudUploadState === 'success') return { state: 'success', text: state.cloudUploadMessage || '已上传并同步' };
+    if (state.pendingUploadSnapshot) {
+      return state.config.autoUploadPrices
+        ? { state: 'idle', text: '自动上传已开启' }
+        : { state: 'idle', text: '本次抓取仅保存在当前页面' };
+    }
+    return { state: 'idle', text: '尚无待上传的本地快照' };
+  }
+
+  function canUploadPendingSnapshot() {
+    return Boolean(state.pendingUploadSnapshot)
+      && !priceBridgeRequest
+      && state.cloudUploadState !== 'busy';
+  }
+
+  function renderToolbarSyncPrimary() {
+    const sync = syncStatusView();
+    const upload = syncUploadStatusView();
+    const refreshBusy = Boolean(priceBridgeRequest);
     return `
-      <section class="toolbar">
-        <button class="btn primary" data-action="settings">导入</button>
-        <button class="btn" data-action="refresh-prices" title="通过用户脚本立即获取交易所价格">↻ 立即刷新</button>
-        <button class="btn" data-action="upload-cloud" title="上传当前价格到云端校验池">上传云端</button>
-        <span class="field" style="display:inline-flex;align-items:center;border:0;background:transparent;padding:0;color:#475569;">价格来源：交易所售价</span>
+      <div class="toolbar-sync-primary">
+        <button class="btn" data-action="refresh-prices" title="通过用户脚本立即获取交易所价格" ${refreshBusy ? 'disabled' : ''}>${refreshBusy ? '↻ 同步中…' : '↻ 立即刷新'}</button>
+        <button class="btn" data-action="upload-cloud" title="上传当前本地快照到云端校验池" ${canUploadPendingSnapshot() ? '' : 'disabled'}>上传云端</button>
+        <div class="toolbar-sync-status" id="syncStatus" data-state="${sync.state}" aria-live="polite"><span class="toolbar-sync-status-dot" aria-hidden="true"></span><strong>${escapeHtml(sync.text)}</strong></div>
+        <span class="toolbar-upload-status" id="syncUploadStatus" data-state="${upload.state}">${escapeHtml(upload.text)}</span>
+        <span class="toolbar-source-status">价格来源：交易所售价</span>
         <select class="field" id="trendWindow" title="涨跌幅区间">
           <option value="1h" ${trendWindowLabel() === '1h' ? 'selected' : ''}>涨跌幅 1h</option>
           <option value="6h" ${trendWindowLabel() === '6h' ? 'selected' : ''}>涨跌幅 6h</option>
@@ -2639,19 +2823,38 @@
           <option value="active" ${state.config.cycleMode === 'active' ? 'selected' : ''}>${state.config.activeHours}h 活跃估算</option>
           <option value="full24" ${state.config.cycleMode === 'full24' ? 'selected' : ''}>24h 理论轮转</option>
         </select>
+      </div>
+    `;
+  }
+
+  function renderToolbarSyncActions() {
+    return `
+      <div class="toolbar-sync-secondary" aria-label="同步与自动化">
+        <label class="toolbar-sync-toggle" title="页面打开时自动检查最新价格">
+          <strong>每小时自动刷新</strong>
+          <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
+        </label>
+        <label class="toolbar-sync-toggle" title="抓取完成后提交价格快照">
+          <strong>导入后自动上传</strong>
+          <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
+        </label>
+        <a class="bookmarklet primary${state.scriptUpdateRequired || state.scriptMissing ? ' is-update-required' : ''}" id="userscriptInstallLink" href="${USERSCRIPT_URL}" target="_blank" rel="noopener noreferrer">${state.scriptUpdateRequired ? '更新脚本' : '安装脚本'}</a>
+        <a class="bookmarklet" href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">打开 CDK</a>
+      </div>
+    `;
+  }
+
+  function renderTableView(rows, bestRevenue, bestExpDay, bestExpHour) {
+    return `
+      <section class="toolbar toolbar-sync-setup" aria-label="价格同步">
+        ${renderToolbarSyncPrimary()}
+        ${renderToolbarSyncActions()}
       </section>
       <section class="landbar">
         <div class="land-title" title="各等级分别按对应产量和生长时间参与全地汇总">全地等级分布：</div>
         ${state.config.landCounts.map((count, index) => `<label class="land-field">Lv${index + 1}<input class="mini-input land-input" data-level="${index + 1}" type="number" min="0" max="${MAX_LANDS}" value="${count}" /></label>`).join('')}
         <div class="land-title">共 ${totalLands()}/${MAX_LANDS} 块</div>
         ${renderFarmExperienceCalculator()}
-      </section>
-      <section class="notice">
-        <span><strong>状态</strong> ${escapeHtml(state.status)}</span>
-        <span>来源：${sourceLabel()}</span>
-        <span>最后导入：${state.lastImportedAt ? formatTime(state.lastImportedAt) : '暂无'}</span>
-        ${state.cloudDefaultAt ? `<span>云端默认：${formatTime(state.cloudDefaultAt)}</span>` : ''}
-        ${state.error ? `<span class="bad">${escapeHtml(state.error)}</span>` : ''}
       </section>
       <section class="formula-bar">
         <span class="formula-title">公式</span>
@@ -2774,41 +2977,30 @@
 
   function renderSettings() {
     return `
-      <div class="settings">
+      <div class="settings settings-page">
         <div class="settings-status" role="status" aria-live="polite">${escapeHtml(state.status)}</div>
-        <section class="settings-panel settings-wide">
-          <div class="settings-head">
-            <div>
-              <h2>价格导入</h2>
-              <p>安装用户脚本后，可从 CDK 获取交易所实时价格。</p>
-            </div>
-            <div class="settings-actions">
-              <a class="bookmarklet primary" href="./userscripts/hyb-farm-dashboard-capture.user.js">安装脚本</a>
-              <a class="bookmarklet" href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">打开 CDK</a>
-            </div>
-          </div>
-        </section>
 
-        <section class="settings-panel">
+        <section class="settings-panel settings-group-wide settings-group-sync" data-settings-group="sync">
           <div class="settings-head compact">
             <div>
-              <h2>自动化</h2>
-              <p>控制刷新和云端提交。</p>
+              <span class="settings-kicker">数据来源与协助</span>
+              <h2>同步协助</h2>
+              <p>自动刷新、自动上传和脚本入口已放在收益表刷新行最右侧。</p>
             </div>
           </div>
-          <div class="toggle-list">
-            <label class="toggle-row">
-              <span class="toggle-text"><strong>每小时自动刷新</strong><small>对比本地与云端时间，自动采用较新的价格</small></span>
-              <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
-            </label>
-            <label class="toggle-row">
-              <span class="toggle-text"><strong>导入后自动上传</strong><small>关闭时只有手动上传才进入云端校验</small></span>
-              <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
+          <div class="settings-sync-note">
+            <strong>脚本状态：${state.scriptUpdateRequired ? '需要更新' : state.userscriptVersion ? `v${escapeHtml(state.userscriptVersion)}` : '尚未连接'}</strong>
+            <span>价格导入仍只在当前浏览器内读取 CDK；关闭同步协助不会影响正常使用。</span>
+          </div>
+          <div class="toggle-list settings-toggle-grid">
+            <label class="toggle-row toggle-row-emphasis">
+              <span class="toggle-text"><strong>允许本设备协助同步</strong><small>仅在页面打开期间参与随机作物资料同步，不上传账号、Cookie 或个人数据</small></span>
+              <span class="toggle-control"><input id="allowSyncNode" type="checkbox" ${state.config.allowSyncNode ? 'checked' : ''} /><span class="toggle-track"></span></span>
             </label>
           </div>
         </section>
 
-        <section class="settings-panel">
+        <section class="settings-panel settings-group-wide settings-group-alerts" data-settings-group="alerts">
           <div class="settings-head compact">
             <div>
               <h2>价格提醒</h2>
@@ -2835,7 +3027,7 @@
           </div>
         </section>
 
-        <section class="settings-panel">
+        <section class="settings-panel settings-group-appearance" data-settings-group="appearance">
           <div class="settings-head compact">
             <div>
               <h2>外观</h2>
@@ -2849,7 +3041,7 @@
           </div>
         </section>
 
-        <section class="settings-panel">
+        <section class="settings-panel settings-group-privacy" data-settings-group="privacy">
           <div class="settings-head compact">
             <div>
               <h2>隐私与云端</h2>
@@ -2859,7 +3051,7 @@
           <div class="settings-copy">价格数据通过脚本消息或 <span class="code">#snapshot</span> 带回本页。只有点击“上传云端”或开启自动上传时，价格和时间才会提交到云端校验池。</div>
         </section>
 
-        <section class="settings-panel settings-wide settings-manage">
+        <section class="settings-panel settings-group-wide settings-group-data settings-manage" data-settings-group="data">
           <div class="settings-head compact">
             <div>
               <h2>数据管理</h2>
@@ -3033,6 +3225,15 @@
       saveState();
       render();
     });
+    const allowSyncNode = document.getElementById('allowSyncNode');
+    if (allowSyncNode) allowSyncNode.addEventListener('change', () => {
+      state.config.allowSyncNode = allowSyncNode.checked;
+      state.status = state.config.allowSyncNode
+        ? '已开启本设备作物资料同步协助。'
+        : '已关闭本设备作物资料同步协助。';
+      saveState();
+      render();
+    });
     const browserPriceAlerts = document.getElementById('browserPriceAlerts');
     if (browserPriceAlerts) browserPriceAlerts.addEventListener('change', () => {
       setBrowserPriceAlerts(browserPriceAlerts.checked).then(() => render()).catch((error) => {
@@ -3093,16 +3294,29 @@
       return;
     }
     if (action === 'upload-cloud') {
-      const snapshot = snapshotFromCurrentPrices();
-      if (!snapshot) { state.status = '没有可上传的当前价格。'; render(); return; }
+      const snapshot = state.pendingUploadSnapshot;
+      if (!snapshot) {
+        state.status = '尚无待上传的本地快照';
+        setCloudUploadStatus('idle', '尚无待上传的本地快照');
+        render();
+        return;
+      }
       state.status = '正在上传云端校验...';
+      setCloudUploadStatus('busy', '手动上传中…');
       render();
       try {
         const result = await submitSnapshotToCloud(snapshot);
         rememberCloudDefault(result);
-        state.status = cloudSubmissionStatusText(result) || '云端已收到价格数据。';
+        const text = cloudSubmissionStatusText(result) || '云端已收到价格数据。';
+        const accepted = result && result.status === 'accepted';
+        const settled = accepted || (result && result.status === 'rejected');
+        if (settled && state.pendingUploadSnapshot === snapshot) state.pendingUploadSnapshot = null;
+        setCloudUploadStatus(accepted ? 'success' : 'warning', text.replace(/。$/, ''));
+        state.status = text;
       } catch (error) {
-        state.status = `云端上传失败：${String(error && error.message || error)}`;
+        const message = `云端上传失败：${String(error && error.message || error)}`;
+        setCloudUploadStatus('error', message);
+        state.status = message;
       }
       render();
       return;

@@ -72,6 +72,21 @@ test('chart animates natural y-axis domains without rebuilding alert data', () =
   assert.match(appSource, /CHART_TIME\.aggregatePricePoints\(/);
 });
 
+test('trend chart rounds the visible price domain and keeps six y-axis ticks', () => {
+  assert.match(appSource, /const TREND_CHART_Y_TICK_COUNT = 6;/);
+  assert.match(appSource, /function niceChartAxis\(minValue, maxValue, tickCount\)/);
+  assert.match(appSource, /const niceFraction = \[1, 1\.2, 1\.25, 1\.5, 2, 2\.5, 3, 4, 5, 6, 8, 10\]/);
+  assert.match(appSource, /const naturalAxis = niceChartAxis\(minPrice, maxPrice, TREND_CHART_Y_TICK_COUNT\);/);
+  assert.match(appSource, /const naturalPriceDomain = \{ min: naturalAxis\.min, max: naturalAxis\.max \};/);
+  assert.match(appSource, /chartAxisFromPriceDomain\(chartOptions\.priceDomain, TREND_CHART_Y_TICK_COUNT\)/);
+});
+
+test('y-axis precision adapts to very small tick steps', () => {
+  assert.match(appSource, /const maxDigits = Number\.isFinite\(numericStep\) && numericStep > 0/);
+  assert.match(appSource, /Math\.min\(12, Math\.max\(2, Math\.ceil\(-Math\.log10\(numericStep\)\) \+ 2\)\)/);
+  assert.doesNotMatch(appSource, /for \(let digits = 2; digits <= 5; digits \+= 1\)/);
+});
+
 test('trend chart keeps a fixed axis column while the y-axis animates', () => {
   assert.match(appSource, /const TREND_CHART_FIXED_AXIS_WIDTH = 86;/);
   assert.match(appSource, /const axisWidth = TREND_CHART_FIXED_AXIS_WIDTH;/);

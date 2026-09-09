@@ -6,8 +6,8 @@ HYB Farm Dashboard 用于在不上传私有农场/账号数据的前提下分析
 
 ```text
 cdk.hybgzs.com page
-  -> userscript fetches same-origin price APIs in the user's browser
-  -> userscript builds a compact price snapshot
+  -> userscript fetches same-origin price, farm-level, and farm-plot APIs in the user's browser
+  -> userscript builds a compact local snapshot
   -> dashboard imports it through an in-page message or dashboard/#snapshot=...
   -> dashboard stores it in local IndexedDB
 ```
@@ -36,6 +36,7 @@ hashed submitter fingerprint for abuse resistance
 ```
 
 It does not intentionally upload farm layout, account identity, inventory, cookies, or private profile data.
+The locally captured total experience and unlocked land levels are removed before any price snapshot upload.
 
 ## What Cloudflare Sees
 

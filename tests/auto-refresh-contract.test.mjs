@@ -40,5 +40,5 @@ test('auto refresh catches up after page lifecycle and network wake events', () 
   assert.match(app, /window\.addEventListener\('online', handleAutoRefreshWake\)/);
   assert.match(app, /const delay = autoRefreshDelay\(Date\.now\(\)\);/);
   assert.match(app, /autoRefreshTimer = window\.setTimeout\(\(\) => \{[\s\S]*?runAutoRefresh\(\);[\s\S]*?scheduleAutoRefresh\(\);[\s\S]*?\}, delay\);/);
-  assert.match(app, /state\.status = `已自动导入 \$\{formatTime\(state\.lastImportedAt\)\} 的实时价格。`;[\s\S]*?scheduleAutoRefresh\(\);/);
+  assert.match(app, /state\.status = `已自动导入 \$\{formatTime\(state\.lastImportedAt\)\} 的实时价格\$\{farmProfileStatusSuffix\(data\.snapshot\.farmProfile\)\}。`;[\s\S]*?scheduleAutoRefresh\(\);/);
 });
