@@ -14,14 +14,14 @@ test('page versions critical assets and loads price-alert utilities before the a
   const criticalAssets = [...html.matchAll(/(?:href|src)="(\.\/(?:style\.css|chart-time-utils\.js|price-alert-utils\.js|app\.js)[^"]*)"/g)]
     .map((match) => match[1]);
   assert.deepEqual(criticalAssets, [
-    './style.css?v=20260910-toolbar1',
-    './chart-time-utils.js?v=20260910-toolbar1',
-    './price-alert-utils.js?v=20260910-toolbar1',
-    './app.js?v=20260910-toolbar1'
+    './style.css?v=20260910-plotlevel1',
+    './chart-time-utils.js?v=20260910-plotlevel1',
+    './price-alert-utils.js?v=20260910-plotlevel1',
+    './app.js?v=20260910-plotlevel1'
   ]);
 
-  const priceAlertIndex = html.indexOf('./price-alert-utils.js?v=20260910-toolbar1');
-  const appIndex = html.indexOf('./app.js?v=20260910-toolbar1');
+  const priceAlertIndex = html.indexOf('./price-alert-utils.js?v=20260910-plotlevel1');
+  const appIndex = html.indexOf('./app.js?v=20260910-plotlevel1');
   assert.ok(priceAlertIndex < appIndex, 'price-alert-utils.js loads before app.js');
 });
 
@@ -164,6 +164,6 @@ test('hidden toggle inputs retain a visible keyboard focus indicator', () => {
 });
 
 test('capture userscript supplies twenty-five hourly buckets for rolling 24-hour alerts', () => {
-  assert.match(userscript, /@version\s+0\.5\.0/);
+  assert.match(userscript, /@version\s+0\.5\.1/);
   assert.match(userscript, /granularity=hour&trendRange=25/);
 });

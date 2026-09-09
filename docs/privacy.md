@@ -6,7 +6,7 @@ HYB Farm Dashboard 用于在不上传私有农场/账号数据的前提下分析
 
 ```text
 cdk.hybgzs.com page
-  -> userscript fetches same-origin price, farm-level, and farm-plot APIs in the user's browser
+  -> userscript fetches same-origin price, farm-level, and farm-crops APIs in the user's browser
   -> userscript builds a compact local snapshot
   -> dashboard imports it through an in-page message or dashboard/#snapshot=...
   -> dashboard stores it in local IndexedDB

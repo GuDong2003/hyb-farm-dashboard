@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong226.com/
-// @version      0.5.0
+// @version      0.5.1
 // @description  为 HYB Farm Dashboard 自动导入实时价格，并同步本地农场经验与地块等级。
 // @updateURL    https://hyb.gudong226.com/userscripts/hyb-farm-dashboard-capture.user.js
 // @downloadURL  https://hyb.gudong226.com/userscripts/hyb-farm-dashboard-capture.user.js
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.5.0';
+  const SCRIPT_VERSION = '0.5.1';
   const DASHBOARD_URL = 'https://hyb.gudong226.com/';
   const DASHBOARD_ORIGINS = new Set([
     'https://hyb.gudong.ccwu.cc',
@@ -27,7 +27,7 @@
   const TREND_HOUR_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=hour&trendRange=25';
   const TREND_DAY_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=day&trendRange=7';
   const FARM_LEVEL_URL = '/api/farm/level';
-  const FARM_PLOTS_URL = '/api/farm/plots';
+  const FARM_CROPS_URL = '/api/farm/crops';
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
@@ -262,49 +262,71 @@
     items.forEach((item) => rememberTrendItem(item, seriesKey, shop, shopChangeRates, shopTrends));
   }
 
-  function normalizeFarmProfile(levelJson, plotsJson) {
+  function normalizeCurrentPlotLevels(cropsJson) {
+    const candidates = [
+      cropsJson && cropsJson.plotLevels,
+      cropsJson && cropsJson.data && cropsJson.data.plotLevels
+    ];
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate)) {
+        const entries = candidate.map((item) => ({
+          plotIndex: Number(item && (item.plotIndex ?? item.index)),
+          level: Number(item && (item.level ?? item.plotLevel))
+        })).filter((item) => (
+          Number.isInteger(item.plotIndex)
+          && item.plotIndex >= 0
+          && Number.isInteger(item.level)
+          && item.level >= 1
+          && item.level <= 7
+        ));
+        if (entries.length) return entries;
+      } else if (candidate && typeof candidate === 'object') {
+        const entries = Object.entries(candidate).map(([plotIndex, level]) => ({
+          plotIndex: Number(plotIndex),
+          level: Number(level && typeof level === 'object' ? (level.level ?? level.plotLevel) : level)
+        })).filter((item) => (
+          Number.isInteger(item.plotIndex)
+          && item.plotIndex >= 0
+          && Number.isInteger(item.level)
+          && item.level >= 1
+          && item.level <= 7
+        ));
+        if (entries.length) return entries;
+      }
+    }
+    return [];
+  }
+
+  function normalizeFarmProfile(levelJson, cropsJson) {
     const profile = {};
     const levelData = levelJson && levelJson.data && typeof levelJson.data === 'object' ? levelJson.data : null;
     const totalExp = Number(levelData && levelData.totalExp);
     if (Number.isFinite(totalExp) && totalExp >= 0) profile.currentTotalExp = Math.floor(totalExp);
 
-    const plotsData = plotsJson && plotsJson.data && typeof plotsJson.data === 'object' ? plotsJson.data : null;
-    const levels = plotsData && plotsData.unlockedPlotLevels && typeof plotsData.unlockedPlotLevels === 'object'
-      ? plotsData.unlockedPlotLevels
-      : null;
-    if (plotsData && levels) {
-      const indexes = new Set();
-      const freeSlots = Number(plotsData.freeSlots);
-      if (Number.isInteger(freeSlots) && freeSlots > 0) {
-        for (let index = 0; index < freeSlots; index += 1) indexes.add(String(index));
-      }
-      if (Array.isArray(plotsData.unlockedPlotIndexes)) {
-        plotsData.unlockedPlotIndexes.forEach((index) => indexes.add(String(index)));
-      }
-      const selectedIndexes = indexes.size ? Array.from(indexes) : Object.keys(levels);
+    const currentPlotLevels = normalizeCurrentPlotLevels(cropsJson);
+    if (currentPlotLevels.length) {
       const landCounts = Array.from({ length: 7 }, () => 0);
       const seen = new Set();
-      selectedIndexes.forEach((index) => {
-        const key = String(index);
-        if (seen.has(key)) return;
-        seen.add(key);
-        const level = Number(levels[key]);
-        if (Number.isInteger(level) && level >= 1 && level <= 7) landCounts[level - 1] += 1;
+      currentPlotLevels.forEach(({ plotIndex, level }) => {
+        if (seen.has(plotIndex)) return;
+        seen.add(plotIndex);
+        landCounts[level - 1] += 1;
       });
       profile.landCounts = landCounts;
+      return Object.keys(profile).length ? profile : null;
     }
 
     return Object.keys(profile).length ? profile : null;
   }
 
   async function captureFarmProfile() {
-    const [levelResult, plotsResult] = await Promise.allSettled([
+    const [levelResult, cropsResult] = await Promise.allSettled([
       fetchJson(FARM_LEVEL_URL, 15000),
-      fetchJson(FARM_PLOTS_URL, 15000)
+      fetchJson(FARM_CROPS_URL, 15000)
     ]);
     return normalizeFarmProfile(
       levelResult.status === 'fulfilled' ? levelResult.value : null,
-      plotsResult.status === 'fulfilled' ? plotsResult.value : null
+      cropsResult.status === 'fulfilled' ? cropsResult.value : null
     );
   }
 

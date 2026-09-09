@@ -18,7 +18,7 @@
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
-  const REQUIRED_USERSCRIPT_VERSION = '0.5.0';
+  const REQUIRED_USERSCRIPT_VERSION = '0.5.1';
   const USERSCRIPT_URL = '/userscripts/hyb-farm-dashboard-capture.user.js';
   const CLOUD_DEFAULT_ENDPOINT = '/api/default-prices';
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
