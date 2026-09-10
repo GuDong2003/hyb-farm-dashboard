@@ -74,9 +74,18 @@ test('home page follows the card-style sync row and removes the redundant live i
 });
 
 test('home sync row mirrors card primary and secondary alignment with responsive wrapping', () => {
+  assert.match(toolbarPrimarySource, /class="btn primary" data-action="refresh-prices"/);
+  assert.match(toolbarPrimarySource, /class="btn primary" data-action="upload-cloud"/);
+  assert.match(toolbarSyncSource, /class="toolbar-sync-toggle-copy"/);
+  assert.match(toolbarSyncSource, /页面打开时自动获取最新价格/);
+  assert.match(toolbarSyncSource, /抓取完成后提交价格快照/);
+  assert.match(toolbarSyncSource, /class="bookmarklet secondary/);
   assert.match(style, /\.toolbar-sync-primary\s*\{[^}]*display:\s*flex/s);
   assert.match(style, /\.toolbar-sync-secondary\s*\{[^}]*margin-left:\s*auto/s);
-  assert.match(style, /\.toolbar-sync-status\s*\{[^}]*border-radius:\s*8px/s);
+  assert.match(style, /\.toolbar-sync-primary \.btn\.primary[\s\S]*?min-height:\s*34px[\s\S]*?padding:\s*0 11px/s);
+  assert.match(style, /\.toolbar-sync-secondary \.bookmarklet\.secondary[\s\S]*?min-height:\s*34px[\s\S]*?padding:\s*0 11px/s);
+  assert.match(style, /\.toolbar-sync-status\s*\{[^}]*border-radius:\s*9px/s);
+  assert.match(style, /\.toolbar-sync-toggle\s*\{[^}]*min-width:\s*150px/s);
   assert.match(style, /\.toolbar-sync-status\[data-state="success"\]/);
   assert.match(style, /\.toolbar-sync-status\[data-state="busy"\]/);
   assert.match(style, /\.toolbar-sync-status\[data-state="error"\]/);

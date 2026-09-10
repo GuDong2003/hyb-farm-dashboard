@@ -2806,8 +2806,8 @@
     const refreshBusy = Boolean(priceBridgeRequest);
     return `
       <div class="toolbar-sync-primary">
-        <button class="btn" data-action="refresh-prices" title="通过用户脚本立即获取交易所价格" ${refreshBusy ? 'disabled' : ''}>${refreshBusy ? '↻ 同步中…' : '↻ 立即刷新'}</button>
-        <button class="btn" data-action="upload-cloud" title="上传当前本地快照到云端校验池" ${canUploadPendingSnapshot() ? '' : 'disabled'}>上传云端</button>
+        <button class="btn primary" data-action="refresh-prices" title="通过用户脚本立即获取交易所价格" ${refreshBusy ? 'disabled' : ''}>${refreshBusy ? '↻ 同步中…' : '↻ 立即刷新'}</button>
+        <button class="btn primary" data-action="upload-cloud" title="上传当前本地快照到云端校验池" ${canUploadPendingSnapshot() ? '' : 'disabled'}>上传云端</button>
         <div class="toolbar-sync-status" id="syncStatus" data-state="${sync.state}" aria-live="polite"><span class="toolbar-sync-status-dot" aria-hidden="true"></span><strong>${escapeHtml(sync.text)}</strong></div>
         <span class="toolbar-upload-status" id="syncUploadStatus" data-state="${upload.state}">${escapeHtml(upload.text)}</span>
         <span class="toolbar-source-status">价格来源：交易所售价</span>
@@ -2831,15 +2831,15 @@
     return `
       <div class="toolbar-sync-secondary" aria-label="同步与自动化">
         <label class="toolbar-sync-toggle" title="页面打开时自动检查最新价格">
-          <strong>每小时自动刷新</strong>
+          <span class="toolbar-sync-toggle-copy"><strong>每小时自动刷新</strong><small>页面打开时自动获取最新价格</small></span>
           <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
         </label>
         <label class="toolbar-sync-toggle" title="抓取完成后提交价格快照">
-          <strong>导入后自动上传</strong>
+          <span class="toolbar-sync-toggle-copy"><strong>导入后自动上传</strong><small>抓取完成后提交价格快照</small></span>
           <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
         </label>
-        <a class="bookmarklet primary${state.scriptUpdateRequired || state.scriptMissing ? ' is-update-required' : ''}" id="userscriptInstallLink" href="${USERSCRIPT_URL}" target="_blank" rel="noopener noreferrer">${state.scriptUpdateRequired ? '更新脚本' : '安装脚本'}</a>
-        <a class="bookmarklet" href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">打开 CDK</a>
+        <a class="bookmarklet secondary${state.scriptUpdateRequired || state.scriptMissing ? ' is-update-required' : ''}" id="userscriptInstallLink" href="${USERSCRIPT_URL}" target="_blank" rel="noopener noreferrer">${state.scriptUpdateRequired ? '更新脚本' : '安装脚本'}</a>
+        <a class="bookmarklet secondary" href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">打开 CDK</a>
       </div>
     `;
   }
