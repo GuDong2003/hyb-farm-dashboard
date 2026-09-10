@@ -54,6 +54,11 @@ export default {
     }
 
     if (url.pathname === '/api/price-submissions' && request.method === 'POST') {
+      const requiredToken = env.PRICE_SUBMIT_TOKEN;
+      const providedToken = request.headers.get('X-Submit-Token');
+      if (requiredToken && providedToken !== requiredToken) {
+        return jsonResponse({ ok: false, error: 'unauthorized' }, 401);
+      }
       return submitPrices(request, env);
     }
 
