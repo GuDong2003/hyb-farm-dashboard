@@ -410,9 +410,11 @@
 
   async function fetchCloudHistoryAlerts(force) {
     const endpoint = `${CLOUD_HISTORY_ENDPOINT}?threshold=${encodeURIComponent(HISTORY_ANOMALY_THRESHOLD)}`;
+    const headers = { accept: 'application/json' };
+    if (force) headers['cache-control'] = 'no-cache';
     const response = await fetch(endpoint, {
-      headers: { accept: 'application/json' },
-      cache: force ? 'reload' : 'no-store'
+      headers,
+      cache: force ? 'reload' : 'default'
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data || data.ok === false) throw new Error(data.error || data.reason || `HTTP ${response.status}`);
@@ -614,7 +616,7 @@
   async function loadCloudDefaultPrices(renderAfter) {
     let changed = false;
     try {
-      const response = await fetch(CLOUD_DEFAULT_ENDPOINT, { headers: { accept: 'application/json' }, cache: 'no-store' });
+      const response = await fetch(CLOUD_DEFAULT_ENDPOINT, { headers: { accept: 'application/json' }, cache: 'default' });
       if (!response.ok) return false;
       const data = await response.json();
       const snapshot = data && data.snapshot;
@@ -3517,9 +3519,6 @@
     installThemeListener();
     await loadCloudDefaultPrices(false);
     await refreshHistoryCount();
-    const historyPromise = loadHistoryAlerts(false);
-    render();
-    await historyPromise;
     render();
     appReady = true;
     window.setTimeout(runAutoRefresh, 600);

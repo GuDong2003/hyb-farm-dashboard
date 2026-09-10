@@ -38,13 +38,14 @@ const MAX_PRICE_USD = 1000000;
 const MAX_TREND_POINTS_PER_SERIES = 200;
 const FUTURE_TOLERANCE_MS = 10 * 60 * 1000;
 const DEFAULT_PRICE_CHANGE_THRESHOLD = 20;
+const PUBLIC_CACHE_CONTROL = 'public, max-age=0, s-maxage=60, stale-while-revalidate=30';
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
     if (url.pathname === '/api/default-prices' && request.method === 'GET') {
-      return getDefaultPrices(env);
+      return getDefaultPrices(request, env);
     }
 
     if (url.pathname === '/api/price-history' && request.method === 'GET') {
@@ -63,41 +64,45 @@ export default {
   }
 };
 
-async function getDefaultPrices(env) {
-  assertDatabase(env);
-  const row = await env.PRICE_DB.prepare('SELECT * FROM default_prices WHERE id = 1').first();
-  if (!row) {
-    return jsonResponse({ ok: true, snapshot: null }, 200, {
-      'cache-control': 'public, max-age=60'
+async function getDefaultPrices(request, env) {
+  return withPublicCache(request, async () => {
+    assertDatabase(env);
+    const row = await env.PRICE_DB.prepare('SELECT * FROM default_prices WHERE id = 1').first();
+    if (!row) {
+      return jsonResponse({ ok: true, snapshot: null }, 200, {
+        'cache-control': PUBLIC_CACHE_CONTROL
+      });
+    }
+    const snapshot = snapshotFromDefaultRow(row);
+    await hydrateSnapshotTrends(env, snapshot);
+    return jsonResponse({ ok: true, snapshot }, 200, {
+      'cache-control': PUBLIC_CACHE_CONTROL
     });
-  }
-  const snapshot = snapshotFromDefaultRow(row);
-  await hydrateSnapshotTrends(env, snapshot);
-  return jsonResponse({ ok: true, snapshot }, 200, {
-    'cache-control': 'public, max-age=60'
   });
 }
 
 async function getPriceHistory(request, env) {
-  assertDatabase(env);
-  const url = new URL(request.url);
-  const threshold = normalizeChangeThreshold(url.searchParams.get('threshold'));
-  const rows = await env.PRICE_DB.prepare(`
-    SELECT id, submitted_at, accepted_at, captured_at, source, prices_json
-    FROM price_submissions
-    WHERE accepted = 1
-    ORDER BY captured_at ASC, id ASC
-  `).all();
-  const result = buildPriceChangeHistory((rows && rows.results) || [], threshold);
-  return jsonResponse({
-    ok: true,
-    threshold,
-    totalSnapshots: result.totalSnapshots,
-    eventCount: result.eventCount,
-    groups: result.groups,
-    series: result.series
-  }, 200, {
-    'cache-control': 'public, max-age=60'
+  return withPublicCache(request, async () => {
+    assertDatabase(env);
+    const url = new URL(request.url);
+    const threshold = normalizeChangeThreshold(url.searchParams.get('threshold'));
+    const rows = await env.PRICE_DB.prepare(`
+      SELECT id, submitted_at, accepted_at, captured_at, source, prices_json
+      FROM price_submissions
+      WHERE accepted = 1
+      ORDER BY captured_at ASC, id ASC
+    `).all();
+    const result = buildPriceChangeHistory((rows && rows.results) || [], threshold);
+    return jsonResponse({
+      ok: true,
+      threshold,
+      totalSnapshots: result.totalSnapshots,
+      eventCount: result.eventCount,
+      groups: result.groups,
+      series: result.series
+    }, 200, {
+      'cache-control': PUBLIC_CACHE_CONTROL
+    });
   });
 }
 
@@ -167,6 +172,7 @@ async function submitPrices(request, env) {
   }
 
   await acceptSubmission(env, normalized, submissionId, now);
+  await purgePriceResponseCaches(request);
 
   return jsonResponse({
     ok: true,
@@ -617,6 +623,56 @@ function safeJsonObject(value) {
 
 function assertDatabase(env) {
   if (!env.PRICE_DB) throw new Error('PRICE_DB binding is not configured');
+}
+
+function publicCacheStorage() {
+  return globalThis.caches && globalThis.caches.default ? globalThis.caches.default : null;
+}
+
+function publicCacheBypassRequested(request) {
+  const cacheControl = request && request.headers ? request.headers.get('cache-control') || '' : '';
+  return /(?:^|,)\s*(?:no-cache|no-store)\b/i.test(cacheControl);
+}
+
+function publicCacheKey(request) {
+  const url = new URL(request.url);
+  url.hash = '';
+  return new Request(url.toString(), { method: 'GET' });
+}
+
+async function withPublicCache(request, loader) {
+  const cache = publicCacheStorage();
+  const bypass = publicCacheBypassRequested(request);
+  const key = publicCacheKey(request);
+  if (cache && !bypass) {
+    try {
+      const cached = await cache.match(key);
+      if (cached) return cached;
+    } catch (_) {
+      // Cache failures must not make the API unavailable.
+    }
+  }
+
+  const response = await loader();
+  if (cache && !bypass && response && response.ok) {
+    try {
+      await cache.put(key, response.clone());
+    } catch (_) {
+      // Cache writes are best effort; return the fresh D1 response regardless.
+    }
+  }
+  return response;
+}
+
+async function purgePriceResponseCaches(request) {
+  const cache = publicCacheStorage();
+  if (!cache) return;
+  const origin = new URL(request.url).origin;
+  const keys = [
+    new Request(`${origin}/api/default-prices`, { method: 'GET' }),
+    new Request(`${origin}/api/price-history?threshold=${DEFAULT_PRICE_CHANGE_THRESHOLD}`, { method: 'GET' })
+  ];
+  await Promise.allSettled(keys.map((key) => cache.delete(key)));
 }
 
 function jsonResponse(body, status = 200, extraHeaders = {}) {
