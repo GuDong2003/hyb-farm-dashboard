@@ -23,7 +23,8 @@ test('public cloud reads use edge caching and accepted uploads invalidate cached
   assert.match(workerSource, /cache\.match\(/);
   assert.match(workerSource, /cache\.put\(/);
   assert.match(workerSource, /cache\.delete\(/);
-  assert.match(workerSource, /s-maxage=60/);
+  assert.match(workerSource, /PUBLIC_DEFAULT_CACHE_CONTROL[\s\S]*s-maxage=600/);
+  assert.match(workerSource, /PUBLIC_HISTORY_CACHE_CONTROL[\s\S]*s-maxage=3600/);
   assert.match(workerSource, /await purgePriceResponseCaches\(request\)/);
 });
 
@@ -71,7 +72,7 @@ test('default-price and history GETs reuse edge responses until an explicit refr
     await worker.fetch(new Request(defaultUrl), defaultEnv);
     await worker.fetch(new Request(defaultUrl), defaultEnv);
     assert.equal(defaultReads, 1, 'cached default response avoids a second D1 read');
-    assert.match(cache.entries.get(defaultUrl).headers.get('cache-control'), /s-maxage=60/);
+    assert.match(cache.entries.get(defaultUrl).headers.get('cache-control'), /s-maxage=600/);
 
     await worker.fetch(new Request(defaultUrl, { headers: { 'cache-control': 'no-cache' } }), defaultEnv);
     assert.equal(defaultReads, 2, 'explicit refresh bypasses the edge response');
@@ -89,5 +90,6 @@ test('default-price and history GETs reuse edge responses until an explicit refr
     await worker.fetch(new Request(historyUrl), historyEnv);
     await worker.fetch(new Request(historyUrl), historyEnv);
     assert.equal(historyReads, 1, 'cached history response avoids a second D1 read');
+    assert.match(cache.entries.get(historyUrl).headers.get('cache-control'), /s-maxage=3600/);
   });
 });

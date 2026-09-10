@@ -38,7 +38,8 @@ const MAX_PRICE_USD = 1000000;
 const MAX_TREND_POINTS_PER_SERIES = 200;
 const FUTURE_TOLERANCE_MS = 10 * 60 * 1000;
 const DEFAULT_PRICE_CHANGE_THRESHOLD = 20;
-const PUBLIC_CACHE_CONTROL = 'public, max-age=0, s-maxage=60, stale-while-revalidate=30';
+const PUBLIC_DEFAULT_CACHE_CONTROL = 'public, max-age=0, s-maxage=600, stale-while-revalidate=60';
+const PUBLIC_HISTORY_CACHE_CONTROL = 'public, max-age=0, s-maxage=3600, stale-while-revalidate=300';
 
 export default {
   async fetch(request, env) {
@@ -70,13 +71,13 @@ async function getDefaultPrices(request, env) {
     const row = await env.PRICE_DB.prepare('SELECT * FROM default_prices WHERE id = 1').first();
     if (!row) {
       return jsonResponse({ ok: true, snapshot: null }, 200, {
-        'cache-control': PUBLIC_CACHE_CONTROL
+        'cache-control': PUBLIC_DEFAULT_CACHE_CONTROL
       });
     }
     const snapshot = snapshotFromDefaultRow(row);
     await hydrateSnapshotTrends(env, snapshot);
     return jsonResponse({ ok: true, snapshot }, 200, {
-      'cache-control': PUBLIC_CACHE_CONTROL
+      'cache-control': PUBLIC_DEFAULT_CACHE_CONTROL
     });
   });
 }
@@ -101,7 +102,7 @@ async function getPriceHistory(request, env) {
       groups: result.groups,
       series: result.series
     }, 200, {
-      'cache-control': PUBLIC_CACHE_CONTROL
+      'cache-control': PUBLIC_HISTORY_CACHE_CONTROL
     });
   });
 }
