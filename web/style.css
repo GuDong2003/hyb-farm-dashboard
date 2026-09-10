@@ -212,12 +212,28 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .toolbar-sync-primary .btn.primary {
   min-height: 34px;
   padding: 0 11px;
+  border-radius: 9px;
+  font-size: .78rem;
+  font-weight: 760;
   white-space: nowrap;
+  transition: filter .18s, transform .18s;
+}
+.toolbar-sync-primary .btn.primary:hover {
+  background: var(--blue);
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+.toolbar-sync-primary .btn.primary:disabled {
+  opacity: 1;
 }
 .toolbar-sync-secondary .bookmarklet.secondary {
   min-height: 34px;
   padding: 0 11px;
+  border-radius: 9px;
+  font-size: .78rem;
+  font-weight: 760;
   white-space: nowrap;
+  transition: filter .18s, transform .18s;
 }
 .toolbar-sync-toggle {
   display: flex;
@@ -238,15 +254,15 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .toolbar-sync-toggle-copy strong {
   overflow: hidden;
   color: var(--text);
-  font-size: 12px;
-  font-weight: 750;
+  font-size: .76rem;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .toolbar-sync-toggle-copy small {
   overflow: hidden;
   color: var(--muted);
-  font-size: 10px;
+  font-size: .66rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -385,8 +401,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .btn:disabled { cursor: not-allowed; opacity: .56; }
 .btn.primary, .bookmarklet.primary { color: #fff; background: var(--blue); border-color: var(--blue); }
 .btn.primary:hover, .bookmarklet.primary:hover { background: var(--blue-strong); }
-.btn.secondary, .bookmarklet.secondary { color: #fff; background: #64748b; border-color: #64748b; }
-.btn.secondary:hover, .bookmarklet.secondary:hover { background: #475569; border-color: #475569; }
+.btn.secondary, .bookmarklet.secondary { color: var(--text); background: transparent; border-color: var(--control-border); }
+.btn.secondary:hover, .bookmarklet.secondary:hover { background: var(--control-hover); border-color: var(--control-border); }
 .bookmarklet.is-update-required { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
 .bookmarklet.is-update-required:hover { background: var(--warn-bg); }
 .btn.warn { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }

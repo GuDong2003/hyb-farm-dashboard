@@ -807,7 +807,7 @@
     const link = document.getElementById('userscriptInstallLink');
     if (!link) return;
     link.href = USERSCRIPT_URL;
-    link.textContent = state.scriptUpdateRequired ? '更新脚本' : '安装脚本';
+    link.textContent = state.scriptUpdateRequired ? '更新用户脚本' : '安装用户脚本';
     link.classList.toggle('is-update-required', state.scriptUpdateRequired || state.scriptMissing);
   }
 
@@ -2838,7 +2838,7 @@
           <span class="toolbar-sync-toggle-copy"><strong>导入后自动上传</strong><small>抓取完成后提交价格快照</small></span>
           <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
         </label>
-        <a class="bookmarklet secondary${state.scriptUpdateRequired || state.scriptMissing ? ' is-update-required' : ''}" id="userscriptInstallLink" href="${USERSCRIPT_URL}" target="_blank" rel="noopener noreferrer">${state.scriptUpdateRequired ? '更新脚本' : '安装脚本'}</a>
+        <a class="bookmarklet secondary${state.scriptUpdateRequired || state.scriptMissing ? ' is-update-required' : ''}" id="userscriptInstallLink" href="${USERSCRIPT_URL}" target="_blank" rel="noopener noreferrer">${state.scriptUpdateRequired ? '更新用户脚本' : '安装用户脚本'}</a>
         <a class="bookmarklet secondary" href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">打开 CDK</a>
       </div>
     `;

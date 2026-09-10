@@ -38,7 +38,7 @@ test('farm dashboard compares bridge versions and marks the update link', () => 
 
   assert.match(app, /const REQUIRED_USERSCRIPT_VERSION\s*=\s*'0\.5\.1'/);
   assert.match(app, /markUserscriptVersion\(data\.scriptVersion\)/);
-  assert.match(app, /link\.textContent\s*=\s*state\.scriptUpdateRequired \? '更新脚本' : '安装脚本'/);
+  assert.match(app, /link\.textContent\s*=\s*state\.scriptUpdateRequired \? '更新用户脚本' : '安装用户脚本'/);
   assert.match(app, /link\.classList\.toggle\('is-update-required', state\.scriptUpdateRequired \|\| state\.scriptMissing\)/);
   assert.match(style, /\.bookmarklet\.is-update-required/);
 });
