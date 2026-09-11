@@ -49,6 +49,18 @@ const PRICE_TREND_WINDOWS = Object.freeze({
   '30d': 30 * 24 * 60 * 60 * 1000
 });
 const PRICE_TREND_WINDOW_VALUES = Object.freeze(Object.keys(PRICE_TREND_WINDOWS));
+const PRICE_SERIES_WINDOWS = Object.freeze({
+  '1h': 60 * 60 * 1000,
+  '6h': 6 * 60 * 60 * 1000,
+  '12h': 12 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '3d': 3 * 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+  '90d': 90 * 24 * 60 * 60 * 1000,
+  all: 0
+});
+const PRICE_SERIES_WINDOW_VALUES = Object.freeze(Object.keys(PRICE_SERIES_WINDOWS));
 const LATEST_SNAPSHOT_KV_KEY = 'latest-snapshot-v1';
 const LATEST_SNAPSHOT_KV_PREFIX = `${LATEST_SNAPSHOT_KV_KEY}:`;
 const MAX_PUBLISHED_SNAPSHOT_VERSIONS = 8;
@@ -63,6 +75,10 @@ export default {
 
     if (url.pathname === '/api/price-history' && request.method === 'GET') {
       return getPriceHistory(request, env);
+    }
+
+    if (url.pathname === '/api/price-series' && request.method === 'GET') {
+      return getPriceSeries(request, env);
     }
 
     if (url.pathname === '/api/price-trends' && request.method === 'GET') {
@@ -133,6 +149,33 @@ async function getPriceHistory(request, env) {
       series: result.series
     }, 200, {
       'cache-control': PUBLIC_HISTORY_CACHE_CONTROL
+    });
+  });
+}
+
+async function getPriceSeries(request, env) {
+  const url = new URL(request.url);
+  const seedId = normalizePriceSeriesSeed(url.searchParams.get('seedId'));
+  const windowValue = normalizePriceSeriesWindow(url.searchParams.get('window'));
+  if (!seedId) return jsonResponse({ ok: false, error: 'invalid_seed_id' }, 400, { 'cache-control': 'no-store' });
+  if (!windowValue) return jsonResponse({ ok: false, error: 'invalid_window' }, 400, { 'cache-control': 'no-store' });
+
+  return withPublicCache(request, async () => {
+    assertDatabase(env);
+    const threshold = normalizeChangeThreshold(url.searchParams.get('threshold'));
+    const rows = await queryPriceSeriesRows(env, seedId, windowValue);
+    const result = buildPriceSeries(rows, seedId, threshold);
+    return jsonResponse({
+      ok: true,
+      seedId,
+      window: windowValue,
+      threshold,
+      totalSnapshots: result.totalSnapshots,
+      eventCount: result.eventCount,
+      groups: result.groups,
+      series: result.series
+    }, 200, {
+      'cache-control': priceSeriesCacheControl(windowValue)
     });
   });
 }
@@ -665,8 +708,26 @@ function normalizeTrendWindow(value) {
   return Object.prototype.hasOwnProperty.call(PRICE_TREND_WINDOWS, normalized) ? normalized : '';
 }
 
+function normalizePriceSeriesSeed(value) {
+  const normalized = String(value || '').trim();
+  return SEED_IDS.includes(normalized) ? normalized : '';
+}
+
+function normalizePriceSeriesWindow(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === '1d') return '24h';
+  return Object.prototype.hasOwnProperty.call(PRICE_SERIES_WINDOWS, normalized) ? normalized : '';
+}
+
 function priceTrendCacheControl(windowValue) {
   return PRICE_TREND_WINDOWS[windowValue] <= PRICE_TREND_WINDOWS['24h']
+    ? PUBLIC_DEFAULT_CACHE_CONTROL
+    : PUBLIC_HISTORY_CACHE_CONTROL;
+}
+
+function priceSeriesCacheControl(windowValue) {
+  const windowMs = PRICE_SERIES_WINDOWS[windowValue];
+  return windowMs > 0 && windowMs <= PRICE_SERIES_WINDOWS['24h']
     ? PUBLIC_DEFAULT_CACHE_CONTROL
     : PUBLIC_HISTORY_CACHE_CONTROL;
 }
@@ -682,6 +743,72 @@ async function queryPriceRowsForWindows(env, capturedAt) {
     ORDER BY captured_at ASC, id ASC
   `).bind(oldestAt).all();
   return (result && result.results) || [];
+}
+
+async function queryPriceSeriesRows(env, seedId, windowValue) {
+  assertDatabase(env);
+  const windowMs = PRICE_SERIES_WINDOWS[windowValue];
+  const lookbackMs = windowMs > 0 ? windowMs + REFRESH_INTERVAL_MS : 0;
+  const pricePath = `$.${seedId}`;
+  const result = await env.PRICE_DB.prepare(`
+    WITH latest AS (
+      SELECT COALESCE(MAX(captured_at), 0) AS latest_at
+      FROM price_submissions
+      WHERE accepted = 1
+    )
+    SELECT id, submitted_at, accepted_at, captured_at, source,
+      json_extract(prices_json, '${pricePath}') AS price
+    FROM price_submissions
+    CROSS JOIN latest
+    WHERE accepted = 1
+      AND (? = 0 OR captured_at >= latest.latest_at - ?)
+    ORDER BY captured_at ASC, id ASC
+  `).bind(windowMs, lookbackMs).all();
+  return (result && result.results) || [];
+}
+
+export function buildPriceSeries(rows, seedId, threshold) {
+  const sortedRows = (Array.isArray(rows) ? rows : [])
+    .slice()
+    .sort((a, b) => Number(a && a.captured_at) - Number(b && b.captured_at) || Number(a && a.id) - Number(b && b.id));
+  const points = [];
+  const events = [];
+  let previous = null;
+  sortedRows.forEach((row) => {
+    const capturedAt = Number(row && row.captured_at);
+    const price = Number(row && row.price);
+    if (!Number.isFinite(capturedAt) || capturedAt <= 0 || !Number.isFinite(price) || price < 0) return;
+    const point = {
+      submissionId: Number(row && row.id) || 0,
+      source: String(row && row.source || ''),
+      capturedAt,
+      price: Number(price.toFixed(5))
+    };
+    points.push(point);
+    if (previous && previous.price > 0) {
+      const changeRate = ((price - previous.price) / previous.price) * 100;
+      if (Number.isFinite(changeRate) && Math.abs(changeRate) >= threshold) {
+        events.push({
+          submissionId: point.submissionId,
+          source: point.source,
+          capturedAt,
+          acceptedAt: Number(row && row.accepted_at) || 0,
+          previousCapturedAt: previous.capturedAt,
+          previousPrice: Number(previous.price.toFixed(5)),
+          currentPrice: point.price,
+          changeRate: Number(changeRate.toFixed(6))
+        });
+      }
+    }
+    previous = { capturedAt, price };
+  });
+
+  return {
+    totalSnapshots: points.length,
+    eventCount: events.length,
+    groups: events.length ? [{ seedId, events: events.slice().sort((a, b) => b.capturedAt - a.capturedAt) }] : [],
+    series: points.length ? [{ seedId, points }] : []
+  };
 }
 
 export function buildPriceChangeWindows(rows, snapshot) {
@@ -932,7 +1059,10 @@ async function purgePriceResponseCaches(request) {
     new Request(`${origin}/api/price-history?threshold=${DEFAULT_PRICE_CHANGE_THRESHOLD}`, { method: 'GET' }),
     ...PRICE_TREND_WINDOW_VALUES.map((windowValue) => (
       new Request(`${origin}/api/price-trends?window=${windowValue}`, { method: 'GET' })
-    ))
+    )),
+    ...SEED_IDS.flatMap((seedId) => PRICE_SERIES_WINDOW_VALUES.map((windowValue) => (
+      new Request(`${origin}/api/price-series?seedId=${encodeURIComponent(seedId)}&window=${encodeURIComponent(windowValue)}`, { method: 'GET' })
+    )))
   ];
   await Promise.allSettled(keys.map((key) => cache.delete(key)));
 }

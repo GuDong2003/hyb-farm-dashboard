@@ -125,7 +125,8 @@ cdk.hybgzs.com
 | --- | --- | --- |
 | `GET` | `/api/default-prices` | 获取当前云端默认价格及趋势 |
 | `POST` | `/api/price-submissions` | 校验并提交价格快照 |
-| `GET` | `/api/price-history` | 获取云端价格历史与单作物曲线数据 |
+| `GET` | `/api/price-history` | 用户主动打开历史页面时获取完整云端快照 |
+| `GET` | `/api/price-series?seedId=carrot&window=7d` | 只获取指定作物与时间窗口的历史曲线（按组合边缘缓存） |
 
 ## 本地开发
 

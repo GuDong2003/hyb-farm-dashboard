@@ -24,6 +24,7 @@
   const PRICE_TREND_ENDPOINT = '/api/price-trends?window=';
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
+  const CLOUD_PRICE_SERIES_ENDPOINT = '/api/price-series';
   const HISTORY_ANOMALY_THRESHOLD = 20;
   const TREND_CHART_AXIS_TRANSITION_MS = 220;
   const TREND_CHART_VIEWPORT_TRANSITION_MS = 180;
@@ -97,6 +98,7 @@
   let trendChartWheelResetTimer = null;
   let suppressTrendPointClick = false;
   let priceWindowRequests = {};
+  let trendHistoryRequests = {};
 
   function normalizeSeed(seed) {
     return {
@@ -160,6 +162,9 @@
       historyError: '',
       historyVisibleCount: HISTORY_PAGE_SIZE,
       historyExpandedKey: '',
+      trendHistoryCache: {},
+      trendHistoryLoading: false,
+      trendHistoryError: '',
       priceAlertModalSeedIds: [],
       priceAlertModalManual: false,
       priceAlertMuteOnClose: false,
@@ -195,6 +200,7 @@
       merged.priceChangeRates = { shop: cleanSignedNumberMap((stored.priceChangeRates && stored.priceChangeRates.shop) || {}) };
       merged.priceTrends = { shop: cleanTrendMap((stored.priceTrends && stored.priceTrends.shop) || {}) };
       merged.priceWindowCache = cleanPriceWindowCache(stored.priceWindowCache || {});
+      merged.trendHistoryCache = {};
       merged.priceOrigin = typeof stored.priceOrigin === 'string' ? stored.priceOrigin : '';
       return merged;
     } catch (_) {
@@ -424,6 +430,98 @@
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data || data.ok === false) throw new Error(data.error || data.reason || `HTTP ${response.status}`);
     return normalizeHistoryResult(data);
+  }
+
+  function normalizeTrendHistoryWindow(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === '1d') return '24h';
+    return ['1h', '6h', '12h', '24h', '3d', '7d', '30d', '90d', 'all'].includes(normalized)
+      ? normalized
+      : '';
+  }
+
+  function trendHistoryWindowMilliseconds(value) {
+    const normalized = normalizeTrendHistoryWindow(value);
+    if (normalized === 'all') return Number.POSITIVE_INFINITY;
+    const hours = {
+      '1h': 1,
+      '6h': 6,
+      '12h': 12,
+      '24h': 24,
+      '3d': 72,
+      '7d': 168,
+      '30d': 720,
+      '90d': 2160
+    }[normalized];
+    return Number.isFinite(hours) ? hours * CHART_TIME.HOUR_MS : 0;
+  }
+
+  function trendHistoryWindowForScale(value) {
+    const normalized = normalizeTrendHistoryWindow(value);
+    return normalized === '24h' ? '24h' : normalized || '24h';
+  }
+
+  function initialTrendHistoryWindow() {
+    const configured = trendHistoryWindowForScale(trendWindowLabel());
+    return configured === '1h' ? '6h' : configured;
+  }
+
+  function trendHistoryCacheKey(seedId, windowValue) {
+    return `${seedId}:${normalizeTrendHistoryWindow(windowValue)}`;
+  }
+
+  function cachedTrendHistoryForSeed(seedId, requestedWindow) {
+    const requestedMs = trendHistoryWindowMilliseconds(requestedWindow);
+    const entries = Object.values(state.trendHistoryCache || {})
+      .filter((entry) => entry && entry.seedId === seedId && entry.result)
+      .filter((entry) => Number(entry.windowMs) >= requestedMs || requestedMs === Number.POSITIVE_INFINITY && entry.window === 'all')
+      .sort((left, right) => Number(left.windowMs) - Number(right.windowMs));
+    return entries[0] || null;
+  }
+
+  function widestCachedTrendHistoryForSeed(seedId) {
+    return Object.values(state.trendHistoryCache || {})
+      .filter((entry) => entry && entry.seedId === seedId && entry.result)
+      .sort((left, right) => Number(right.windowMs) - Number(left.windowMs))[0] || null;
+  }
+
+  async function loadCropTrendHistory(seedId, windowValue, force) {
+    if (!SEED_BY_ID[seedId]) return false;
+    const normalizedWindow = normalizeTrendHistoryWindow(windowValue) || initialTrendHistoryWindow();
+    const cacheKey = trendHistoryCacheKey(seedId, normalizedWindow);
+    if (!force && cachedTrendHistoryForSeed(seedId, normalizedWindow)) return false;
+    if (trendHistoryRequests[cacheKey]) return trendHistoryRequests[cacheKey];
+
+    state.trendHistoryLoading = true;
+    state.trendHistoryError = '';
+    const request = (async () => {
+      try {
+        const endpoint = `${CLOUD_PRICE_SERIES_ENDPOINT}?seedId=${encodeURIComponent(seedId)}&window=${encodeURIComponent(normalizedWindow)}`;
+        const headers = { accept: 'application/json' };
+        if (force) headers['cache-control'] = 'no-cache';
+        const response = await fetch(endpoint, {
+          headers,
+          cache: force ? 'reload' : 'default'
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data || data.ok === false) throw new Error(data.error || data.reason || `HTTP ${response.status}`);
+        state.trendHistoryCache[cacheKey] = {
+          seedId,
+          window: normalizedWindow,
+          windowMs: trendHistoryWindowMilliseconds(normalizedWindow),
+          result: normalizeHistoryResult(data)
+        };
+        return true;
+      } catch (error) {
+        state.trendHistoryError = String(error && error.message || error);
+        return false;
+      } finally {
+        delete trendHistoryRequests[cacheKey];
+        state.trendHistoryLoading = Object.keys(trendHistoryRequests).length > 0;
+      }
+    })();
+    trendHistoryRequests[cacheKey] = request;
+    return request;
   }
 
   function buildSnapshotChangeHistory(snapshots, threshold) {
@@ -2714,7 +2812,10 @@
 
   function cropTrendData(seedId) {
     const alerts = state.historyAlerts || {};
-    const cloud = alerts.cloud || emptyHistoryResult();
+    const targeted = widestCachedTrendHistoryForSeed(seedId);
+    const cloud = targeted && targeted.result
+      ? targeted.result
+      : emptyHistoryResult();
     const local = alerts.local || emptyHistoryResult();
     const pointMap = new Map();
     const eventMap = new Map();
@@ -2764,10 +2865,10 @@
     const currentPrice = Number((state.prices.shop || {})[seedId]);
     const hasTrend = trend.points.length >= 2;
     let content = '';
-    if (state.historyLoading && !hasTrend) {
+    if (state.trendHistoryLoading && !hasTrend) {
       content = '<div class="crop-trend-loading">正在读取历史曲线...</div>';
-    } else if (state.historyError && !hasTrend) {
-      content = `<div class="history-error">曲线读取失败：${escapeHtml(state.historyError)}</div>`;
+    } else if (state.trendHistoryError && !hasTrend) {
+      content = `<div class="history-error">曲线读取失败：${escapeHtml(state.trendHistoryError)}</div>`;
     } else {
       content = renderHistoryLineChart(trend.group, trend.result, activeTrendChartOptions());
     }
@@ -2786,7 +2887,7 @@
           </header>
           <div class="crop-trend-modal-body">
             ${content}
-            ${state.historyLoading && hasTrend ? '<div class="crop-trend-refreshing">正在刷新历史数据...</div>' : ''}
+            ${state.trendHistoryLoading && hasTrend ? '<div class="crop-trend-refreshing">正在刷新历史数据...</div>' : ''}
           </div>
         </section>
       </div>
@@ -2819,7 +2920,8 @@
     state.trendModalVisibleEnd = null;
     state.trendModalVisibleWindowMs = defaultTrendVisibleWindowMs();
     state.trendModalCenterAt = null;
-    const historyPromise = loadHistoryAlerts(false);
+    state.trendHistoryError = '';
+    const historyPromise = loadCropTrendHistory(seedId, initialTrendHistoryWindow(), false);
     render();
     historyPromise.finally(() => {
       if (state.view === 'table' && state.trendModalSeedId === seedId) render();
@@ -3183,7 +3285,8 @@
         state.view = button.dataset.view;
         if (state.view !== 'table') state.trendModalSeedId = '';
         if (state.view === 'history') {
-          loadHistoryAlerts(false).then(() => render()).catch(() => render());
+          const historyPromise = loadHistoryAlerts(false);
+          historyPromise.then(() => render()).catch(() => render());
         }
         render();
       });
@@ -3301,7 +3404,32 @@
           model.maxTime
         );
         state.trendModalCenterAt = state.trendModalVisibleEnd - windowMs / 2;
+        const trendHistoryPromise = loadCropTrendHistory(state.trendModalSeedId, trendHistoryWindowForScale(button.dataset.trendScale), false);
         render();
+        trendHistoryPromise
+          .then((changed) => {
+            if (!changed || !state.trendModalSeedId) return;
+            const { model: loadedModel } = activeTrendChartBounds();
+            const loadedHistorySpan = Math.max(0, loadedModel.maxTime - loadedModel.minTime);
+            const requestedLoadedWindow = button.dataset.trendScale === 'all'
+              ? loadedHistorySpan
+              : trendScaleMilliseconds(button.dataset.trendScale);
+            const loadedWindowMs = Math.min(
+              loadedHistorySpan || requestedLoadedWindow,
+              Math.max(CHART_TIME.HOUR_MS, requestedLoadedWindow)
+            );
+            if (Number.isFinite(loadedWindowMs) && loadedWindowMs > 0) {
+              state.trendModalVisibleWindowMs = loadedWindowMs;
+              state.trendModalVisibleEnd = CHART_TIME.clampVisibleEnd(
+                loadedModel.minTime,
+                loadedModel.maxTime,
+                loadedWindowMs,
+                loadedModel.maxTime
+              );
+              state.trendModalCenterAt = state.trendModalVisibleEnd - loadedWindowMs / 2;
+            }
+            render();
+          });
       });
     });
     const trendAnomalyToggle = document.querySelector('[data-trend-anomaly-toggle]');
