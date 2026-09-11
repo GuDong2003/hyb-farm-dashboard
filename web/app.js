@@ -26,7 +26,8 @@
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const CLOUD_PRICE_SERIES_ENDPOINT = '/api/price-series';
   const VISITOR_USAGE_ENDPOINT = '/api/visitor-usage';
-  const VISITOR_USAGE_REFRESH_INTERVAL_MS = 60 * 1000;
+  const VISITOR_USAGE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+  const PRICE_TREND_RETRY_MS = 60 * 1000;
   const VISITOR_ID_STORAGE_KEY = 'hyb-farm-dashboard-visitor-id-v1';
   const VISITOR_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
   const HISTORY_ANOMALY_THRESHOLD = 20;
@@ -105,6 +106,7 @@
   let trendChartWheelResetTimer = null;
   let suppressTrendPointClick = false;
   let priceWindowRequests = {};
+  let priceWindowRetryTimers = {};
   let trendHistoryRequests = {};
 
   function normalizeSeed(seed) {
@@ -789,6 +791,28 @@
     scheduleVisitorUsageRefresh();
   }
 
+  function schedulePriceTrendRetry(windowValue) {
+    const normalizedWindow = ['1h', '6h', '12h', '24h', '7d', '30d'].includes(windowValue) ? windowValue : '';
+    if (!normalizedWindow || priceWindowRetryTimers[normalizedWindow]) return;
+    priceWindowRetryTimers[normalizedWindow] = window.setTimeout(() => {
+      delete priceWindowRetryTimers[normalizedWindow];
+      if (document.visibilityState && document.visibilityState !== 'visible') {
+        schedulePriceTrendRetry(normalizedWindow);
+        return;
+      }
+      loadCloudPriceTrend(normalizedWindow, true).then((changed) => {
+        if (changed) render();
+      });
+    }, PRICE_TREND_RETRY_MS);
+  }
+
+  function clearPriceTrendRetry(windowValue) {
+    const timer = priceWindowRetryTimers[windowValue];
+    if (!timer) return;
+    window.clearTimeout(timer);
+    delete priceWindowRetryTimers[windowValue];
+  }
+
   function installVisitorUsageLifecycleListeners() {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') handleVisitorUsageWake();
@@ -935,13 +959,29 @@
           headers: { accept: 'application/json' },
           cache: force ? 'reload' : 'default'
         });
-        if (!response.ok) return false;
+        if (!response.ok) {
+          schedulePriceTrendRetry(normalizedWindow);
+          return false;
+        }
         const data = await response.json().catch(() => ({}));
-        if (!data || data.ok === false) return false;
-        const changed = replacePriceWindowCache(normalizedWindow, data.trends || {});
+        if (!data || data.ok === false) {
+          schedulePriceTrendRetry(normalizedWindow);
+          return false;
+        }
+        const incomingTrends = data.trends && typeof data.trends === 'object'
+          ? data.trends
+          : {};
+        const previousTrends = state.priceWindowCache && state.priceWindowCache[normalizedWindow];
+        if (!Object.keys(incomingTrends).length && Object.keys(previousTrends || {}).length) {
+          schedulePriceTrendRetry(normalizedWindow);
+          return false;
+        }
+        clearPriceTrendRetry(normalizedWindow);
+        const changed = replacePriceWindowCache(normalizedWindow, incomingTrends);
         if (changed) saveState();
         return changed;
       } catch (_) {
+        schedulePriceTrendRetry(normalizedWindow);
         return false;
       } finally {
         delete priceWindowRequests[normalizedWindow];

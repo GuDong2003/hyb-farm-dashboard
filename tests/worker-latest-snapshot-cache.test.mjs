@@ -89,6 +89,38 @@ test('default and compact trend reads use the published KV snapshot before D1', 
   assert.equal(d1Reads, 0);
 });
 
+test('incomplete trend hydration is retryable and never caches an empty result', async () => {
+  const cache = createMemoryCache();
+  const snapshot = publishedSnapshot();
+  delete snapshot.priceChangeWindows;
+  let d1Reads = 0;
+  const env = {
+    LATEST_KV: { async get() { return snapshot; } },
+    PRICE_DB: {
+      prepare() {
+        d1Reads += 1;
+        throw new Error('temporary history failure');
+      }
+    }
+  };
+
+  await withMemoryCache(cache, async () => {
+    const response = await worker.fetch(new Request('https://cache.test/api/price-trends?window=24h'), env);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('retry-after'), '60');
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: 'price_trend_unavailable',
+      window: '24h',
+      retryable: true
+    });
+  });
+
+  assert.equal(d1Reads, 1);
+  assert.equal(cache.entries.size, 0, 'an unavailable trend must not poison the edge cache');
+});
+
 test('legacy published snapshots hydrate the cloud history count from a dedicated KV key', async () => {
   const cache = createMemoryCache();
   const legacy = publishedSnapshot();
@@ -226,7 +258,7 @@ test('trend windows use independent edge keys and short/long cache lifetimes', a
   });
 
   for (const window of WINDOWS) {
-    const key = `https://cache.test/api/price-trends?window=${window}`;
+    const key = `https://cache.test/api/price-trends?window=${window}&_cache=v2`;
     const cached = cache.entries.get(key);
     assert.ok(cached, `edge cache contains ${window}`);
     const cacheControl = cached.headers.get('cache-control');

@@ -65,12 +65,12 @@ const PRICE_SERIES_WINDOW_VALUES = Object.freeze(Object.keys(PRICE_SERIES_WINDOW
 const LATEST_SNAPSHOT_KV_KEY = 'latest-snapshot-v1';
 const LATEST_SNAPSHOT_KV_PREFIX = `${LATEST_SNAPSHOT_KV_KEY}:`;
 const HISTORY_COUNT_KV_KEY = 'history-count-v1';
+const PRICE_TREND_CACHE_VERSION = 'v2';
+// Kept as a migration reference for existing KV data; visitor traffic no longer reads or writes it.
 export const VISITOR_USAGE_COUNT_KV_KEY = 'farm:usage:visitors:v1';
-const VISITOR_USAGE_VISITOR_PREFIX = 'farm:usage:visitor:v1:';
 const VISITOR_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 const VISITOR_COUNTER_NAME = 'global';
 const VISITOR_COUNTER_COUNT_KEY = 'count';
-const VISITOR_COUNTER_MIGRATION_KEY = 'legacy-migrated';
 const VISITOR_COUNTER_VISITOR_PREFIX = 'visitor:';
 const VISITOR_HASH_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_PUBLISHED_SNAPSHOT_VERSIONS = 8;
@@ -131,9 +131,18 @@ async function getPriceTrends(request, env) {
 
   return withPublicCache(request, async () => {
     const snapshot = await loadLatestSnapshot(env);
-    const trends = snapshot && snapshot.priceChangeWindows && snapshot.priceChangeWindows[windowValue]
-      ? snapshot.priceChangeWindows[windowValue]
-      : {};
+    if (!hasPriceTrendWindow(snapshot, windowValue)) {
+      return jsonResponse({
+        ok: false,
+        error: 'price_trend_unavailable',
+        window: windowValue,
+        retryable: true
+      }, 503, {
+        'cache-control': 'no-store',
+        'retry-after': '60'
+      });
+    }
+    const trends = snapshot.priceChangeWindows[windowValue];
     return jsonResponse({
       ok: true,
       window: windowValue,
@@ -146,8 +155,17 @@ async function getPriceTrends(request, env) {
   });
 }
 
+function hasPriceTrendWindow(snapshot, windowValue) {
+  const windows = snapshot && snapshot.priceChangeWindows;
+  return Boolean(windows
+    && Object.prototype.hasOwnProperty.call(windows, windowValue)
+    && windows[windowValue]
+    && typeof windows[windowValue] === 'object'
+    && !Array.isArray(windows[windowValue])
+    && Object.keys(windows[windowValue]).length > 0);
+}
+
 async function getVisitorUsage(request, env) {
-  const counterConfigured = visitorCounterConfigured(env);
   const counter = visitorCounterStub(env);
   if (counter) {
     try {
@@ -164,19 +182,7 @@ async function getVisitorUsage(request, env) {
       });
     }
   }
-
-  if (counterConfigured) {
-    return jsonResponse({ ok: true, visitors: await readVisitorUsageCount(env) }, 200, {
-      'cache-control': VISITOR_USAGE_CACHE_CONTROL
-    });
-  }
-
-  return jsonResponse({
-    ok: true,
-    visitors: await readVisitorUsageCount(env)
-  }, 200, {
-    'cache-control': VISITOR_USAGE_CACHE_CONTROL
-  });
+  return visitorCounterUnavailableResponse();
 }
 
 async function postVisitorUsage(request, env) {
@@ -217,39 +223,23 @@ async function postVisitorUsage(request, env) {
       console.error('visitor_usage_counter_write_failed', {
         message: String(error && error.message || error).slice(0, 240)
       });
-      return visitorCounterUnavailableResponse(env);
+      return visitorCounterUnavailableResponse();
     }
   }
 
-  return visitorCounterUnavailableResponse(env);
+  return visitorCounterUnavailableResponse();
 }
 
-async function visitorCounterUnavailableResponse(env) {
+async function visitorCounterUnavailableResponse() {
   return jsonResponse({
     ok: false,
     error: 'visitor_counter_unavailable',
-    visitors: await readVisitorUsageCount(env),
+    visitors: null,
     counted: false
   }, 503, {
     'cache-control': VISITOR_USAGE_CACHE_CONTROL,
     'retry-after': '60'
   });
-}
-
-async function readVisitorUsageCount(env) {
-  const kv = env && env.LATEST_KV;
-  if (!kv || typeof kv.get !== 'function') return null;
-  try {
-    return await readVisitorUsageCountFromKv(kv);
-  } catch (_) {
-    return null;
-  }
-}
-
-async function readVisitorUsageCountFromKv(kv) {
-  if (!kv || typeof kv.get !== 'function') return 0;
-  const value = await kv.get(VISITOR_USAGE_COUNT_KV_KEY);
-  return normalizeVisitorCount(value) ?? 0;
 }
 
 function normalizeVisitorCount(value) {
@@ -275,11 +265,6 @@ function visitorCounterStub(env) {
   } catch (_) {
     return null;
   }
-}
-
-function visitorCounterConfigured(env) {
-  const namespace = env && env.VISITOR_COUNTER;
-  return Boolean(namespace && typeof namespace.idFromName === 'function' && typeof namespace.get === 'function');
 }
 
 export class VisitorCounter {
@@ -336,64 +321,18 @@ export class VisitorCounter {
       });
     }
 
-    if (await this.legacyVisitorSeen(visitorHash)) {
-      await this.state.storage.put(markerKey, '1');
-      return jsonResponse({ ok: true, visitors: count, counted: false }, 200, {
-        'cache-control': VISITOR_USAGE_CACHE_CONTROL
-      });
-    }
-
     const next = count + 1;
     await this.state.storage.put({
       [VISITOR_COUNTER_COUNT_KEY]: String(next),
       [markerKey]: '1'
     });
-    await this.writeLegacyState(visitorHash, next);
     return jsonResponse({ ok: true, visitors: next, counted: true }, 200, {
       'cache-control': VISITOR_USAGE_CACHE_CONTROL
     });
   }
 
   async readCount() {
-    const stored = normalizeVisitorCount(await this.state.storage.get(VISITOR_COUNTER_COUNT_KEY));
-    const migrationState = await this.state.storage.get(VISITOR_COUNTER_MIGRATION_KEY);
-    if (stored !== null && migrationState === '1') return stored;
-
-    let legacy;
-    try {
-      legacy = await readVisitorUsageCountFromKv(this.env && this.env.LATEST_KV);
-    } catch (_) {
-      // The Durable Object count remains authoritative when the compatibility KV is unavailable.
-      return stored === null ? 0 : stored;
-    }
-    const next = stored === null ? legacy : Math.max(stored, legacy);
-    const updates = { [VISITOR_COUNTER_MIGRATION_KEY]: '1' };
-    if (stored !== next) updates[VISITOR_COUNTER_COUNT_KEY] = String(next);
-    await this.state.storage.put(updates);
-    return next;
-  }
-
-  async legacyVisitorSeen(visitorHash) {
-    const kv = this.env && this.env.LATEST_KV;
-    if (!kv || typeof kv.get !== 'function') return false;
-    try {
-      return (await kv.get(`${VISITOR_USAGE_VISITOR_PREFIX}${visitorHash}`)) != null;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  async writeLegacyState(visitorHash, count) {
-    const kv = this.env && this.env.LATEST_KV;
-    if (!kv || typeof kv.put !== 'function') return;
-    try {
-      await kv.put(VISITOR_USAGE_COUNT_KV_KEY, String(count));
-      await kv.put(`${VISITOR_USAGE_VISITOR_PREFIX}${visitorHash}`, '1');
-    } catch (error) {
-      console.error('visitor_usage_legacy_sync_failed', {
-        message: String(error && error.message || error).slice(0, 240)
-      });
-    }
+    return normalizeVisitorCount(await this.state.storage.get(VISITOR_COUNTER_COUNT_KEY)) ?? 0;
   }
 }
 
@@ -1337,6 +1276,7 @@ function publicCacheBypassRequested(request) {
 function publicCacheKey(request) {
   const url = new URL(request.url);
   url.hash = '';
+  if (url.pathname === '/api/price-trends') url.searchParams.set('_cache', PRICE_TREND_CACHE_VERSION);
   return new Request(url.toString(), { method: 'GET' });
 }
 
@@ -1371,7 +1311,7 @@ async function purgePriceResponseCaches(request) {
   const keys = [
     new Request(`${origin}/api/default-prices`, { method: 'GET' }),
     new Request(`${origin}/api/price-history?threshold=${DEFAULT_PRICE_CHANGE_THRESHOLD}`, { method: 'GET' }),
-    ...PRICE_TREND_WINDOW_VALUES.map((windowValue) => (
+    ...PRICE_TREND_WINDOW_VALUES.map((windowValue) => publicCacheKey(
       new Request(`${origin}/api/price-trends?window=${windowValue}`, { method: 'GET' })
     )),
     ...SEED_IDS.flatMap((seedId) => PRICE_SERIES_WINDOW_VALUES.map((windowValue) => (

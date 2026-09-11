@@ -18,6 +18,13 @@ test('trend-window changes load only the selected compact cache entry', () => {
   assert.match(app, /state\.priceWindowCache\[windowValue\]/);
 });
 
+test('trend loading preserves valid data and retries a temporary unavailable response', () => {
+  assert.match(app, /const PRICE_TREND_RETRY_MS = 60 \* 1000;/);
+  assert.match(app, /function schedulePriceTrendRetry\(windowValue\)/);
+  assert.match(app, /const incomingTrends = data\.trends && typeof data\.trends === 'object'\s*\? data\.trends\s*:\s*\{\};/);
+  assert.match(app, /!Object\.keys\(incomingTrends\)\.length\s*&&\s*Object\.keys\(previousTrends \|\| \{\}\)\.length/);
+});
+
 test('homepage history navigation prefers the cloud snapshot count from the default KV snapshot', () => {
   assert.match(app, /cloudHistoryCount:\s*null,/);
   assert.match(app, /const cloudHistoryCount = Number\(snapshot && snapshot\.historySnapshotCount\)/);

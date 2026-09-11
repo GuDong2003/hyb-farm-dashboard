@@ -18,7 +18,7 @@ test('topbar places the anonymous cumulative visitor badge immediately before hi
 
 test('visitor usage uses a local anonymous id and retries when registration is unavailable', () => {
   assert.match(app, /const VISITOR_USAGE_ENDPOINT = '\/api\/visitor-usage';/);
-  assert.match(app, /const VISITOR_USAGE_REFRESH_INTERVAL_MS = 60 \* 1000;/);
+  assert.match(app, /const VISITOR_USAGE_REFRESH_INTERVAL_MS = 10 \* 60 \* 1000;/);
   assert.match(app, /let memoryVisitorId = '';/);
   assert.match(app, /VISITOR_ID_STORAGE_KEY/);
   assert.match(app, /localStorage\.getItem\(VISITOR_ID_STORAGE_KEY\)/);
