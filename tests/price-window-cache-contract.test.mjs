@@ -17,3 +17,10 @@ test('trend-window changes load only the selected compact cache entry', () => {
   assert.match(app, /\/api\/price-trends\?window=/);
   assert.match(app, /state\.priceWindowCache\[windowValue\]/);
 });
+
+test('homepage history navigation prefers the cloud snapshot count from the default KV snapshot', () => {
+  assert.match(app, /cloudHistoryCount:\s*null,/);
+  assert.match(app, /const cloudHistoryCount = Number\(snapshot && snapshot\.historySnapshotCount\)/);
+  assert.match(app, /const normalizedCloudHistoryCount = Math\.floor\(cloudHistoryCount\)[\s\S]*?state\.cloudHistoryCount = normalizedCloudHistoryCount/);
+  assert.match(app, /function historyNavigationCount\(\)\s*\{[\s\S]*?if \(Number\.isFinite\(state\.cloudHistoryCount\)\) return state\.cloudHistoryCount;/);
+});

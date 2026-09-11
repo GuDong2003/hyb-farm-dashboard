@@ -151,6 +151,7 @@
       priceWindowCache: {},
       lastImportedAt: 0,
       cloudDefaultAt: 0,
+      cloudHistoryCount: null,
       cloudUploadState: 'idle',
       cloudUploadMessage: '尚未上传',
       pendingUploadSnapshot: null,
@@ -729,9 +730,17 @@
       const priceChangeRates = snapshot && (snapshot.priceChangeRates || snapshot.changeRates || snapshot.priceRates);
       const priceTrends = snapshot && (snapshot.priceTrends || snapshot.trends);
       const priceChangeWindows = snapshot && snapshot.priceChangeWindows;
+      const cloudHistoryCount = Number(snapshot && snapshot.historySnapshotCount);
       const cleanCloudTrends = cleanTrendMap((priceTrends && priceTrends.shop) || {});
       const cleanCloudWindows = cleanPriceWindowCache(priceChangeWindows || {});
       const cloudCapturedAt = Number(snapshot && snapshot.capturedAt) || 0;
+      if (Number.isFinite(cloudHistoryCount) && cloudHistoryCount >= 0) {
+        const normalizedCloudHistoryCount = Math.floor(cloudHistoryCount);
+        if (state.cloudHistoryCount !== normalizedCloudHistoryCount) {
+          state.cloudHistoryCount = normalizedCloudHistoryCount;
+          changed = true;
+        }
+      }
       if (cloudCapturedAt && state.cloudDefaultAt !== cloudCapturedAt) {
         state.cloudDefaultAt = cloudCapturedAt;
         changed = true;
@@ -1800,6 +1809,7 @@
   }
 
   function historyNavigationCount() {
+    if (Number.isFinite(state.cloudHistoryCount)) return state.cloudHistoryCount;
     if (!state.historyAlerts) return state.historyCount;
     const cloud = state.historyAlerts.cloud || emptyHistoryResult();
     const local = state.historyAlerts.local || emptyHistoryResult();

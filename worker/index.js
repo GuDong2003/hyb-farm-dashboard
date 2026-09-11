@@ -63,6 +63,7 @@ const PRICE_SERIES_WINDOWS = Object.freeze({
 const PRICE_SERIES_WINDOW_VALUES = Object.freeze(Object.keys(PRICE_SERIES_WINDOWS));
 const LATEST_SNAPSHOT_KV_KEY = 'latest-snapshot-v1';
 const LATEST_SNAPSHOT_KV_PREFIX = `${LATEST_SNAPSHOT_KV_KEY}:`;
+const HISTORY_COUNT_KV_KEY = 'history-count-v1';
 const MAX_PUBLISHED_SNAPSHOT_VERSIONS = 8;
 
 export default {
@@ -527,6 +528,20 @@ async function sha256Hex(value) {
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function normalizeHistorySnapshotCount(value) {
+  const candidate = value && typeof value === 'object' && !Array.isArray(value)
+    ? value.historySnapshotCount ?? value.count
+    : value;
+  const count = Number(candidate);
+  return Number.isFinite(count) && count >= 0 ? Math.floor(count) : null;
+}
+
+function applyHistorySnapshotCount(snapshot, rows) {
+  const count = normalizeHistorySnapshotCount(rows && rows.historySnapshotCount);
+  if (count !== null && snapshot) snapshot.historySnapshotCount = count;
+  return count;
+}
+
 function snapshotFromDefaultRow(row) {
   const priceChangeRates = safeJsonObject(row.price_change_rates_json);
   const priceTrends = safeJsonObject(row.price_trends_json);
@@ -540,6 +555,8 @@ function snapshotFromDefaultRow(row) {
     matched: Number(row.matched_count) || 0,
     totalSeeds: Number(row.total_count) || SEED_IDS.length
   };
+  const historySnapshotCount = normalizeHistorySnapshotCount(row && (row.history_snapshot_count ?? row.historySnapshotCount));
+  if (historySnapshotCount !== null) snapshot.historySnapshotCount = historySnapshotCount;
   if (Object.keys(priceChangeRates).length) snapshot.priceChangeRates = { shop: priceChangeRates };
   if (Object.keys(priceTrends).length) snapshot.priceTrends = { shop: priceTrends };
   return snapshot;
@@ -560,6 +577,7 @@ async function loadLatestSnapshot(env) {
   let windowRows = null;
   try {
     windowRows = await queryPriceRowsForWindows(env, snapshot.capturedAt);
+    applyHistorySnapshotCount(snapshot, windowRows);
     snapshot.priceChangeWindows = buildPriceChangeWindows(windowRows, snapshot);
   } catch (_) {
     // The current price snapshot remains usable if trend hydration is unavailable.
@@ -599,13 +617,31 @@ async function readPublishedSnapshot(env) {
   } catch (_) {
     // A list failure should still allow the legacy fixed key to serve data.
   }
-  if (versioned) return versioned;
+  if (versioned) return hydratePublishedHistoryCount(env, versioned);
   try {
     const value = await env.LATEST_KV.get(LATEST_SNAPSHOT_KV_KEY, { type: 'json' });
-    return normalizePublishedSnapshot(value);
+    return hydratePublishedHistoryCount(env, normalizePublishedSnapshot(value));
   } catch (_) {
     return null;
   }
+}
+
+async function hydratePublishedHistoryCount(env, snapshot) {
+  if (!snapshot) return null;
+  const existingCount = normalizeHistorySnapshotCount(snapshot.historySnapshotCount);
+  if (existingCount !== null) {
+    snapshot.historySnapshotCount = existingCount;
+    return snapshot;
+  }
+  if (!env || !env.LATEST_KV || typeof env.LATEST_KV.get !== 'function') return snapshot;
+  try {
+    const value = await env.LATEST_KV.get(HISTORY_COUNT_KV_KEY, { type: 'json' });
+    const historySnapshotCount = normalizeHistorySnapshotCount(value);
+    if (historySnapshotCount !== null) snapshot.historySnapshotCount = historySnapshotCount;
+  } catch (_) {
+    // The migration key is best effort; the legacy snapshot remains usable.
+  }
+  return snapshot;
 }
 
 async function readLatestVersionedSnapshot(env) {
@@ -694,6 +730,7 @@ async function publishAcceptedSnapshot(env, normalized, submissionId, now) {
   snapshot.submissionId = Number(submissionId) || 0;
   try {
     const rows = await queryPriceRowsForWindows(env, snapshot.capturedAt);
+    applyHistorySnapshotCount(snapshot, rows);
     const newestAcceptedAt = Math.max(0, ...(rows || []).map((row) => Number(row && row.captured_at) || 0));
     if (newestAcceptedAt > snapshot.capturedAt) return false;
     snapshot.priceChangeWindows = buildPriceChangeWindows(rows, snapshot);
@@ -737,12 +774,21 @@ async function queryPriceRowsForWindows(env, capturedAt) {
   const latestAt = Number(capturedAt) || Date.now();
   const oldestAt = latestAt - Math.max(...Object.values(PRICE_TREND_WINDOWS)) - REFRESH_INTERVAL_MS;
   const result = await env.PRICE_DB.prepare(`
+    WITH history_totals AS (
+      SELECT COUNT(*) AS snapshot_count
+      FROM price_submissions
+      WHERE accepted = 1
+    )
     SELECT captured_at, prices_json
+      , (SELECT snapshot_count FROM history_totals) AS history_snapshot_count
     FROM price_submissions
     WHERE accepted = 1 AND captured_at >= ?
     ORDER BY captured_at ASC, id ASC
   `).bind(oldestAt).all();
-  return (result && result.results) || [];
+  const rows = (result && result.results) || [];
+  const historySnapshotCount = normalizeHistorySnapshotCount(rows[0] && rows[0].history_snapshot_count);
+  if (historySnapshotCount !== null) rows.historySnapshotCount = historySnapshotCount;
+  return rows;
 }
 
 async function queryPriceSeriesRows(env, seedId, windowValue) {

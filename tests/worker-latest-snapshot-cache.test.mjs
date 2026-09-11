@@ -42,6 +42,7 @@ function publishedSnapshot() {
     version: 1,
     source: 'cloud-default',
     capturedAt: LATEST_AT,
+    historySnapshotCount: 2337,
     prices: { shop: { carrot: 100 } },
     priceChangeWindows: Object.fromEntries(WINDOWS.map((window) => [window, {
       carrot: {
@@ -88,6 +89,35 @@ test('default and compact trend reads use the published KV snapshot before D1', 
   assert.equal(d1Reads, 0);
 });
 
+test('legacy published snapshots hydrate the cloud history count from a dedicated KV key', async () => {
+  const cache = createMemoryCache();
+  const legacy = publishedSnapshot();
+  delete legacy.historySnapshotCount;
+  const kvReads = [];
+  const env = {
+    LATEST_KV: {
+      async get(key, options) {
+        kvReads.push({ key, options });
+        if (key === 'latest-snapshot-v1') return legacy;
+        if (key === 'history-count-v1') return 2337;
+        return null;
+      }
+    },
+    PRICE_DB: { prepare: () => { throw new Error('complete legacy snapshot should not read D1'); } }
+  };
+
+  await withMemoryCache(cache, async () => {
+    const response = await worker.fetch(new Request('https://cache.test/api/default-prices'), env);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).snapshot.historySnapshotCount, 2337);
+  });
+
+  assert.deepEqual(kvReads, [
+    { key: 'latest-snapshot-v1', options: { type: 'json' } },
+    { key: 'history-count-v1', options: { type: 'json' } }
+  ]);
+});
+
 test('legacy published snapshots backfill compact windows once and remain readable', async () => {
   const cache = createMemoryCache();
   const legacy = {
@@ -129,10 +159,12 @@ test('legacy published snapshots backfill compact windows once and remain readab
 test('cold D1 snapshot hydration reuses the single history read for trend data', async () => {
   const cache = createMemoryCache();
   let prepareCount = 0;
+  const preparedSql = [];
   const env = {
     PRICE_DB: {
       prepare(sql) {
         prepareCount += 1;
+        preparedSql.push(sql);
         if (sql.includes('SELECT * FROM default_prices')) {
           return {
             async first() {
@@ -152,7 +184,13 @@ test('cold D1 snapshot hydration reuses the single history read for trend data',
           bind() {
             return {
               async all() {
-                return { results: [{ captured_at: LATEST_AT, prices_json: JSON.stringify({ carrot: 100 }) }] };
+                return {
+                  results: [{
+                    captured_at: LATEST_AT,
+                    prices_json: JSON.stringify({ carrot: 100 }),
+                    history_snapshot_count: 2337
+                  }]
+                };
               }
             };
           }
@@ -165,9 +203,12 @@ test('cold D1 snapshot hydration reuses the single history read for trend data',
   await withMemoryCache(cache, async () => {
     const response = await worker.fetch(new Request('https://cache.test/api/default-prices'), env);
     assert.equal(response.status, 200);
+    assert.equal((await response.clone().json()).snapshot.historySnapshotCount, 2337);
   });
 
   assert.equal(prepareCount, 2);
+  assert.match(preparedSql[1], /COUNT\(\*\)/i);
+  assert.match(preparedSql[1], /history_snapshot_count/i);
 });
 
 test('trend windows use independent edge keys and short/long cache lifetimes', async () => {

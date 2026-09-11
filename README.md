@@ -128,6 +128,8 @@ cdk.hybgzs.com
 | `GET` | `/api/price-history` | 用户主动打开历史页面时获取完整云端快照 |
 | `GET` | `/api/price-series?seedId=carrot&window=7d` | 只获取指定作物与时间窗口的历史曲线（按组合边缘缓存） |
 
+`/api/default-prices` 返回的 `snapshot.historySnapshotCount` 是云端已接受快照总数。它随最新快照一起发布到 KV，主页显示该字段时不需要读取完整历史接口；旧 KV 快照会兼容读取 `history-count-v1` 迁移键。
+
 ## 本地开发
 
 建议使用 Node.js 22 或更高版本。
