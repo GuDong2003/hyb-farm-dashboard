@@ -2,6 +2,8 @@
 
 This project is configured for Cloudflare Workers Static Assets.
 
+公开价格快照使用 `LATEST_KV` 保存最近一次成功同步的数据；默认首页和六个涨跌幅区间会优先从 KV/边缘缓存读取，只有 KV 尚未初始化或旧快照需要回填时才读取 D1。部署配置中的 KV 命名空间已经固定为本项目专用空间。
+
 ## Local Deployment
 
 ```bash
@@ -66,6 +68,7 @@ For a custom token, use permissions equivalent to:
 
 ```text
 Account / Workers Scripts / Edit
+Account / Workers KV Storage / Edit
 Account / Account Settings / Read
 Account / D1 / Edit
 User / User Details / Read

@@ -21,6 +21,7 @@
   const REQUIRED_USERSCRIPT_VERSION = '0.5.1';
   const USERSCRIPT_URL = '/userscripts/hyb-farm-dashboard-capture.user.js';
   const CLOUD_DEFAULT_ENDPOINT = '/api/default-prices';
+  const PRICE_TREND_ENDPOINT = '/api/price-trends?window=';
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const HISTORY_ANOMALY_THRESHOLD = 20;
@@ -95,6 +96,7 @@
   let trendChartWheelDelta = 0;
   let trendChartWheelResetTimer = null;
   let suppressTrendPointClick = false;
+  let priceWindowRequests = {};
 
   function normalizeSeed(seed) {
     return {
@@ -144,6 +146,7 @@
       previousPrices: { shop: {} },
       priceChangeRates: { shop: {} },
       priceTrends: { shop: {} },
+      priceWindowCache: {},
       lastImportedAt: 0,
       cloudDefaultAt: 0,
       cloudUploadState: 'idle',
@@ -191,6 +194,7 @@
       merged.previousPrices = { shop: cleanPriceMap((stored.previousPrices && stored.previousPrices.shop) || {}) };
       merged.priceChangeRates = { shop: cleanSignedNumberMap((stored.priceChangeRates && stored.priceChangeRates.shop) || {}) };
       merged.priceTrends = { shop: cleanTrendMap((stored.priceTrends && stored.priceTrends.shop) || {}) };
+      merged.priceWindowCache = cleanPriceWindowCache(stored.priceWindowCache || {});
       merged.priceOrigin = typeof stored.priceOrigin === 'string' ? stored.priceOrigin : '';
       return merged;
     } catch (_) {
@@ -274,6 +278,7 @@
       previousPrices: state.previousPrices,
       priceChangeRates: state.priceChangeRates,
       priceTrends: state.priceTrends,
+      priceWindowCache: state.priceWindowCache,
       lastImportedAt: state.lastImportedAt,
       priceOrigin: state.priceOrigin
     }));
@@ -591,12 +596,14 @@
     const prices = snapshot.prices || {};
     const priceChangeRates = snapshot.priceChangeRates || snapshot.changeRates || snapshot.priceRates || {};
     const priceTrends = snapshot.priceTrends || snapshot.trends || {};
+    const priceChangeWindows = snapshot.priceChangeWindows || {};
     applyFarmProfile(snapshot.farmProfile);
     if (prices.shop) {
       state.previousPrices.shop = Object.assign({}, state.prices.shop || {});
       state.prices.shop = cleanPriceMap(prices.shop);
       state.priceChangeRates.shop = cleanSignedNumberMap(priceChangeRates.shop || {});
       state.priceTrends.shop = cleanTrendMap(priceTrends.shop || {});
+      state.priceWindowCache = cleanPriceWindowCache(priceChangeWindows);
     }
     state.lastImportedAt = capturedAt;
     state.priceOrigin = 'local';
@@ -623,7 +630,9 @@
       const prices = snapshot && snapshot.prices && snapshot.prices.shop;
       const priceChangeRates = snapshot && (snapshot.priceChangeRates || snapshot.changeRates || snapshot.priceRates);
       const priceTrends = snapshot && (snapshot.priceTrends || snapshot.trends);
+      const priceChangeWindows = snapshot && snapshot.priceChangeWindows;
       const cleanCloudTrends = cleanTrendMap((priceTrends && priceTrends.shop) || {});
+      const cleanCloudWindows = cleanPriceWindowCache(priceChangeWindows || {});
       const cloudCapturedAt = Number(snapshot && snapshot.capturedAt) || 0;
       if (cloudCapturedAt && state.cloudDefaultAt !== cloudCapturedAt) {
         state.cloudDefaultAt = cloudCapturedAt;
@@ -634,6 +643,7 @@
         && PRICE_ALERT.shouldUseCloudTrendMap(state.priceTrends.shop, cleanCloudTrends, Object.keys(prices || {}));
       if (prices && sameCaptureHasImprovedTrends) {
         state.priceTrends.shop = cleanCloudTrends;
+        if (Object.keys(cleanCloudWindows).length) state.priceWindowCache = cleanCloudWindows;
         state.status = `已补全云端 24h 价格趋势：${formatTime(cloudCapturedAt)}。`;
         saveState();
         handlePriceAlertsForNewData();
@@ -643,6 +653,7 @@
         state.prices.shop = cleanPriceMap(prices);
         state.priceChangeRates.shop = cleanSignedNumberMap((priceChangeRates && priceChangeRates.shop) || {});
         state.priceTrends.shop = cleanCloudTrends;
+        state.priceWindowCache = cleanCloudWindows;
         state.lastImportedAt = cloudCapturedAt;
         state.priceOrigin = 'cloud';
         state.config.source = 'shop';
@@ -652,11 +663,48 @@
         handlePriceAlertsForNewData();
         changed = true;
       }
+      const shouldUseCloudWindows = Object.keys(cleanCloudWindows).length
+        && (!hasShopPrices() || isNewerCloud || cloudCapturedAt === (Number(state.lastImportedAt) || 0));
+      if (shouldUseCloudWindows) {
+        Object.keys(cleanCloudWindows).forEach((windowValue) => {
+          replacePriceWindowCache(windowValue, cleanCloudWindows[windowValue]);
+        });
+      }
     } catch (_) {
       // Cloud defaults are only a fallback; local use should keep working offline.
     }
     if (changed && renderAfter) render();
     return changed;
+  }
+
+  async function loadCloudPriceTrend(windowValue, force) {
+    const normalizedWindow = ['1h', '6h', '12h', '24h', '7d', '30d'].includes(windowValue) ? windowValue : '24h';
+    if (!force && state.priceWindowCache && Object.prototype.hasOwnProperty.call(state.priceWindowCache, normalizedWindow)) {
+      return false;
+    }
+    if (priceWindowRequests[normalizedWindow]) return priceWindowRequests[normalizedWindow];
+
+    const request = (async () => {
+      try {
+        const endpoint = `${PRICE_TREND_ENDPOINT}${encodeURIComponent(normalizedWindow)}`;
+        const response = await fetch(endpoint, {
+          headers: { accept: 'application/json' },
+          cache: force ? 'reload' : 'default'
+        });
+        if (!response.ok) return false;
+        const data = await response.json().catch(() => ({}));
+        if (!data || data.ok === false) return false;
+        const changed = replacePriceWindowCache(normalizedWindow, data.trends || {});
+        if (changed) saveState();
+        return changed;
+      } catch (_) {
+        return false;
+      } finally {
+        delete priceWindowRequests[normalizedWindow];
+      }
+    })();
+    priceWindowRequests[normalizedWindow] = request;
+    return request;
   }
 
   function hasShopPrices() {
@@ -978,6 +1026,57 @@
     }).filter(Boolean).sort((a, b) => Date.parse(a.bucketStartedAt) - Date.parse(b.bucketStartedAt));
   }
 
+  function cleanPriceWindowCache(cache) {
+    const out = {};
+    Object.keys(cache || {}).forEach((windowValue) => {
+      if (!['1h', '6h', '12h', '24h', '7d', '30d'].includes(windowValue)) return;
+      const source = cache[windowValue];
+      if (!source || typeof source !== 'object' || Array.isArray(source)) return;
+      const trends = {};
+      Object.keys(source).forEach((seedId) => {
+        const item = source[seedId];
+        if (!item || typeof item !== 'object') return;
+        const rate = Number(item.rate);
+        if (!Number.isFinite(rate)) return;
+        const baseAt = Number(item.baseAt);
+        const endAt = Number(item.endAt);
+        const basePrice = Number(item.basePrice);
+        const endPrice = Number(item.endPrice);
+        trends[seedId] = { rate };
+        if (Number.isFinite(baseAt) && baseAt > 0) trends[seedId].baseAt = baseAt;
+        if (Number.isFinite(endAt) && endAt > 0) trends[seedId].endAt = endAt;
+        if (Number.isFinite(basePrice) && basePrice > 0) trends[seedId].basePrice = basePrice;
+        if (Number.isFinite(endPrice) && endPrice >= 0) trends[seedId].endPrice = endPrice;
+      });
+      out[windowValue] = trends;
+    });
+    return out;
+  }
+
+  function priceWindowChangeForSeed(seedId, windowValue) {
+    const windowCache = state.priceWindowCache && state.priceWindowCache[windowValue];
+    const item = windowCache && windowCache[seedId];
+    if (!item || !hasFiniteNumber(item.rate)) return {};
+    return {
+      rate: Number(item.rate),
+      baseAt: Number(item.baseAt) || 0,
+      endAt: Number(item.endAt) || 0,
+      basePrice: Number.isFinite(Number(item.basePrice)) ? Number(item.basePrice) : undefined,
+      endPrice: Number.isFinite(Number(item.endPrice)) ? Number(item.endPrice) : undefined,
+      source: `price-window-${windowValue}`
+    };
+  }
+
+  function replacePriceWindowCache(windowValue, trends) {
+    const normalizedWindow = ['1h', '6h', '12h', '24h', '7d', '30d'].includes(windowValue) ? windowValue : '';
+    if (!normalizedWindow) return false;
+    const next = cleanPriceWindowCache({ [normalizedWindow]: trends || {} })[normalizedWindow] || {};
+    const previous = state.priceWindowCache && state.priceWindowCache[normalizedWindow];
+    const changed = JSON.stringify(previous || {}) !== JSON.stringify(next);
+    state.priceWindowCache[normalizedWindow] = next;
+    return changed;
+  }
+
   function decodeBase64Url(value) {
     const padded = String(value).replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
     return decodeURIComponent(escape(atob(padded)));
@@ -1011,7 +1110,10 @@
     const prices = priceMap();
     const rows = SEEDS.map((seed) => {
       const price = Number(prices[seed.id]);
-      const historyChange = historyWindowChangeForSeed(seed.id, trendWindowLabel());
+      const priceWindowChange = priceWindowChangeForSeed(seed.id, trendWindowLabel());
+      const historyChange = hasFiniteNumber(priceWindowChange.rate)
+        ? priceWindowChange
+        : historyWindowChangeForSeed(seed.id, trendWindowLabel());
       const alertTrendChange = trendChangeForSeed(seed.id, PRICE_CHANGE_ALERT_WINDOW, true);
       const hasPrice = Number.isFinite(price);
       const priceChangeRate = hasFiniteNumber(historyChange.rate) ? historyChange.rate : null;
@@ -1183,6 +1285,8 @@
   }
 
   function historyWindowChangeForSeed(seedId, value) {
+    const cached = priceWindowChangeForSeed(seedId, value);
+    if (hasFiniteNumber(cached.rate)) return cached;
     const trend = cropTrendData(seedId);
     const points = trend.points.length >= 2 ? trend.points : anomalyChartPoints(trend.group.events);
     return historyWindowChange(points, value);
@@ -1217,6 +1321,8 @@
   }
 
   function trendChangeForSeed(seedId, windowValue, requireFullWindow) {
+    const cached = priceWindowChangeForSeed(seedId, windowValue);
+    if (hasFiniteNumber(cached.rate)) return cached;
     const trend = state.priceTrends && state.priceTrends.shop && state.priceTrends.shop[seedId];
     if (!trend) return {};
     const config = trendWindowConfig(windowValue);
@@ -3114,7 +3220,14 @@
     const cycle = document.getElementById('cycleMode');
     if (cycle) cycle.addEventListener('change', () => { state.config.cycleMode = cycle.value; saveState(); render(); });
     const trendWindow = document.getElementById('trendWindow');
-    if (trendWindow) trendWindow.addEventListener('change', () => { state.config.trendWindow = trendWindow.value; saveState(); render(); });
+    if (trendWindow) trendWindow.addEventListener('change', () => {
+      state.config.trendWindow = trendWindow.value;
+      saveState();
+      render();
+      loadCloudPriceTrend(trendWindow.value, false).then((changed) => {
+        if (changed) render();
+      });
+    });
     const viewLevel = document.getElementById('viewLevel');
     if (viewLevel) viewLevel.addEventListener('change', () => { state.config.viewLevel = clampInt(viewLevel.value, 1, 7, 1); saveState(); render(); });
     const currentTotalExp = document.getElementById('currentTotalExp');
@@ -3518,6 +3631,7 @@
     await importSnapshotFromHash();
     installThemeListener();
     await loadCloudDefaultPrices(false);
+    await loadCloudPriceTrend(trendWindowLabel(), false);
     await refreshHistoryCount();
     render();
     appReady = true;

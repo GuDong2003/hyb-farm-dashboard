@@ -40,6 +40,18 @@ const FUTURE_TOLERANCE_MS = 10 * 60 * 1000;
 const DEFAULT_PRICE_CHANGE_THRESHOLD = 20;
 const PUBLIC_DEFAULT_CACHE_CONTROL = 'public, max-age=0, s-maxage=600, stale-while-revalidate=60';
 const PUBLIC_HISTORY_CACHE_CONTROL = 'public, max-age=0, s-maxage=3600, stale-while-revalidate=300';
+const PRICE_TREND_WINDOWS = Object.freeze({
+  '1h': 60 * 60 * 1000,
+  '6h': 6 * 60 * 60 * 1000,
+  '12h': 12 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000
+});
+const PRICE_TREND_WINDOW_VALUES = Object.freeze(Object.keys(PRICE_TREND_WINDOWS));
+const LATEST_SNAPSHOT_KV_KEY = 'latest-snapshot-v1';
+const LATEST_SNAPSHOT_KV_PREFIX = `${LATEST_SNAPSHOT_KV_KEY}:`;
+const MAX_PUBLISHED_SNAPSHOT_VERSIONS = 8;
 
 export default {
   async fetch(request, env) {
@@ -51,6 +63,10 @@ export default {
 
     if (url.pathname === '/api/price-history' && request.method === 'GET') {
       return getPriceHistory(request, env);
+    }
+
+    if (url.pathname === '/api/price-trends' && request.method === 'GET') {
+      return getPriceTrends(request, env);
     }
 
     if (url.pathname === '/api/price-submissions' && request.method === 'POST') {
@@ -67,17 +83,31 @@ export default {
 
 async function getDefaultPrices(request, env) {
   return withPublicCache(request, async () => {
-    assertDatabase(env);
-    const row = await env.PRICE_DB.prepare('SELECT * FROM default_prices WHERE id = 1').first();
-    if (!row) {
-      return jsonResponse({ ok: true, snapshot: null }, 200, {
-        'cache-control': PUBLIC_DEFAULT_CACHE_CONTROL
-      });
-    }
-    const snapshot = snapshotFromDefaultRow(row);
-    await hydrateSnapshotTrends(env, snapshot);
+    const snapshot = await loadLatestSnapshot(env);
     return jsonResponse({ ok: true, snapshot }, 200, {
       'cache-control': PUBLIC_DEFAULT_CACHE_CONTROL
+    });
+  });
+}
+
+async function getPriceTrends(request, env) {
+  const url = new URL(request.url);
+  const windowValue = normalizeTrendWindow(url.searchParams.get('window'));
+  if (!windowValue) return jsonResponse({ ok: false, error: 'invalid_window' }, 400, { 'cache-control': 'no-store' });
+
+  return withPublicCache(request, async () => {
+    const snapshot = await loadLatestSnapshot(env);
+    const trends = snapshot && snapshot.priceChangeWindows && snapshot.priceChangeWindows[windowValue]
+      ? snapshot.priceChangeWindows[windowValue]
+      : {};
+    return jsonResponse({
+      ok: true,
+      window: windowValue,
+      capturedAt: Number(snapshot && snapshot.capturedAt) || 0,
+      updatedAt: Number(snapshot && snapshot.defaultUpdatedAt) || 0,
+      trends
+    }, 200, {
+      'cache-control': priceTrendCacheControl(windowValue)
     });
   });
 }
@@ -173,6 +203,7 @@ async function submitPrices(request, env) {
   }
 
   await acceptSubmission(env, normalized, submissionId, now);
+  await publishAcceptedSnapshot(env, normalized, submissionId, now);
   await purgePriceResponseCaches(request);
 
   return jsonResponse({
@@ -461,6 +492,7 @@ function snapshotFromDefaultRow(row) {
     source: 'cloud-default',
     capturedAt: Number(row.captured_at),
     defaultUpdatedAt: Number(row.updated_at),
+    submissionId: Number(row.submission_id) || 0,
     prices: { shop: safeJsonObject(row.prices_json) },
     matched: Number(row.matched_count) || 0,
     totalSeeds: Number(row.total_count) || SEED_IDS.length
@@ -468,6 +500,230 @@ function snapshotFromDefaultRow(row) {
   if (Object.keys(priceChangeRates).length) snapshot.priceChangeRates = { shop: priceChangeRates };
   if (Object.keys(priceTrends).length) snapshot.priceTrends = { shop: priceTrends };
   return snapshot;
+}
+
+async function loadLatestSnapshot(env) {
+  const published = await readPublishedSnapshot(env);
+  if (published) {
+    await hydratePublishedSnapshotWindows(env, published);
+    return published;
+  }
+
+  assertDatabase(env);
+  const row = await env.PRICE_DB.prepare('SELECT * FROM default_prices WHERE id = 1').first();
+  if (!row) return null;
+
+  const snapshot = snapshotFromDefaultRow(row);
+  let windowRows = null;
+  try {
+    windowRows = await queryPriceRowsForWindows(env, snapshot.capturedAt);
+    snapshot.priceChangeWindows = buildPriceChangeWindows(windowRows, snapshot);
+  } catch (_) {
+    // The current price snapshot remains usable if trend hydration is unavailable.
+  }
+  try {
+    await hydrateSnapshotTrends(env, snapshot, windowRows);
+  } catch (_) {
+    // The current price snapshot remains usable if full trend hydration is unavailable.
+  }
+  await publishLatestSnapshot(env, snapshot);
+  return snapshot;
+}
+
+async function hydratePublishedSnapshotWindows(env, snapshot) {
+  const existing = snapshot && snapshot.priceChangeWindows;
+  const complete = existing && PRICE_TREND_WINDOW_VALUES.every((windowValue) => (
+    Object.prototype.hasOwnProperty.call(existing, windowValue)
+  ));
+  if (complete) return false;
+
+  try {
+    const rows = await queryPriceRowsForWindows(env, snapshot.capturedAt);
+    snapshot.priceChangeWindows = buildPriceChangeWindows(rows, snapshot);
+    await publishLatestSnapshot(env, snapshot);
+    return true;
+  } catch (_) {
+    // A legacy KV snapshot remains usable when D1 is temporarily unavailable.
+    return false;
+  }
+}
+
+async function readPublishedSnapshot(env) {
+  if (!env || !env.LATEST_KV || typeof env.LATEST_KV.get !== 'function') return null;
+  let versioned = null;
+  try {
+    versioned = await readLatestVersionedSnapshot(env);
+  } catch (_) {
+    // A list failure should still allow the legacy fixed key to serve data.
+  }
+  if (versioned) return versioned;
+  try {
+    const value = await env.LATEST_KV.get(LATEST_SNAPSHOT_KV_KEY, { type: 'json' });
+    return normalizePublishedSnapshot(value);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function readLatestVersionedSnapshot(env) {
+  if (!env || !env.LATEST_KV || typeof env.LATEST_KV.list !== 'function') return null;
+  const keys = await listVersionedSnapshotKeys(env);
+  const latestKey = keys.slice().sort().pop() || '';
+  if (!latestKey) return null;
+  return normalizePublishedSnapshot(await env.LATEST_KV.get(latestKey, { type: 'json' }));
+}
+
+async function listVersionedSnapshotKeys(env) {
+  if (!env || !env.LATEST_KV || typeof env.LATEST_KV.list !== 'function') return [];
+  const names = new Set();
+  let cursor = '';
+  do {
+    const options = { prefix: LATEST_SNAPSHOT_KV_PREFIX, limit: 1000 };
+    if (cursor) options.cursor = cursor;
+    const page = await env.LATEST_KV.list(options);
+    for (const item of (page && Array.isArray(page.keys) ? page.keys : [])) {
+      const name = String(item && item.name || '');
+      if (name) names.add(name);
+    }
+    cursor = page && page.list_complete === false && page.cursor ? String(page.cursor) : '';
+  } while (cursor);
+  return Array.from(names);
+}
+
+function normalizePublishedSnapshot(value) {
+  const snapshot = value && value.snapshot && value.snapshot.prices ? value.snapshot : value;
+  return snapshot && snapshot.prices && snapshot.prices.shop ? snapshot : null;
+}
+
+export async function publishLatestSnapshot(env, snapshot) {
+  if (!env || !env.LATEST_KV || typeof env.LATEST_KV.put !== 'function' || !snapshot) return false;
+  try {
+    if (typeof env.LATEST_KV.list === 'function') {
+      await env.LATEST_KV.put(snapshotVersionKey(snapshot), JSON.stringify(snapshot));
+      await pruneVersionedSnapshots(env);
+      return true;
+    }
+    const published = await readPublishedSnapshot(env);
+    if (published && shouldKeepPublishedSnapshot(published, snapshot)) return false;
+    await env.LATEST_KV.put(LATEST_SNAPSHOT_KV_KEY, JSON.stringify(snapshot));
+    return true;
+  } catch (_) {
+    // KV is a read optimization; an unavailable KV must not reject a valid upload.
+    return false;
+  }
+}
+
+async function pruneVersionedSnapshots(env) {
+  if (!env || !env.LATEST_KV || typeof env.LATEST_KV.delete !== 'function') return;
+  const keys = (await listVersionedSnapshotKeys(env)).sort().reverse();
+  await Promise.allSettled(keys.slice(MAX_PUBLISHED_SNAPSHOT_VERSIONS).map((key) => env.LATEST_KV.delete(key)));
+}
+
+function snapshotVersionKey(snapshot) {
+  const capturedAt = String(Math.max(0, Number(snapshot && snapshot.capturedAt) || 0)).padStart(16, '0');
+  const updatedAt = String(Math.max(0, Number(snapshot && snapshot.defaultUpdatedAt) || 0)).padStart(16, '0');
+  const submissionId = String(Math.max(0, Number(snapshot && snapshot.submissionId) || 0)).padStart(16, '0');
+  return `${LATEST_SNAPSHOT_KV_PREFIX}${capturedAt}:${updatedAt}:${submissionId}`;
+}
+
+function shouldKeepPublishedSnapshot(existing, incoming) {
+  const existingCapturedAt = Number(existing && existing.capturedAt) || 0;
+  const incomingCapturedAt = Number(incoming && incoming.capturedAt) || 0;
+  if (existingCapturedAt > incomingCapturedAt) return true;
+  if (existingCapturedAt < incomingCapturedAt) return false;
+
+  const existingUpdatedAt = Number(existing && existing.defaultUpdatedAt) || 0;
+  const incomingUpdatedAt = Number(incoming && incoming.defaultUpdatedAt) || 0;
+  if (existingUpdatedAt > incomingUpdatedAt) return true;
+
+  const existingWindows = existing && existing.priceChangeWindows;
+  const incomingWindows = incoming && incoming.priceChangeWindows;
+  const existingComplete = existingWindows
+    && PRICE_TREND_WINDOW_VALUES.every((windowValue) => Object.prototype.hasOwnProperty.call(existingWindows, windowValue));
+  const incomingComplete = incomingWindows
+    && PRICE_TREND_WINDOW_VALUES.every((windowValue) => Object.prototype.hasOwnProperty.call(incomingWindows, windowValue));
+  return Boolean(existingComplete && !incomingComplete);
+}
+
+async function publishAcceptedSnapshot(env, normalized, submissionId, now) {
+  if (!env || !env.LATEST_KV) return false;
+  const snapshot = snapshotFromNormalized(normalized, now);
+  snapshot.submissionId = Number(submissionId) || 0;
+  try {
+    const rows = await queryPriceRowsForWindows(env, snapshot.capturedAt);
+    const newestAcceptedAt = Math.max(0, ...(rows || []).map((row) => Number(row && row.captured_at) || 0));
+    if (newestAcceptedAt > snapshot.capturedAt) return false;
+    snapshot.priceChangeWindows = buildPriceChangeWindows(rows, snapshot);
+  } catch (_) {
+    // Publish the accepted price even when the optional trend summary cannot be built.
+  }
+  return publishLatestSnapshot(env, snapshot);
+}
+
+function normalizeTrendWindow(value) {
+  const normalized = String(value || '').trim();
+  return Object.prototype.hasOwnProperty.call(PRICE_TREND_WINDOWS, normalized) ? normalized : '';
+}
+
+function priceTrendCacheControl(windowValue) {
+  return PRICE_TREND_WINDOWS[windowValue] <= PRICE_TREND_WINDOWS['24h']
+    ? PUBLIC_DEFAULT_CACHE_CONTROL
+    : PUBLIC_HISTORY_CACHE_CONTROL;
+}
+
+async function queryPriceRowsForWindows(env, capturedAt) {
+  assertDatabase(env);
+  const latestAt = Number(capturedAt) || Date.now();
+  const oldestAt = latestAt - Math.max(...Object.values(PRICE_TREND_WINDOWS)) - REFRESH_INTERVAL_MS;
+  const result = await env.PRICE_DB.prepare(`
+    SELECT captured_at, prices_json
+    FROM price_submissions
+    WHERE accepted = 1 AND captured_at >= ?
+    ORDER BY captured_at ASC, id ASC
+  `).bind(oldestAt).all();
+  return (result && result.results) || [];
+}
+
+export function buildPriceChangeWindows(rows, snapshot) {
+  const currentPrices = snapshot && snapshot.prices && snapshot.prices.shop ? snapshot.prices.shop : {};
+  const latestAt = Number(snapshot && snapshot.capturedAt)
+    || Math.max(0, ...(Array.isArray(rows) ? rows : []).map((row) => Number(row && row.captured_at) || 0));
+  const points = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      capturedAt: Number(row && row.captured_at),
+      prices: safeJsonObject(row && row.prices_json)
+    }))
+    .filter((row) => Number.isFinite(row.capturedAt) && row.capturedAt > 0)
+    .sort((a, b) => a.capturedAt - b.capturedAt);
+
+  const result = {};
+  Object.entries(PRICE_TREND_WINDOWS).forEach(([windowValue, windowMs]) => {
+    const targetAt = latestAt - windowMs;
+    const trends = {};
+    for (const seedId of SEED_IDS) {
+      const currentPrice = Number(currentPrices[seedId]);
+      if (!Number.isFinite(currentPrice) || currentPrice <= 0) continue;
+      let anchor = null;
+      points.forEach((point) => {
+        const price = Number(point.prices[seedId]);
+        if (point.capturedAt <= targetAt && Number.isFinite(price) && price > 0) {
+          anchor = { capturedAt: point.capturedAt, price };
+        }
+      });
+      if (!anchor) continue;
+      const rate = ((currentPrice - anchor.price) / anchor.price) * 100;
+      if (!Number.isFinite(rate)) continue;
+      trends[seedId] = {
+        rate: Number(rate.toFixed(6)),
+        baseAt: anchor.capturedAt,
+        endAt: latestAt,
+        basePrice: Number(anchor.price.toFixed(5)),
+        endPrice: Number(currentPrice.toFixed(5))
+      };
+    }
+    result[windowValue] = trends;
+  });
+  return result;
 }
 
 function snapshotFromNormalized(normalized, updatedAt) {
@@ -485,19 +741,21 @@ function snapshotFromNormalized(normalized, updatedAt) {
   return snapshot;
 }
 
-export async function hydrateSnapshotTrends(env, snapshot) {
+export async function hydrateSnapshotTrends(env, snapshot, providedRows) {
   if (!snapshot || !snapshot.prices || !snapshot.prices.shop) return;
   const existingTrends = snapshot.priceTrends && snapshot.priceTrends.shop ? snapshot.priceTrends.shop : {};
   if (!trendMapNeedsHydration(existingTrends, snapshot.prices.shop)) return;
 
-  const rows = await env.PRICE_DB.prepare(`
-    SELECT captured_at, prices_json
-    FROM price_submissions
-    WHERE accepted = 1
-    ORDER BY captured_at DESC
-    LIMIT 500
-  `).all();
-  const trendMap = buildTrendMapFromRows((rows && rows.results) || [], snapshot.prices.shop, Number(snapshot.capturedAt) || Date.now());
+  const rows = Array.isArray(providedRows)
+    ? providedRows
+    : ((await env.PRICE_DB.prepare(`
+      SELECT captured_at, prices_json
+      FROM price_submissions
+      WHERE accepted = 1
+      ORDER BY captured_at DESC
+      LIMIT 500
+    `).all()).results || []);
+  const trendMap = buildTrendMapFromRows(rows, snapshot.prices.shop, Number(snapshot.capturedAt) || Date.now());
   if (Object.keys(trendMap).length) snapshot.priceTrends = { shop: mergePriceTrendMaps(trendMap, existingTrends) };
 }
 
@@ -671,7 +929,10 @@ async function purgePriceResponseCaches(request) {
   const origin = new URL(request.url).origin;
   const keys = [
     new Request(`${origin}/api/default-prices`, { method: 'GET' }),
-    new Request(`${origin}/api/price-history?threshold=${DEFAULT_PRICE_CHANGE_THRESHOLD}`, { method: 'GET' })
+    new Request(`${origin}/api/price-history?threshold=${DEFAULT_PRICE_CHANGE_THRESHOLD}`, { method: 'GET' }),
+    ...PRICE_TREND_WINDOW_VALUES.map((windowValue) => (
+      new Request(`${origin}/api/price-trends?window=${windowValue}`, { method: 'GET' })
+    ))
   ];
   await Promise.allSettled(keys.map((key) => cache.delete(key)));
 }
