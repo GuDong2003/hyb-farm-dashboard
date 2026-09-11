@@ -38,6 +38,10 @@ hashed submitter fingerprint for abuse resistance
 It does not intentionally upload farm layout, account identity, inventory, cookies, or private profile data.
 The locally captured total experience and unlocked land levels are removed before any price snapshot upload.
 
+## Anonymous Visitor Count
+
+The top-bar cumulative visitor badge uses a random browser-local visitor ID. On the first visit the Worker hashes that ID and stores only the hash marker plus an aggregate count in the existing KV namespace; it does not read or write D1. Later visits reuse the local marker and read the publicly cached count. This is an approximate anonymous browser/device count, not an account or person identifier.
+
 ## What Cloudflare Sees
 
 For normal page use, Cloudflare receives asset/API requests such as:

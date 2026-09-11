@@ -25,6 +25,9 @@
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const CLOUD_PRICE_SERIES_ENDPOINT = '/api/price-series';
+  const VISITOR_USAGE_ENDPOINT = '/api/visitor-usage';
+  const VISITOR_ID_STORAGE_KEY = 'hyb-farm-dashboard-visitor-id-v1';
+  const VISITOR_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
   const HISTORY_ANOMALY_THRESHOLD = 20;
   const TREND_CHART_AXIS_TRANSITION_MS = 220;
   const TREND_CHART_VIEWPORT_TRANSITION_MS = 180;
@@ -152,6 +155,7 @@
       lastImportedAt: 0,
       cloudDefaultAt: 0,
       cloudHistoryCount: null,
+      visitorCount: null,
       cloudUploadState: 'idle',
       cloudUploadMessage: '尚未上传',
       pendingUploadSnapshot: null,
@@ -660,6 +664,90 @@
       });
     } catch (error) {
       state.error = String(error && error.message || error);
+    }
+  }
+
+  function isValidVisitorId(value) {
+    return VISITOR_ID_PATTERN.test(String(value || '').trim());
+  }
+
+  function createVisitorId() {
+    const cryptoApi = window.crypto;
+    if (cryptoApi && typeof cryptoApi.randomUUID === 'function') return cryptoApi.randomUUID();
+    if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+      const bytes = new Uint8Array(16);
+      cryptoApi.getRandomValues(bytes);
+      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    }
+    return `visitor-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  function readStoredVisitorId() {
+    try {
+      const value = String(window.localStorage.getItem(VISITOR_ID_STORAGE_KEY) || '').trim();
+      return isValidVisitorId(value) ? value : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function rememberVisitorId(visitorId) {
+    try {
+      window.localStorage.setItem(VISITOR_ID_STORAGE_KEY, visitorId);
+    } catch (_) {
+      // Private browsing or storage restrictions must not block the dashboard.
+    }
+  }
+
+  function normalizeVisitorCount(value) {
+    const count = Number(value);
+    return Number.isFinite(count) && count >= 0 ? Math.floor(count) : null;
+  }
+
+  function formatVisitorCount(value) {
+    const count = normalizeVisitorCount(value);
+    return count === null ? '累计访客：—' : `累计访客：${count.toLocaleString('zh-CN')}`;
+  }
+
+  function setVisitorCount(value) {
+    state.visitorCount = normalizeVisitorCount(value);
+    const element = document.querySelector('[data-visitor-count]');
+    if (element) element.textContent = formatVisitorCount(state.visitorCount);
+  }
+
+  async function loadVisitorUsage() {
+    const storedVisitorId = readStoredVisitorId();
+    if (!storedVisitorId) {
+      const visitorId = createVisitorId();
+      try {
+        const response = await fetch(VISITOR_USAGE_ENDPOINT, {
+          method: 'POST',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { accept: 'application/json', 'content-type': 'application/json' },
+          body: JSON.stringify({ visitorId })
+        });
+        const data = await response.json().catch(() => ({}));
+        const count = normalizeVisitorCount(data && data.visitors);
+        if (response.ok && data && data.ok !== false && count !== null) {
+          rememberVisitorId(visitorId);
+          setVisitorCount(count);
+          return;
+        }
+      } catch (_) {
+        // Fall through to a cached read so a usage outage never affects the dashboard.
+      }
+    }
+
+    try {
+      const response = await fetch(VISITOR_USAGE_ENDPOINT, {
+        headers: { accept: 'application/json' },
+        cache: 'default'
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) setVisitorCount(data && data.visitors);
+    } catch (_) {
+      // Visitor statistics are optional and must not affect the dashboard.
     }
   }
 
@@ -1703,6 +1791,7 @@
           </nav>
           ${topPriceRiseAlert(alertSummary)}
           <nav class="topbar-actions" aria-label="项目链接与主题">
+            <span class="visitor-count" data-visitor-count aria-live="polite" title="匿名浏览器或设备的累计近似数">${formatVisitorCount(state.visitorCount)}</span>
             <button class="topbar-link history-link ${state.view === 'history' ? 'active' : ''}" data-view="history" title="查看价格快照历史">历史 ${historyNavigationCount()} 条</button>
             <a class="card-link" href="https://card.gudong226.com/" target="_blank" rel="noopener noreferrer" aria-label="打开 HYB 卡牌收益计算" title="HYB 卡牌收益计算">
               <img src="./assets/card-dashboard-icon.svg" alt="" width="20" height="20" />
@@ -3772,6 +3861,7 @@
     await loadCloudPriceTrend(trendWindowLabel(), false);
     await refreshHistoryCount();
     render();
+    void loadVisitorUsage();
     appReady = true;
     window.setTimeout(runAutoRefresh, 600);
     scheduleAutoRefresh();

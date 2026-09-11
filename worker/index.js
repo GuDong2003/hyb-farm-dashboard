@@ -40,6 +40,7 @@ const FUTURE_TOLERANCE_MS = 10 * 60 * 1000;
 const DEFAULT_PRICE_CHANGE_THRESHOLD = 20;
 const PUBLIC_DEFAULT_CACHE_CONTROL = 'public, max-age=0, s-maxage=600, stale-while-revalidate=60';
 const PUBLIC_HISTORY_CACHE_CONTROL = 'public, max-age=0, s-maxage=3600, stale-while-revalidate=300';
+const PUBLIC_VISITOR_CACHE_CONTROL = 'public, max-age=600, s-maxage=600, stale-while-revalidate=3600';
 const PRICE_TREND_WINDOWS = Object.freeze({
   '1h': 60 * 60 * 1000,
   '6h': 6 * 60 * 60 * 1000,
@@ -64,6 +65,9 @@ const PRICE_SERIES_WINDOW_VALUES = Object.freeze(Object.keys(PRICE_SERIES_WINDOW
 const LATEST_SNAPSHOT_KV_KEY = 'latest-snapshot-v1';
 const LATEST_SNAPSHOT_KV_PREFIX = `${LATEST_SNAPSHOT_KV_KEY}:`;
 const HISTORY_COUNT_KV_KEY = 'history-count-v1';
+export const VISITOR_USAGE_COUNT_KV_KEY = 'farm:usage:visitors:v1';
+const VISITOR_USAGE_VISITOR_PREFIX = 'farm:usage:visitor:v1:';
+const VISITOR_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 const MAX_PUBLISHED_SNAPSHOT_VERSIONS = 8;
 
 export default {
@@ -84,6 +88,14 @@ export default {
 
     if (url.pathname === '/api/price-trends' && request.method === 'GET') {
       return getPriceTrends(request, env);
+    }
+
+    if (url.pathname === '/api/visitor-usage' && request.method === 'GET') {
+      return getVisitorUsage(request, env);
+    }
+
+    if (url.pathname === '/api/visitor-usage' && request.method === 'POST') {
+      return postVisitorUsage(request, env);
     }
 
     if (url.pathname === '/api/price-submissions' && request.method === 'POST') {
@@ -127,6 +139,85 @@ async function getPriceTrends(request, env) {
       'cache-control': priceTrendCacheControl(windowValue)
     });
   });
+}
+
+async function getVisitorUsage(request, env) {
+  return withPublicCache(request, async () => jsonResponse({
+    ok: true,
+    visitors: await readVisitorUsageCount(env)
+  }, 200, {
+    'cache-control': PUBLIC_VISITOR_CACHE_CONTROL
+  }));
+}
+
+async function postVisitorUsage(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (_) {
+    return jsonResponse({ ok: false, error: 'invalid_json' }, 400);
+  }
+
+  const visitorId = normalizeVisitorId(body && body.visitorId);
+  if (!visitorId) return jsonResponse({ ok: false, error: 'invalid_visitor_id' }, 400);
+
+  const kv = env && env.LATEST_KV;
+  if (!kv || typeof kv.get !== 'function' || typeof kv.put !== 'function') {
+    return jsonResponse({ ok: true, visitors: null, counted: false }, 200, {
+      'cache-control': PUBLIC_VISITOR_CACHE_CONTROL
+    });
+  }
+
+  try {
+    const visitorKey = `${VISITOR_USAGE_VISITOR_PREFIX}${await hashVisitorId(visitorId)}`;
+    const seen = await kv.get(visitorKey);
+    const current = await readVisitorUsageCountFromKv(kv);
+    if (seen != null) {
+      return jsonResponse({ ok: true, visitors: current, counted: false }, 200, {
+        'cache-control': PUBLIC_VISITOR_CACHE_CONTROL
+      });
+    }
+
+    const next = current + 1;
+    await kv.put(VISITOR_USAGE_COUNT_KV_KEY, String(next));
+    await kv.put(visitorKey, '1');
+    return jsonResponse({ ok: true, visitors: next, counted: true }, 200, {
+      'cache-control': PUBLIC_VISITOR_CACHE_CONTROL
+    });
+  } catch (error) {
+    console.error('visitor_usage_write_failed', {
+      message: String(error && error.message || error).slice(0, 240)
+    });
+    return jsonResponse({ ok: true, visitors: null, counted: false }, 200, {
+      'cache-control': PUBLIC_VISITOR_CACHE_CONTROL
+    });
+  }
+}
+
+async function readVisitorUsageCount(env) {
+  const kv = env && env.LATEST_KV;
+  if (!kv || typeof kv.get !== 'function') return null;
+  try {
+    return await readVisitorUsageCountFromKv(kv);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function readVisitorUsageCountFromKv(kv) {
+  const value = await kv.get(VISITOR_USAGE_COUNT_KV_KEY);
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0;
+}
+
+function normalizeVisitorId(value) {
+  const visitorId = String(value == null ? '' : value).trim();
+  return VISITOR_ID_PATTERN.test(visitorId) ? visitorId : '';
+}
+
+async function hashVisitorId(visitorId) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(visitorId));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function getPriceHistory(request, env) {

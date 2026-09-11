@@ -122,6 +122,27 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .nav button.active { color: var(--blue); background: var(--blue-soft); font-weight: 750; }
 .topbar-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.visitor-count {
+  display: inline-grid;
+  width: auto;
+  max-width: 150px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--formula-bg);
+  color: var(--muted);
+  cursor: default;
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .top-alert {
   display: inline-flex;
   align-items: center;
@@ -795,6 +816,7 @@ tr:hover td { background: var(--row-hover); }
   .brand { min-width: 0; width: 100%; }
   .top-alert { order: 4; width: 100%; max-width: none; justify-content: center; }
   .history-link { margin-left: 0; }
+  .visitor-count { max-width: 132px; padding: 0 7px; font-size: 11px; }
   .main { padding: 10px 10px 18px; }
   .toolbar-sync-primary, .toolbar-sync-secondary { width: 100%; }
   .toolbar-sync-secondary { justify-content: flex-start; margin-left: 0; padding-top: 2px; border-top: 1px solid var(--line-soft); }
