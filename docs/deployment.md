@@ -2,7 +2,7 @@
 
 This project is configured for Cloudflare Workers Static Assets.
 
-公开价格快照使用 `LATEST_KV` 保存最近一次成功同步的数据；默认首页和六个涨跌幅区间会优先从 KV/边缘缓存读取，只有 KV 尚未初始化或旧快照需要回填时才读取 D1。部署配置中的 KV 命名空间已经固定为本项目专用空间。
+公开价格快照使用 `LATEST_KV` 保存最近一次成功同步的数据；默认首页和六个涨跌幅区间会优先从 KV/边缘缓存读取，只有 KV 尚未初始化或旧快照需要回填时才读取 D1。匿名访客计数使用 `VISITOR_COUNTER` Durable Object 串行处理，并用 `LATEST_KV` 保留兼容备份；它不读取 D1。部署配置中的 KV 命名空间已经固定为本项目专用空间。
 
 ## Local Deployment
 

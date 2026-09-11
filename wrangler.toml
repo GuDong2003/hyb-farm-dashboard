@@ -16,3 +16,11 @@ database_id = "99d3fde9-4d9e-4370-ad9d-dcfb2827815d"
 [[kv_namespaces]]
 binding = "LATEST_KV"
 id = "f1195c48ecaa41bc980aa728bc9c4982"
+
+[[durable_objects.bindings]]
+name = "VISITOR_COUNTER"
+class_name = "VisitorCounter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["VisitorCounter"]

@@ -16,12 +16,19 @@ test('topbar places the anonymous cumulative visitor badge immediately before hi
   assert.ok(topbar.indexOf('visitor-count') < topbar.indexOf('history-link'));
 });
 
-test('visitor usage uses a local anonymous id and the KV-only usage endpoint', () => {
+test('visitor usage uses a local anonymous id and retries when registration is unavailable', () => {
   assert.match(app, /const VISITOR_USAGE_ENDPOINT = '\/api\/visitor-usage';/);
+  assert.match(app, /const VISITOR_USAGE_REFRESH_INTERVAL_MS = 60 \* 1000;/);
+  assert.match(app, /let memoryVisitorId = '';/);
   assert.match(app, /VISITOR_ID_STORAGE_KEY/);
   assert.match(app, /localStorage\.getItem\(VISITOR_ID_STORAGE_KEY\)/);
+  assert.match(app, /return memoryVisitorId;/);
+  assert.match(app, /memoryVisitorId = visitorId;/);
   assert.match(app, /method: 'POST'/);
+  assert.match(app, /fetch\(VISITOR_USAGE_ENDPOINT, \{[\s\S]*?headers: \{ accept: 'application\/json' \},\s*cache: 'no-store'/);
   assert.match(app, /loadVisitorUsage\(\)/);
+  assert.match(app, /function scheduleVisitorUsageRefresh\(\)/);
+  assert.match(app, /document\.addEventListener\('visibilitychange'/);
   assert.match(app, /visitorCount: null,/);
 });
 

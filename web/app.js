@@ -26,6 +26,7 @@
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const CLOUD_PRICE_SERIES_ENDPOINT = '/api/price-series';
   const VISITOR_USAGE_ENDPOINT = '/api/visitor-usage';
+  const VISITOR_USAGE_REFRESH_INTERVAL_MS = 60 * 1000;
   const VISITOR_ID_STORAGE_KEY = 'hyb-farm-dashboard-visitor-id-v1';
   const VISITOR_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
   const HISTORY_ANOMALY_THRESHOLD = 20;
@@ -89,6 +90,9 @@
   let appReady = false;
   let priceBridgeRequest = null;
   let autoRefreshTimer = null;
+  let visitorUsageTimer = null;
+  let visitorUsageLoading = false;
+  let memoryVisitorId = '';
   let trendChartUpdateFrame = 0;
   let trendChartAxisAnimationFrame = 0;
   let trendChartViewportAnimationFrame = 0;
@@ -683,15 +687,22 @@
   }
 
   function readStoredVisitorId() {
+    if (isValidVisitorId(memoryVisitorId)) return memoryVisitorId;
     try {
       const value = String(window.localStorage.getItem(VISITOR_ID_STORAGE_KEY) || '').trim();
-      return isValidVisitorId(value) ? value : '';
+      if (isValidVisitorId(value)) {
+        memoryVisitorId = value;
+        return value;
+      }
     } catch (_) {
-      return '';
+      // Private browsing or storage restrictions use the page-lifetime fallback below.
     }
+    return memoryVisitorId;
   }
 
   function rememberVisitorId(visitorId) {
+    if (!isValidVisitorId(visitorId)) return;
+    memoryVisitorId = visitorId;
     try {
       window.localStorage.setItem(VISITOR_ID_STORAGE_KEY, visitorId);
     } catch (_) {
@@ -716,39 +727,77 @@
   }
 
   async function loadVisitorUsage() {
-    const storedVisitorId = readStoredVisitorId();
-    if (!storedVisitorId) {
-      const visitorId = createVisitorId();
-      try {
-        const response = await fetch(VISITOR_USAGE_ENDPOINT, {
-          method: 'POST',
-          credentials: 'same-origin',
-          cache: 'no-store',
-          headers: { accept: 'application/json', 'content-type': 'application/json' },
-          body: JSON.stringify({ visitorId })
-        });
-        const data = await response.json().catch(() => ({}));
-        const count = normalizeVisitorCount(data && data.visitors);
-        if (response.ok && data && data.ok !== false && count !== null) {
-          rememberVisitorId(visitorId);
-          setVisitorCount(count);
-          return;
-        }
-      } catch (_) {
-        // Fall through to a cached read so a usage outage never affects the dashboard.
-      }
-    }
-
+    if (visitorUsageLoading) return;
+    visitorUsageLoading = true;
     try {
+      const storedVisitorId = readStoredVisitorId();
+      if (!storedVisitorId) {
+        const visitorId = createVisitorId();
+        try {
+          const response = await fetch(VISITOR_USAGE_ENDPOINT, {
+            method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: { accept: 'application/json', 'content-type': 'application/json' },
+            body: JSON.stringify({ visitorId })
+          });
+          const data = await response.json().catch(() => ({}));
+          const count = normalizeVisitorCount(data && data.visitors);
+          if (response.ok && data && data.ok !== false && count !== null) {
+            rememberVisitorId(visitorId);
+            setVisitorCount(count);
+            return;
+          }
+        } catch (_) {
+          // Fall through to a fresh read so a usage outage never affects the dashboard.
+        }
+      }
+
       const response = await fetch(VISITOR_USAGE_ENDPOINT, {
+        credentials: 'same-origin',
         headers: { accept: 'application/json' },
-        cache: 'default'
+        cache: 'no-store'
       });
       const data = await response.json().catch(() => ({}));
       if (response.ok) setVisitorCount(data && data.visitors);
     } catch (_) {
       // Visitor statistics are optional and must not affect the dashboard.
+    } finally {
+      visitorUsageLoading = false;
     }
+  }
+
+  function clearVisitorUsageRefreshTimer() {
+    if (visitorUsageTimer) window.clearTimeout(visitorUsageTimer);
+    visitorUsageTimer = null;
+  }
+
+  function scheduleVisitorUsageRefresh() {
+    clearVisitorUsageRefreshTimer();
+    if (document.visibilityState && document.visibilityState !== 'visible') return;
+    visitorUsageTimer = window.setTimeout(() => {
+      visitorUsageTimer = null;
+      if (document.visibilityState && document.visibilityState !== 'visible') return;
+      void loadVisitorUsage();
+      scheduleVisitorUsageRefresh();
+    }, VISITOR_USAGE_REFRESH_INTERVAL_MS);
+  }
+
+  function handleVisitorUsageWake() {
+    if (document.visibilityState && document.visibilityState !== 'visible') return;
+    void loadVisitorUsage();
+    scheduleVisitorUsageRefresh();
+  }
+
+  function installVisitorUsageLifecycleListeners() {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') handleVisitorUsageWake();
+      else clearVisitorUsageRefreshTimer();
+    });
+    window.addEventListener('focus', handleVisitorUsageWake);
+    window.addEventListener('pageshow', handleVisitorUsageWake);
+    window.addEventListener('online', handleVisitorUsageWake);
+    scheduleVisitorUsageRefresh();
   }
 
   async function clearHistory() {
@@ -3862,6 +3911,7 @@
     await refreshHistoryCount();
     render();
     void loadVisitorUsage();
+    installVisitorUsageLifecycleListeners();
     appReady = true;
     window.setTimeout(runAutoRefresh, 600);
     scheduleAutoRefresh();
