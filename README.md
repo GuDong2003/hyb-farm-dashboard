@@ -117,7 +117,7 @@ cdk.hybgzs.com
 
 只有用户点击“上传云端”或开启“导入后自动上传”时，作物价格和采集时间才会提交到 Worker。D1 保存的是公开价格快照、采集时间、提交状态元数据和用于防滥用的哈希指纹，不会主动上传农场布局、当前总经验、账号资料、库存或 Cookie。
 
-顶栏的“累计访客”是匿名浏览器/设备的近似累计数：首次访问生成并保存在本地的随机访客标识，Worker 只保存该标识的哈希和累计计数，不读取或写入 D1。计数由 Durable Object 串行处理，KV 保留兼容备份；统计不可用时不会影响价格页面。
+顶栏的“累计访客”是匿名浏览器/设备的近似累计数：首次访问生成并保存在本地的随机访客标识，Worker 只保存该标识的哈希和累计计数，不读取或写入 D1/KV。计数由 Durable Object 串行处理，读取接口使用 `no-store`；统计不可用时不会影响价格页面。
 
 更详细的说明见 [docs/privacy.md](docs/privacy.md)。
 
@@ -129,7 +129,7 @@ cdk.hybgzs.com
 | `POST` | `/api/price-submissions` | 校验并提交价格快照 |
 | `GET` | `/api/price-history` | 用户主动打开历史页面时获取完整云端快照 |
 | `GET` | `/api/price-series?seedId=carrot&window=7d` | 只获取指定作物与时间窗口的历史曲线（按组合边缘缓存） |
-| `GET` / `POST` | `/api/visitor-usage` | 读取或登记匿名累计访客数（Durable Object + KV 备份，实时读取） |
+| `GET` / `POST` | `/api/visitor-usage` | 读取或登记匿名累计访客数（仅 Durable Object，实时读取） |
 
 `/api/default-prices` 返回的 `snapshot.historySnapshotCount` 是云端已接受快照总数。它随最新快照一起发布到 KV，主页显示该字段时不需要读取完整历史接口；旧 KV 快照会兼容读取 `history-count-v1` 迁移键。
 

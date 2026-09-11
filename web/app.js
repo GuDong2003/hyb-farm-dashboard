@@ -108,6 +108,7 @@
   let priceWindowRequests = {};
   let priceWindowRetryTimers = {};
   let trendHistoryRequests = {};
+  let pendingTrendWheelRequest = null;
 
   function normalizeSeed(seed) {
     return {
@@ -465,6 +466,14 @@
       '90d': 2160
     }[normalized];
     return Number.isFinite(hours) ? hours * CHART_TIME.HOUR_MS : 0;
+  }
+
+  function trendHistoryWindowForMilliseconds(value) {
+    const requestedMs = Number(value);
+    if (!Number.isFinite(requestedMs)) return 'all';
+    const minimumMs = Math.max(CHART_TIME.HOUR_MS, requestedMs);
+    return ['1h', '6h', '12h', '24h', '3d', '7d', '30d', '90d']
+      .find((windowValue) => trendHistoryWindowMilliseconds(windowValue) >= minimumMs) || 'all';
   }
 
   function trendHistoryWindowForScale(value) {
@@ -971,13 +980,15 @@
         const incomingTrends = data.trends && typeof data.trends === 'object'
           ? data.trends
           : {};
-        const previousTrends = state.priceWindowCache && state.priceWindowCache[normalizedWindow];
-        if (!Object.keys(incomingTrends).length && Object.keys(previousTrends || {}).length) {
+        const cleanIncomingTrends = cleanPriceWindowCache({
+          [normalizedWindow]: incomingTrends
+        })[normalizedWindow] || {};
+        if (!Object.keys(incomingTrends).length || !Object.keys(cleanIncomingTrends).length) {
           schedulePriceTrendRetry(normalizedWindow);
           return false;
         }
         clearPriceTrendRetry(normalizedWindow);
-        const changed = replacePriceWindowCache(normalizedWindow, incomingTrends);
+        const changed = replacePriceWindowCache(normalizedWindow, cleanIncomingTrends);
         if (changed) saveState();
         return changed;
       } catch (_) {
@@ -1320,6 +1331,7 @@
       Object.keys(source).forEach((seedId) => {
         const item = source[seedId];
         if (!item || typeof item !== 'object') return;
+        if (item.rate === null || item.rate === undefined || String(item.rate).trim() === '') return;
         const rate = Number(item.rate);
         if (!Number.isFinite(rate)) return;
         const baseAt = Number(item.baseAt);
@@ -1332,7 +1344,7 @@
         if (Number.isFinite(basePrice) && basePrice > 0) trends[seedId].basePrice = basePrice;
         if (Number.isFinite(endPrice) && endPrice >= 0) trends[seedId].endPrice = endPrice;
       });
-      out[windowValue] = trends;
+      if (Object.keys(trends).length) out[windowValue] = trends;
     });
     return out;
   }
@@ -1355,6 +1367,7 @@
     const normalizedWindow = ['1h', '6h', '12h', '24h', '7d', '30d'].includes(windowValue) ? windowValue : '';
     if (!normalizedWindow) return false;
     const next = cleanPriceWindowCache({ [normalizedWindow]: trends || {} })[normalizedWindow] || {};
+    if (!Object.keys(next).length) return false;
     const previous = state.priceWindowCache && state.priceWindowCache[normalizedWindow];
     const changed = JSON.stringify(previous || {}) !== JSON.stringify(next);
     state.priceWindowCache[normalizedWindow] = next;
@@ -2828,12 +2841,17 @@
         trendChartViewportCurrent ? trendChartViewportCurrent.visibleEnd : state.trendModalVisibleEnd
       );
       const historySpan = model.maxTime - model.minTime;
-      const maxWindowMs = historySpan;
-      const minWindowMs = Math.min(CHART_TIME.HOUR_MS, maxWindowMs);
+      const minWindowMs = Math.min(CHART_TIME.HOUR_MS, historySpan);
       const currentWindowMs = Math.max(1, range.end - range.start);
       const zoomFactor = wheelDirection > 0 ? 0.8 : 1.25;
-      const nextWindowMs = Math.min(maxWindowMs, Math.max(minWindowMs, currentWindowMs * zoomFactor));
-      if (nextWindowMs === currentWindowMs) return;
+      const requestedWindowMs = Math.max(minWindowMs, currentWindowMs * zoomFactor);
+      const nextWindowMs = wheelDirection > 0
+        ? Math.min(historySpan, requestedWindowMs)
+        : requestedWindowMs;
+      if (!Number.isFinite(nextWindowMs) || nextWindowMs === currentWindowMs) {
+        pendingTrendWheelRequest = null;
+        return;
+      }
       const wrapRect = chartWrap.getBoundingClientRect();
       const pointerPoint = nearestTrendPoint(chartWrap, event.clientX);
       const activePoint = chartWrap.querySelector('.crosshair-active [data-history-point]');
@@ -2858,6 +2876,36 @@
         nextWindowMs,
         requestedVisibleEnd
       );
+
+      if (wheelDirection < 0 && nextWindowMs > historySpan + edgeTolerance) {
+        const seedId = state.trendModalSeedId;
+        const pendingRequest = {
+          seedId,
+          visibleWindowMs: nextWindowMs,
+          visibleEnd: requestedVisibleEnd
+        };
+        pendingTrendWheelRequest = pendingRequest;
+        const trendHistoryPromise = loadCropTrendHistory(state.trendModalSeedId, trendHistoryWindowForMilliseconds(nextWindowMs), false);
+        Promise.resolve(trendHistoryPromise).then(() => {
+          if (pendingTrendWheelRequest !== pendingRequest || state.trendModalSeedId !== seedId) return;
+          pendingTrendWheelRequest = null;
+          const { model: loadedModel } = activeTrendChartBounds();
+          const loadedHistorySpan = Math.max(0, loadedModel.maxTime - loadedModel.minTime);
+          const loadedWindowMs = Math.min(loadedHistorySpan, pendingRequest.visibleWindowMs);
+          if (Number.isFinite(loadedWindowMs) && loadedWindowMs > 0) {
+            const loadedVisibleEnd = CHART_TIME.clampVisibleEnd(
+              loadedModel.minTime,
+              loadedModel.maxTime,
+              loadedWindowMs,
+              pendingRequest.visibleEnd
+            );
+            startTrendChartViewportTransition(loadedModel, loadedWindowMs, loadedVisibleEnd);
+          }
+          render();
+        });
+        return;
+      }
+      pendingTrendWheelRequest = null;
       startTrendChartViewportTransition(model, nextWindowMs, nextVisibleEnd);
     }, { passive: false });
 
@@ -3085,6 +3133,7 @@
   function clearCropTrendModalState() {
     resetTrendChartWheel();
     resetTrendChartAxisTransition();
+    pendingTrendWheelRequest = null;
     state.trendModalSeedId = '';
     state.trendHideAnomalies = false;
     state.trendModalVisibleEnd = null;
@@ -3471,7 +3520,10 @@
     document.querySelectorAll('[data-view]').forEach((button) => {
       button.addEventListener('click', () => {
         state.view = button.dataset.view;
-        if (state.view !== 'table') state.trendModalSeedId = '';
+        if (state.view !== 'table') {
+          pendingTrendWheelRequest = null;
+          state.trendModalSeedId = '';
+        }
         if (state.view === 'history') {
           const historyPromise = loadHistoryAlerts(false);
           historyPromise.then(() => render()).catch(() => render());
@@ -3577,6 +3629,7 @@
       button.addEventListener('click', () => {
         resetTrendChartWheel();
         resetTrendChartAxisTransition();
+        pendingTrendWheelRequest = null;
         const { model } = activeTrendChartBounds();
         const historySpan = Math.max(0, model.maxTime - model.minTime);
         const requestedWindow = button.dataset.trendScale === 'all'

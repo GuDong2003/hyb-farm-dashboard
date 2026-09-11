@@ -22,7 +22,14 @@ test('trend loading preserves valid data and retries a temporary unavailable res
   assert.match(app, /const PRICE_TREND_RETRY_MS = 60 \* 1000;/);
   assert.match(app, /function schedulePriceTrendRetry\(windowValue\)/);
   assert.match(app, /const incomingTrends = data\.trends && typeof data\.trends === 'object'\s*\? data\.trends\s*:\s*\{\};/);
-  assert.match(app, /!Object\.keys\(incomingTrends\)\.length\s*&&\s*Object\.keys\(previousTrends \|\| \{\}\)\.length/);
+  assert.match(app, /const cleanIncomingTrends = cleanPriceWindowCache\(\{\s*\[normalizedWindow\]: incomingTrends\s*\}\)\[normalizedWindow\] \|\| \{\};/);
+  assert.match(app, /!Object\.keys\(incomingTrends\)\.length\s*\|\|\s*!Object\.keys\(cleanIncomingTrends\)\.length/);
+});
+
+test('empty trend responses never become loaded cache entries', () => {
+  assert.match(app, /if \(!Object\.keys\(incomingTrends\)\.length\s*\|\|\s*!Object\.keys\(cleanIncomingTrends\)\.length\)\s*\{[\s\S]*?schedulePriceTrendRetry\(normalizedWindow\);[\s\S]*?return false;\s*\}/);
+  assert.match(app, /if \(!Object\.keys\(next\)\.length\) return false;/);
+  assert.match(app, /if \(Object\.keys\(trends\)\.length\) out\[windowValue\] = trends;/);
 });
 
 test('homepage history navigation prefers the cloud snapshot count from the default KV snapshot', () => {

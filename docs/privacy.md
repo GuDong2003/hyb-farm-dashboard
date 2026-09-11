@@ -40,7 +40,7 @@ The locally captured total experience and unlocked land levels are removed befor
 
 ## Anonymous Visitor Count
 
-The top-bar cumulative visitor badge uses a random browser-local visitor ID. On the first visit the Worker hashes that ID and stores only the hash marker plus an aggregate count; the Durable Object serializes the counter operation, while the existing KV namespace retains a compatibility backup. It does not read or write D1. Later visits reuse the local marker and read the current count without browser or edge caching. This is an approximate anonymous browser/device count, not an account or person identifier.
+The top-bar cumulative visitor badge uses a random browser-local visitor ID. On the first visit the Worker hashes that ID and stores only the hash marker plus an aggregate count in a Durable Object; the object serializes the counter operation. Visitor requests do not read or write D1 or KV, and later visits reuse the local marker and read the current count without browser or edge caching. This is an approximate anonymous browser/device count, not an account or person identifier.
 
 ## What Cloudflare Sees
 

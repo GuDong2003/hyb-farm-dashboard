@@ -36,8 +36,9 @@ test('mouse and touch pointer dragging shift the fixed time anchor', () => {
 
 test('wheel gestures zoom the unified timeline around the cursor', () => {
   assert.match(appSource, /CHART_TIME\.wheelNavigationDelta\(event\.deltaX, event\.deltaY\)/);
-  assert.match(appSource, /const maxWindowMs = historySpan;/);
-  assert.match(appSource, /const minWindowMs = Math\.min\(CHART_TIME\.HOUR_MS, maxWindowMs\);/);
+  assert.match(appSource, /const minWindowMs = Math\.min\(CHART_TIME\.HOUR_MS, historySpan\);/);
+  assert.match(appSource, /const requestedWindowMs = Math\.max\(minWindowMs, currentWindowMs \* zoomFactor\);/);
+  assert.match(appSource, /const nextWindowMs = wheelDirection > 0/);
   assert.match(appSource, /let pointerRatio =/);
   assert.match(appSource, /if \(atLeftEdge && !atRightEdge\) pointerRatio = 0;/);
   assert.match(appSource, /if \(atRightEdge && !atLeftEdge\) pointerRatio = 1;/);
@@ -45,6 +46,7 @@ test('wheel gestures zoom the unified timeline around the cursor', () => {
   assert.match(appSource, /const anchorPoint = activePoint \|\| pointerPoint;/);
   assert.match(appSource, /const anchorTime = Number\(anchorPoint && anchorPoint\.dataset\.historyPointAt\);/);
   assert.match(appSource, /pointerRatio = \(anchorTime - range\.start\) \/ Math\.max\(1, currentWindowMs\);/);
+  assert.match(appSource, /if \(wheelDirection < 0 && nextWindowMs > historySpan \+ edgeTolerance\)/);
   assert.match(appSource, /startTrendChartViewportTransition\(model, nextWindowMs, nextVisibleEnd\);/);
   assert.match(appSource, /function startTrendChartViewportTransition\(model, visibleWindowMs, visibleEnd\)/);
   assert.match(appSource, /function sampleTrendChartViewportTransition\(nowValue\)/);

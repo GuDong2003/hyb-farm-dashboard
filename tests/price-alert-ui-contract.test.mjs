@@ -14,14 +14,14 @@ test('page versions critical assets and loads price-alert utilities before the a
   const criticalAssets = [...html.matchAll(/(?:href|src)="(\.\/(?:style\.css|chart-time-utils\.js|price-alert-utils\.js|app\.js)[^"]*)"/g)]
     .map((match) => match[1]);
   assert.deepEqual(criticalAssets, [
-    './style.css?v=20260911-visitor-counter',
-    './chart-time-utils.js?v=20260911-visitor-counter',
-    './price-alert-utils.js?v=20260911-visitor-counter',
-    './app.js?v=20260911-visitor-counter'
+    './style.css?v=20260911-live-cache',
+    './chart-time-utils.js?v=20260911-live-cache',
+    './price-alert-utils.js?v=20260911-live-cache',
+    './app.js?v=20260911-live-cache'
   ]);
 
-  const priceAlertIndex = html.indexOf('./price-alert-utils.js?v=20260911-visitor-counter');
-  const appIndex = html.indexOf('./app.js?v=20260911-visitor-counter');
+  const priceAlertIndex = html.indexOf('./price-alert-utils.js?v=20260911-live-cache');
+  const appIndex = html.indexOf('./app.js?v=20260911-live-cache');
   assert.ok(priceAlertIndex < appIndex, 'price-alert-utils.js loads before app.js');
 });
 

@@ -121,6 +121,30 @@ test('incomplete trend hydration is retryable and never caches an empty result',
   assert.equal(cache.entries.size, 0, 'an unavailable trend must not poison the edge cache');
 });
 
+test('malformed trend windows are retryable and never enter the edge cache', async () => {
+  const cache = createMemoryCache();
+  const snapshot = publishedSnapshot();
+  snapshot.priceChangeWindows['24h'] = { carrot: { rate: 'not-a-number' } };
+  const env = {
+    LATEST_KV: { async get() { return snapshot; } },
+    PRICE_DB: { prepare() { throw new Error('malformed trend must not be served'); } }
+  };
+
+  await withMemoryCache(cache, async () => {
+    const response = await worker.fetch(new Request('https://cache.test/api/price-trends?window=24h'), env);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: 'price_trend_unavailable',
+      window: '24h',
+      retryable: true
+    });
+  });
+
+  assert.equal(cache.entries.size, 0);
+});
+
 test('legacy published snapshots hydrate the cloud history count from a dedicated KV key', async () => {
   const cache = createMemoryCache();
   const legacy = publishedSnapshot();

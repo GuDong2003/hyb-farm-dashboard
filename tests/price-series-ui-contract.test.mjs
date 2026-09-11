@@ -27,3 +27,10 @@ test('a scale request reapplies its viewport after the wider targeted series arr
   assert.match(app, /trendHistoryPromise[\s\S]*?activeTrendChartBounds\(\)[\s\S]*?state\.trendModalVisibleWindowMs/);
   assert.match(app, /button\.dataset\.trendScale === 'all'/);
 });
+
+test('wheel zoom requests a wider crop history when the loaded boundary is reached', () => {
+  assert.match(app, /function trendHistoryWindowForMilliseconds\(value\)/);
+  assert.match(app, /let pendingTrendWheelRequest = null;/);
+  assert.match(app, /loadCropTrendHistory\(state\.trendModalSeedId, trendHistoryWindowForMilliseconds\(nextWindowMs\), false\)/);
+  assert.match(app, /pendingTrendWheelRequest[\s\S]*?startTrendChartViewportTransition/);
+});

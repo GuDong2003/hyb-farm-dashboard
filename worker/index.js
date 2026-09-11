@@ -157,12 +157,23 @@ async function getPriceTrends(request, env) {
 
 function hasPriceTrendWindow(snapshot, windowValue) {
   const windows = snapshot && snapshot.priceChangeWindows;
-  return Boolean(windows
-    && Object.prototype.hasOwnProperty.call(windows, windowValue)
-    && windows[windowValue]
-    && typeof windows[windowValue] === 'object'
-    && !Array.isArray(windows[windowValue])
-    && Object.keys(windows[windowValue]).length > 0);
+  const trends = windows && windows[windowValue];
+  if (!windows || !Object.prototype.hasOwnProperty.call(windows, windowValue)) return false;
+  if (!trends || typeof trends !== 'object' || Array.isArray(trends)) return false;
+  const entries = Object.entries(trends);
+  return entries.length > 0 && entries.every(([, item]) => (
+    item
+      && typeof item === 'object'
+      && !Array.isArray(item)
+      && item.rate !== null
+      && item.rate !== undefined
+      && String(item.rate).trim() !== ''
+      && Number.isFinite(Number(item.rate))
+  ));
+}
+
+function hasCompletePriceTrendWindows(snapshot) {
+  return PRICE_TREND_WINDOW_VALUES.every((windowValue) => hasPriceTrendWindow(snapshot, windowValue));
 }
 
 async function getVisitorUsage(request, env) {
@@ -799,10 +810,7 @@ async function loadLatestSnapshot(env) {
 }
 
 async function hydratePublishedSnapshotWindows(env, snapshot) {
-  const existing = snapshot && snapshot.priceChangeWindows;
-  const complete = existing && PRICE_TREND_WINDOW_VALUES.every((windowValue) => (
-    Object.prototype.hasOwnProperty.call(existing, windowValue)
-  ));
+  const complete = hasCompletePriceTrendWindows(snapshot);
   if (complete) return false;
 
   try {
@@ -922,12 +930,8 @@ function shouldKeepPublishedSnapshot(existing, incoming) {
   const incomingUpdatedAt = Number(incoming && incoming.defaultUpdatedAt) || 0;
   if (existingUpdatedAt > incomingUpdatedAt) return true;
 
-  const existingWindows = existing && existing.priceChangeWindows;
-  const incomingWindows = incoming && incoming.priceChangeWindows;
-  const existingComplete = existingWindows
-    && PRICE_TREND_WINDOW_VALUES.every((windowValue) => Object.prototype.hasOwnProperty.call(existingWindows, windowValue));
-  const incomingComplete = incomingWindows
-    && PRICE_TREND_WINDOW_VALUES.every((windowValue) => Object.prototype.hasOwnProperty.call(incomingWindows, windowValue));
+  const existingComplete = hasCompletePriceTrendWindows(existing);
+  const incomingComplete = hasCompletePriceTrendWindows(incoming);
   return Boolean(existingComplete && !incomingComplete);
 }
 
