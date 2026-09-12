@@ -16,7 +16,7 @@
   const BEIJING_OFFSET_MS = 8 * 60 * MINUTE_MS;
   const PRICE_REFRESH_RETRY_MS = 5 * 60 * 1000;
   const PRICE_REFRESH_MIN_TIMER_MS = 1000;
-  const PRICE_SYNC_DISABLED_MESSAGE = '实时刷新功能暂时停用';
+  const PRICE_SYNC_DISABLED_MESSAGE = '实时抓取功能当前暂未开放';
   const USERSCRIPT_DISABLED_MESSAGE = '同步脚本安装暂时停用';
   const HISTORY_PAGE_SIZE = 50;
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
@@ -210,6 +210,7 @@
       userscriptVersion: '',
       scriptUpdateRequired: false,
       scriptMissing: false,
+      scriptBridgeReady: false,
       syncStatusState: 'idle',
       syncStatusMessage: '等待价格数据',
       error: '',
@@ -1070,9 +1071,8 @@
       const encoded = location.hash.slice('#snapshot='.length);
       const snapshot = JSON.parse(decodeBase64Url(encoded));
       if (!userscriptVersionSupported(snapshot.scriptVersion)) {
-        const error = userscriptUpdateError(snapshot.scriptVersion);
         markUserscriptVersion(snapshot.scriptVersion);
-        const message = `${error.message}；请点击“更新脚本”安装新版本。`;
+        const message = userscriptUpdateMessage(snapshot.scriptVersion);
         setSyncStatus('error', message);
         state.status = message;
         history.replaceState(null, '', location.pathname + location.search);
@@ -1321,6 +1321,21 @@
     return reason || '校验未通过';
   }
 
+  function formatCaptureClock(value) {
+    const timestamp = Number(value);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+    const beijingDate = new Date(timestamp + BEIJING_OFFSET_MS);
+    if (!Number.isFinite(beijingDate.getTime())) return '';
+    return `${String(beijingDate.getUTCHours()).padStart(2, '0')}:${String(beijingDate.getUTCMinutes()).padStart(2, '0')}`;
+  }
+
+  function sharedCaptureSkippedMessage(nextAllowedAt) {
+    const clock = formatCaptureClock(nextAllowedAt);
+    return clock
+      ? `本轮已由其他用户处理，下次可刷新：${clock}`
+      : '本轮已由其他用户处理，请稍后再试';
+  }
+
   function nextFixedPriceCaptureAt(now, minute) {
     const timestamp = Math.floor(Number(now));
     const safeNow = Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now();
@@ -1363,19 +1378,20 @@
   }
 
   function installPriceBridgeListener() {
-    if (!priceCaptureIsEnabled() || priceBridgeListenerInstalled) return;
+    if (priceBridgeListenerInstalled) return;
     priceBridgeListenerInstalled = true;
     window.addEventListener('message', (event) => {
       const data = event && event.data;
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_READY) return;
       const wasMissing = state.scriptMissing;
-      if (data.scriptVersion) markUserscriptVersion(data.scriptVersion);
+      state.scriptBridgeReady = true;
+      markUserscriptVersion(data.scriptVersion);
       state.scriptMissing = false;
       renderUserscriptLink();
       if (state.scriptUpdateRequired) {
-        const error = userscriptUpdateError(data.scriptVersion);
-        setSyncStatus('error', `${error.message}；请点击“更新脚本”安装新版本。`);
-        state.status = `${error.message}；请点击“更新脚本”安装新版本。`;
+        const message = userscriptUpdateMessage(data.scriptVersion);
+        setSyncStatus('error', message);
+        state.status = message;
         render();
         return;
       }
@@ -1416,6 +1432,27 @@
     error.retryable = false;
     error.scriptVersion = String(version || '');
     return error;
+  }
+
+  function userscriptMissingMessage(unresponsive = false) {
+    return unresponsive
+      ? '同步脚本未响应，请刷新 CDK 页面后重试'
+      : `未检测到可用的同步脚本，请安装并启用 v${REQUIRED_USERSCRIPT_VERSION} 后重试`;
+  }
+
+  function userscriptUpdateMessage(version = '') {
+    const normalized = String(version || '').trim();
+    return normalized
+      ? `检测到旧版同步脚本 v${normalized}，请更新到 v${REQUIRED_USERSCRIPT_VERSION}`
+      : `同步脚本需要更新到 v${REQUIRED_USERSCRIPT_VERSION}`;
+  }
+
+  function syncBridgeErrorMessage(data) {
+    const code = String(data && (data.errorCode || data.code) || '').trim();
+    if (code === 'sync_disabled') return syncDisabledMessage();
+    if (code === 'script_update_required') return userscriptUpdateMessage(data && data.scriptVersion);
+    if (code === 'price_sync_gate_unavailable') return '价格同步服务暂时不可用，请稍后重试';
+    return String(data && data.error || '脚本未返回价格');
   }
 
   function renderUserscriptLink() {
@@ -1471,10 +1508,10 @@
       const data = event && event.data;
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_RESPONSE || data.requestId !== requestId) return;
       cleanup();
+      state.scriptBridgeReady = true;
       markUserscriptVersion(data.scriptVersion);
       if (state.scriptUpdateRequired) {
-        const error = userscriptUpdateError(data.scriptVersion);
-        const message = `${error.message}；请点击“更新脚本”安装新版本。`;
+        const message = userscriptUpdateMessage(data.scriptVersion);
         setSyncStatus('error', message);
         state.status = message;
         render();
@@ -1485,19 +1522,19 @@
         const capturedAt = Number(data.capturedAt) || 0;
         if (capturedAt) state.priceSyncObservedAt = Math.max(Number(state.priceSyncObservedAt) || 0, capturedAt);
         if (nextAllowedAt) state.priceSyncNextAllowedAt = nextAllowedAt;
-        const nextText = nextAllowedAt ? `，下次可刷新：${formatTime(nextAllowedAt)}` : '';
-        const message = `共享价格仍在有效期内${nextText}`;
+        const message = sharedCaptureSkippedMessage(nextAllowedAt);
         setSyncStatus('idle', message);
-        state.status = manual ? `本次刷新已跳过：${message}。` : `自动刷新已跳过：${message}。`;
+        state.status = message;
         saveState();
         scheduleAutoRefresh();
         render();
         return;
       }
       if (!data.ok || !data.snapshot) {
-        const detail = String(data.error || '脚本未返回价格');
+        const detail = syncBridgeErrorMessage(data);
         const message = manual ? `刷新失败：${detail}` : `自动获取失败：${detail}`;
-        setSyncStatus('error', message);
+        const statusState = String(data.errorCode || data.code || '') === 'sync_disabled' ? 'warning' : 'error';
+        setSyncStatus(statusState, detail);
         state.status = manual ? message : `${message}；5分钟后自动重试。`;
         if (!manual) scheduleAutoRefresh();
         render();
@@ -1525,7 +1562,7 @@
     timer = window.setTimeout(() => {
       cleanup();
       state.scriptMissing = true;
-      const message = '未检测到同步脚本；请先安装脚本后再刷新';
+      const message = userscriptMissingMessage(state.scriptBridgeReady);
       setSyncStatus('error', message);
       state.status = message;
       renderUserscriptLink();
@@ -3532,10 +3569,10 @@
       return { state: 'busy', text: '正在同步…' };
     }
     if (state.scriptUpdateRequired) {
-      return { state: 'error', text: `同步脚本需要更新到 v${REQUIRED_USERSCRIPT_VERSION}` };
+      return { state: 'error', text: userscriptUpdateMessage(state.userscriptVersion) };
     }
     if (state.scriptMissing) {
-      return { state: 'error', text: '未检测到同步脚本；请先安装脚本后再刷新' };
+      return { state: 'error', text: userscriptMissingMessage(state.scriptBridgeReady) };
     }
     if (state.error) {
       return { state: 'error', text: state.error };
@@ -4427,9 +4464,9 @@
   }
 
   async function init() {
+    installPriceBridgeListener();
     await loadSiteConfig(false);
     await restoreAdminSession();
-    installPriceBridgeListener();
     installAutoRefreshLifecycleListeners();
     window.addEventListener('resize', scheduleTrendChartViewportRefresh, { passive: true });
     document.addEventListener('keydown', (event) => {

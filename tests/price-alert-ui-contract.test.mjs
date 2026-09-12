@@ -164,7 +164,7 @@ test('hidden toggle inputs retain a visible keyboard focus indicator', () => {
 });
 
 test('capture userscript fetches current prices only and leaves trend calculation to the dashboard', () => {
-  assert.match(userscript, /@version\s+0\.6\.0/);
+  assert.match(userscript, /@version\s+0\.6\.1/);
   assert.doesNotMatch(userscript, /includeTrend|granularity|trendRange/);
   assert.match(userscript, /\/api\/farm\/recycle\/prices/);
 });

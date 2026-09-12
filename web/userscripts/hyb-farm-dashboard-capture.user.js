@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong226.com/
-// @version      0.6.0
+// @version      0.6.1
 // @description  为 HYB Farm Dashboard 协作同步当前交易所价格。
 // @updateURL    https://hyb.gudong226.com/userscripts/hyb-farm-dashboard-capture.user.js
 // @downloadURL  https://hyb.gudong226.com/userscripts/hyb-farm-dashboard-capture.user.js
@@ -17,7 +17,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.6.0';
+  const SCRIPT_VERSION = '0.6.1';
   const DASHBOARD_URL = 'https://hyb.gudong226.com/';
   const DASHBOARD_ORIGINS = new Set([
     'https://hyb.gudong.ccwu.cc',
@@ -129,8 +129,9 @@
         body: options.body,
         signal: controller.signal
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw requestError(response.status, data);
+      return data;
     } finally {
       window.clearTimeout(timer);
     }
@@ -173,12 +174,13 @@
         timeout: timeoutMs,
         onload: (response) => {
           window.clearTimeout(timer);
-          if (response.status < 200 || response.status >= 300) {
-            fail(new Error(`HTTP ${response.status}`));
-            return;
-          }
           try {
-            done(response.response || JSON.parse(response.responseText));
+            const data = response.response || JSON.parse(response.responseText || '{}');
+            if (response.status < 200 || response.status >= 300) {
+              fail(requestError(response.status, data));
+              return;
+            }
+            done(data);
           } catch (error) {
             fail(error);
           }
@@ -195,6 +197,15 @@
         }
       });
     });
+  }
+
+  function requestError(status, data) {
+    const code = String(data && (data.error || data.reason) || '').trim();
+    const error = new Error(code || `HTTP ${status}`);
+    error.status = Number(status) || 0;
+    error.code = code;
+    error.requiredScriptVersion = String(data && data.requiredScriptVersion || '');
+    return error;
   }
 
   function encodeSnapshot(data) {
@@ -277,7 +288,8 @@
       showToast('正在获取实时价格...');
       const result = await captureSharedShopSnapshot(0);
       if (result.skipped) {
-        showToast(`共享价格仍在有效期内，下次可刷新：${new Date(result.nextAllowedAt).toLocaleString('zh-CN', { hour12: false })}`);
+        const clock = formatCaptureClock(result.nextAllowedAt);
+        showToast(clock ? `本轮已由其他用户处理，下次可刷新：${clock}` : '本轮已由其他用户处理，请稍后再试');
         return;
       }
       const payload = result.snapshot;
@@ -294,8 +306,18 @@
 
   function friendlyError(error) {
     const message = error && error.name === 'AbortError' ? '请求超时' : String(error && error.message || error);
-    if (/HTTP 401/.test(message)) return '请先登录 cdk.hybgzs.com 后再获取价格';
+    if (error && error.code === 'sync_disabled') return '实时抓取功能当前暂未开放';
+    if (error && error.code === 'script_update_required') {
+      return `同步脚本需要更新到 v${error.requiredScriptVersion || SCRIPT_VERSION}`;
+    }
+    if (Number(error && error.status) === 401 || /HTTP 401/.test(message)) return '请先登录 cdk.hybgzs.com 后再获取价格';
     return message;
+  }
+
+  function formatCaptureClock(value) {
+    const date = new Date(Number(value));
+    if (!Number.isFinite(date.getTime())) return '';
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
   }
 
   function installButton() {
@@ -346,7 +368,14 @@
         }
         window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: true, scriptVersion: SCRIPT_VERSION, snapshot: result.snapshot }, location.origin);
       } catch (error) {
-        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: false, scriptVersion: SCRIPT_VERSION, error: friendlyError(error) }, location.origin);
+        window.postMessage({
+          type: BRIDGE_RESPONSE,
+          requestId: data.requestId,
+          ok: false,
+          scriptVersion: SCRIPT_VERSION,
+          errorCode: String(error && error.code || ''),
+          error: friendlyError(error)
+        }, location.origin);
       }
     });
     window.postMessage({ type: BRIDGE_READY, scriptVersion: SCRIPT_VERSION }, location.origin);

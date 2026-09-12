@@ -102,15 +102,16 @@ test('home sync row tracks local pending uploads and prompts for a missing scrip
   assert.match(app, /pendingUploadSnapshot:\s*null/);
   assert.match(app, /state\.pendingUploadSnapshot\s*=\s*snapshot/);
   assert.match(app, /state\.pendingUploadSnapshot\s*=\s*null/);
-  assert.match(app, /未检测到同步脚本；请先安装脚本后再刷新/);
-  assert.match(app, /请点击“更新脚本”安装新版本/);
+  assert.match(app, /userscriptMissingMessage\(state\.scriptBridgeReady\)/);
+  assert.match(app, /userscriptUpdateMessage\(version = ''\)/);
   assert.match(app, /renderUserscriptLink\(\)/);
 });
 
 test('refresh and upload actions follow card-style busy and pending rules', () => {
   assert.match(requestSource, /setSyncStatus\('busy'/);
   assert.match(requestSource, /state\.scriptMissing\s*=\s*true/);
-  assert.match(requestSource, /未检测到同步脚本；请先安装脚本后再刷新/);
+  assert.match(requestSource, /userscriptMissingMessage\(state\.scriptBridgeReady\)/);
+  assert.match(requestSource, /sharedCaptureSkippedMessage\(nextAllowedAt\)/);
   assert.doesNotMatch(requestSource, /loadCloudDefaultPrices\(/);
   assert.match(actionSource, /state\.pendingUploadSnapshot/);
   assert.match(actionSource, /尚无待上传的本地快照/);

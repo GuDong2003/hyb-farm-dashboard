@@ -96,8 +96,8 @@ test('one granted refresh fetches only the current-price batch and returns 31 pr
     { url: 'https://cdk.hybgzs.com/api/farm/recycle/prices', method: 'GET' }
   ]);
   assert.equal(result.response.ok, true);
-  assert.equal(result.response.scriptVersion, '0.6.0');
-  assert.equal(result.response.snapshot.scriptVersion, '0.6.0');
+  assert.equal(result.response.scriptVersion, '0.6.1');
+  assert.equal(result.response.snapshot.scriptVersion, '0.6.1');
   assert.equal(result.response.snapshot.syncLeaseId, leaseId);
   assert.equal(result.response.snapshot.sourceUpdatedAt, 1789224300000);
   assert.equal(result.response.snapshot.matched, 31);
