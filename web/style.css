@@ -267,6 +267,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   padding: 0 2px;
   cursor: pointer;
 }
+.toolbar-sync-toggle.is-disabled { cursor: not-allowed; opacity: .62; }
 .toolbar-sync-toggle-copy {
   display: grid;
   min-width: 0;
@@ -426,6 +427,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .btn.secondary:hover, .bookmarklet.secondary:hover { background: var(--control-hover); border-color: var(--control-border); }
 .bookmarklet.is-update-required { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
 .bookmarklet.is-update-required:hover { background: var(--warn-bg); }
+.bookmarklet.is-disabled { cursor: not-allowed; opacity: .56; pointer-events: none; }
 .btn.warn { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
 .field { height: 32px; padding: 0 9px; }
 .mini-input { width: 52px; height: 30px; padding: 0 6px; text-align: center; }

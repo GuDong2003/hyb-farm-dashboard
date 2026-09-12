@@ -17,6 +17,7 @@
   'use strict';
 
   const SCRIPT_VERSION = '0.5.1';
+  const SCRIPT_DISABLED = true;
   const DASHBOARD_URL = 'https://hyb.gudong226.com/';
   const DASHBOARD_ORIGINS = new Set([
     'https://hyb.gudong.ccwu.cc',
@@ -428,6 +429,8 @@
     installDashboardBridge();
     if (location.origin === CDK_ORIGIN) installButton();
   }
+
+  if (SCRIPT_DISABLED) return;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot, { once: true });

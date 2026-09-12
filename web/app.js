@@ -14,6 +14,9 @@
   const PRICE_REFRESH_MS = 60 * 60 * 1000;
   const PRICE_REFRESH_RETRY_MS = 5 * 60 * 1000;
   const PRICE_REFRESH_MIN_TIMER_MS = 1000;
+  const PRICE_SYNC_DISABLED = true;
+  const PRICE_SYNC_DISABLED_MESSAGE = '实时刷新功能暂时停用';
+  const USERSCRIPT_DISABLED_MESSAGE = '同步脚本安装暂时停用';
   const HISTORY_PAGE_SIZE = 50;
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
@@ -849,6 +852,12 @@
 
   async function importSnapshotFromHash() {
     if (!location.hash.startsWith('#snapshot=')) return;
+    if (PRICE_SYNC_DISABLED) {
+      history.replaceState(null, '', location.pathname + location.search);
+      state.status = PRICE_SYNC_DISABLED_MESSAGE;
+      setSyncStatus('warning', PRICE_SYNC_DISABLED_MESSAGE);
+      return;
+    }
     try {
       const encoded = location.hash.slice('#snapshot='.length);
       const snapshot = JSON.parse(decodeBase64Url(encoded));
@@ -1074,6 +1083,7 @@
   }
 
   function autoRefreshDue(now) {
+    if (PRICE_SYNC_DISABLED) return false;
     if (!state.config.autoRefreshPrices) return false;
     const importedAt = Number(state.lastImportedAt) || 0;
     return !importedAt || Number(now) - importedAt >= PRICE_REFRESH_MS;
@@ -1088,6 +1098,7 @@
   }
 
   function shouldAutoRequestPrices(force) {
+    if (PRICE_SYNC_DISABLED) return false;
     if (force) return true;
     if (!state.config.autoRefreshPrices) return false;
     if (!hasShopPrices()) return true;
@@ -1095,6 +1106,7 @@
   }
 
   function installPriceBridgeListener() {
+    if (PRICE_SYNC_DISABLED) return;
     window.addEventListener('message', (event) => {
       const data = event && event.data;
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_READY) return;
@@ -1151,6 +1163,13 @@
   function renderUserscriptLink() {
     const link = document.getElementById('userscriptInstallLink');
     if (!link) return;
+    if (PRICE_SYNC_DISABLED) {
+      link.removeAttribute('href');
+      link.setAttribute('aria-disabled', 'true');
+      link.textContent = USERSCRIPT_DISABLED_MESSAGE;
+      link.classList.add('is-disabled');
+      return;
+    }
     link.href = USERSCRIPT_URL;
     link.textContent = state.scriptUpdateRequired ? '更新用户脚本' : '安装用户脚本';
     link.classList.toggle('is-update-required', state.scriptUpdateRequired || state.scriptMissing);
@@ -1165,6 +1184,12 @@
   }
 
   function requestScriptPrices(force) {
+    if (PRICE_SYNC_DISABLED) {
+      state.status = PRICE_SYNC_DISABLED_MESSAGE;
+      setSyncStatus('warning', PRICE_SYNC_DISABLED_MESSAGE);
+      render();
+      return false;
+    }
     if (!shouldAutoRequestPrices(force) || priceBridgeRequest) return false;
 
     const manual = Boolean(force);
@@ -1242,6 +1267,7 @@
   }
 
   function runAutoRefresh() {
+    if (PRICE_SYNC_DISABLED) return false;
     if (!appReady || !state.config.autoRefreshPrices) return false;
     if (state.scriptMissing || state.scriptUpdateRequired) return false;
     if (priceBridgeRequest || !shouldAutoRequestPrices(false)) return false;
@@ -1249,6 +1275,7 @@
   }
 
   function handleAutoRefreshWake() {
+    if (PRICE_SYNC_DISABLED) return;
     if (!appReady || !state.config.autoRefreshPrices) return;
     if (document.visibilityState && document.visibilityState !== 'visible') return;
     runAutoRefresh();
@@ -1267,6 +1294,7 @@
   function scheduleAutoRefresh() {
     if (autoRefreshTimer) window.clearTimeout(autoRefreshTimer);
     autoRefreshTimer = null;
+    if (PRICE_SYNC_DISABLED) return;
     if (!state.config.autoRefreshPrices || state.scriptMissing || state.scriptUpdateRequired) return;
     const delay = autoRefreshDelay(Date.now());
     autoRefreshTimer = window.setTimeout(() => {
@@ -3217,6 +3245,9 @@
   }
 
   function syncStatusView() {
+    if (PRICE_SYNC_DISABLED) {
+      return { state: 'warning', text: PRICE_SYNC_DISABLED_MESSAGE };
+    }
     if (priceBridgeRequest) {
       return { state: 'busy', text: '正在同步…' };
     }
@@ -3258,9 +3289,10 @@
     const sync = syncStatusView();
     const upload = syncUploadStatusView();
     const refreshBusy = Boolean(priceBridgeRequest);
+    const refreshDisabled = PRICE_SYNC_DISABLED || refreshBusy;
     return `
       <div class="toolbar-sync-primary">
-        <button class="btn primary" data-action="refresh-prices" title="通过用户脚本立即获取交易所价格" ${refreshBusy ? 'disabled' : ''}>${refreshBusy ? '↻ 同步中…' : '↻ 立即刷新'}</button>
+        <button class="btn primary" data-action="refresh-prices" title="${PRICE_SYNC_DISABLED ? PRICE_SYNC_DISABLED_MESSAGE : '通过用户脚本立即获取交易所价格'}" ${refreshDisabled ? 'disabled' : ''}>${PRICE_SYNC_DISABLED ? '↻ 刷新暂时停用' : refreshBusy ? '↻ 同步中…' : '↻ 立即刷新'}</button>
         <button class="btn primary" data-action="upload-cloud" title="上传当前本地快照到云端校验池" ${canUploadPendingSnapshot() ? '' : 'disabled'}>上传云端</button>
         <div class="toolbar-sync-status" id="syncStatus" data-state="${sync.state}" aria-live="polite"><span class="toolbar-sync-status-dot" aria-hidden="true"></span><strong>${escapeHtml(sync.text)}</strong></div>
         <span class="toolbar-upload-status" id="syncUploadStatus" data-state="${upload.state}">${escapeHtml(upload.text)}</span>
@@ -3284,15 +3316,17 @@
   function renderToolbarSyncActions() {
     return `
       <div class="toolbar-sync-secondary" aria-label="同步与自动化">
-        <label class="toolbar-sync-toggle" title="页面打开时自动检查最新价格">
-          <span class="toolbar-sync-toggle-copy"><strong>每小时自动刷新</strong><small>页面打开时自动获取最新价格</small></span>
-          <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
+        <label class="toolbar-sync-toggle${PRICE_SYNC_DISABLED ? ' is-disabled' : ''}" title="${PRICE_SYNC_DISABLED ? PRICE_SYNC_DISABLED_MESSAGE : '页面打开时自动检查最新价格'}">
+          <span class="toolbar-sync-toggle-copy"><strong>每小时自动刷新${PRICE_SYNC_DISABLED ? '（暂时停用）' : ''}</strong><small>${PRICE_SYNC_DISABLED ? PRICE_SYNC_DISABLED_MESSAGE : '页面打开时自动获取最新价格'}</small></span>
+          <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices && !PRICE_SYNC_DISABLED ? 'checked' : ''} ${PRICE_SYNC_DISABLED ? 'disabled' : ''} /><span class="toggle-track"></span></span>
         </label>
         <label class="toolbar-sync-toggle" title="抓取完成后提交价格快照">
           <span class="toolbar-sync-toggle-copy"><strong>导入后自动上传</strong><small>抓取完成后提交价格快照</small></span>
           <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
         </label>
-        <a class="bookmarklet secondary${state.scriptUpdateRequired || state.scriptMissing ? ' is-update-required' : ''}" id="userscriptInstallLink" href="${USERSCRIPT_URL}" target="_blank" rel="noopener noreferrer">${state.scriptUpdateRequired ? '更新用户脚本' : '安装用户脚本'}</a>
+        ${PRICE_SYNC_DISABLED
+          ? `<span class="bookmarklet secondary is-disabled" id="userscriptInstallLink" aria-disabled="true">${USERSCRIPT_DISABLED_MESSAGE}</span>`
+          : `<a class="bookmarklet secondary${state.scriptUpdateRequired || state.scriptMissing ? ' is-update-required' : ''}" id="userscriptInstallLink" href="${USERSCRIPT_URL}" target="_blank" rel="noopener noreferrer">${state.scriptUpdateRequired ? '更新用户脚本' : '安装用户脚本'}</a>`}
         <a class="bookmarklet secondary" href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">打开 CDK</a>
       </div>
     `;
@@ -3702,6 +3736,7 @@
     });
     const autoRefreshPrices = document.getElementById('autoRefreshPrices');
     if (autoRefreshPrices) autoRefreshPrices.addEventListener('change', () => {
+      if (PRICE_SYNC_DISABLED) return;
       state.config.autoRefreshPrices = autoRefreshPrices.checked;
       state.status = state.config.autoRefreshPrices ? '已开启每小时自动获取实时价格。' : '已关闭每小时自动获取实时价格。';
       saveState();
@@ -3778,6 +3813,12 @@
       return;
     }
     if (action === 'refresh-prices') {
+      if (PRICE_SYNC_DISABLED) {
+        state.status = PRICE_SYNC_DISABLED_MESSAGE;
+        setSyncStatus('warning', PRICE_SYNC_DISABLED_MESSAGE);
+        render();
+        return;
+      }
       if (!requestScriptPrices(true)) {
         state.status = priceBridgeRequest ? '正在刷新实时价格，请稍候。' : '无法刷新实时价格。';
         render();
