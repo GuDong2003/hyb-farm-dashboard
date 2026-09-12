@@ -32,6 +32,12 @@ test('empty trend responses never become loaded cache entries', () => {
   assert.match(app, /if \(Object\.keys\(trends\)\.length\) out\[windowValue\] = trends;/);
 });
 
+test('local and cloud snapshots merge valid windows instead of clearing them', () => {
+  assert.match(app, /function mergePriceWindowCache\(existing, incoming\)/);
+  assert.match(app, /state\.priceWindowCache = mergePriceWindowCache\(state\.priceWindowCache, priceChangeWindows\);/);
+  assert.match(app, /state\.priceWindowCache = mergePriceWindowCache\(state\.priceWindowCache, cleanCloudWindows\);/);
+});
+
 test('homepage history navigation prefers the cloud snapshot count from the default KV snapshot', () => {
   assert.match(app, /cloudHistoryCount:\s*null,/);
   assert.match(app, /const cloudHistoryCount = Number\(snapshot && snapshot\.historySnapshotCount\)/);

@@ -373,3 +373,52 @@ test('versioned KV snapshots select the newest capture without a mutable pointer
     assert.equal((await response.json()).snapshot.capturedAt, newer.capturedAt);
   });
 });
+
+test('newer incomplete versioned snapshots preserve valid windows from the previous snapshot', async () => {
+  const previous = publishedSnapshot();
+  const incoming = {
+    ...previous,
+    capturedAt: LATEST_AT + 60 * 60 * 1000,
+    defaultUpdatedAt: LATEST_AT + 60 * 60 * 1000,
+    submissionId: 2,
+    priceChangeWindows: {
+      '1h': {
+        carrot: {
+          rate: 20,
+          baseAt: LATEST_AT,
+          endAt: LATEST_AT + 60 * 60 * 1000,
+          basePrice: 100,
+          endPrice: 120
+        }
+      }
+    }
+  };
+  const previousKey = 'latest-snapshot-v1:00001759152000000:00001759152000000';
+  const entries = new Map([[previousKey, previous]]);
+  const writes = [];
+  const env = {
+    LATEST_KV: {
+      async list({ prefix }) {
+        return {
+          keys: Array.from(entries.keys())
+            .filter((key) => key.startsWith(prefix))
+            .map((name) => ({ name }))
+        };
+      },
+      async get(key) {
+        return entries.get(key) || null;
+      },
+      async put(key, value) {
+        const parsed = JSON.parse(value);
+        entries.set(key, parsed);
+        writes.push(parsed);
+      }
+    }
+  };
+
+  assert.equal(await publishLatestSnapshot(env, incoming), true);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(Object.keys(writes[0].priceChangeWindows), WINDOWS);
+  assert.equal(writes[0].priceChangeWindows['1h'].carrot.rate, 20);
+  assert.equal(writes[0].priceChangeWindows['24h'].carrot.rate, 10);
+});

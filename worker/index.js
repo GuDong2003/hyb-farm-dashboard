@@ -172,6 +172,30 @@ function hasPriceTrendWindow(snapshot, windowValue) {
   ));
 }
 
+function normalizePriceChangeWindow(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => (
+    item
+      && typeof item === 'object'
+      && !Array.isArray(item)
+      && item.rate !== null
+      && item.rate !== undefined
+      && String(item.rate).trim() !== ''
+      && Number.isFinite(Number(item.rate))
+  )));
+}
+
+export function mergePriceChangeWindows(existing, incoming) {
+  const merged = {};
+  for (const windowValue of PRICE_TREND_WINDOW_VALUES) {
+    const previous = normalizePriceChangeWindow(existing && existing[windowValue]);
+    const next = normalizePriceChangeWindow(incoming && incoming[windowValue]);
+    const combined = { ...previous, ...next };
+    if (Object.keys(combined).length) merged[windowValue] = combined;
+  }
+  return merged;
+}
+
 function hasCompletePriceTrendWindows(snapshot) {
   return PRICE_TREND_WINDOW_VALUES.every((windowValue) => hasPriceTrendWindow(snapshot, windowValue));
 }
@@ -892,14 +916,21 @@ function normalizePublishedSnapshot(value) {
 export async function publishLatestSnapshot(env, snapshot) {
   if (!env || !env.LATEST_KV || typeof env.LATEST_KV.put !== 'function' || !snapshot) return false;
   try {
+    const published = await readPublishedSnapshot(env);
+    const mergedWindows = mergePriceChangeWindows(
+      published && published.priceChangeWindows,
+      snapshot.priceChangeWindows
+    );
+    const snapshotToPublish = Object.keys(mergedWindows).length
+      ? { ...snapshot, priceChangeWindows: mergedWindows }
+      : snapshot;
     if (typeof env.LATEST_KV.list === 'function') {
-      await env.LATEST_KV.put(snapshotVersionKey(snapshot), JSON.stringify(snapshot));
+      await env.LATEST_KV.put(snapshotVersionKey(snapshotToPublish), JSON.stringify(snapshotToPublish));
       await pruneVersionedSnapshots(env);
       return true;
     }
-    const published = await readPublishedSnapshot(env);
-    if (published && shouldKeepPublishedSnapshot(published, snapshot)) return false;
-    await env.LATEST_KV.put(LATEST_SNAPSHOT_KV_KEY, JSON.stringify(snapshot));
+    if (published && shouldKeepPublishedSnapshot(published, snapshotToPublish)) return false;
+    await env.LATEST_KV.put(LATEST_SNAPSHOT_KV_KEY, JSON.stringify(snapshotToPublish));
     return true;
   } catch (_) {
     // KV is a read optimization; an unavailable KV must not reject a valid upload.

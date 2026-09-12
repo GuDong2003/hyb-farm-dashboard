@@ -872,7 +872,7 @@
       state.prices.shop = cleanPriceMap(prices.shop);
       state.priceChangeRates.shop = cleanSignedNumberMap(priceChangeRates.shop || {});
       state.priceTrends.shop = cleanTrendMap(priceTrends.shop || {});
-      state.priceWindowCache = cleanPriceWindowCache(priceChangeWindows);
+      state.priceWindowCache = mergePriceWindowCache(state.priceWindowCache, priceChangeWindows);
     }
     state.lastImportedAt = capturedAt;
     state.priceOrigin = 'local';
@@ -920,7 +920,7 @@
         && PRICE_ALERT.shouldUseCloudTrendMap(state.priceTrends.shop, cleanCloudTrends, Object.keys(prices || {}));
       if (prices && sameCaptureHasImprovedTrends) {
         state.priceTrends.shop = cleanCloudTrends;
-        if (Object.keys(cleanCloudWindows).length) state.priceWindowCache = cleanCloudWindows;
+        state.priceWindowCache = mergePriceWindowCache(state.priceWindowCache, cleanCloudWindows);
         state.status = `已补全云端 24h 价格趋势：${formatTime(cloudCapturedAt)}。`;
         saveState();
         handlePriceAlertsForNewData();
@@ -930,7 +930,7 @@
         state.prices.shop = cleanPriceMap(prices);
         state.priceChangeRates.shop = cleanSignedNumberMap((priceChangeRates && priceChangeRates.shop) || {});
         state.priceTrends.shop = cleanCloudTrends;
-        state.priceWindowCache = cleanCloudWindows;
+        state.priceWindowCache = mergePriceWindowCache(state.priceWindowCache, cleanCloudWindows);
         state.lastImportedAt = cloudCapturedAt;
         state.priceOrigin = 'cloud';
         state.config.source = 'shop';
@@ -1347,6 +1347,13 @@
       if (Object.keys(trends).length) out[windowValue] = trends;
     });
     return out;
+  }
+
+  function mergePriceWindowCache(existing, incoming) {
+    return Object.assign(
+      cleanPriceWindowCache(existing || {}),
+      cleanPriceWindowCache(incoming || {})
+    );
   }
 
   function priceWindowChangeForSeed(seedId, windowValue) {
