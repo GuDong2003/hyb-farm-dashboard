@@ -15,7 +15,6 @@
   const PRICE_REFRESH_RETRY_MS = 5 * 60 * 1000;
   const PRICE_REFRESH_MIN_TIMER_MS = 1000;
   const PRICE_SYNC_SOURCE_GRACE_MS = 60 * 1000;
-  const PRICE_SYNC_DISABLED = true;
   const PRICE_SYNC_DISABLED_MESSAGE = '实时刷新功能暂时停用';
   const USERSCRIPT_DISABLED_MESSAGE = '同步脚本安装暂时停用';
   const HISTORY_PAGE_SIZE = 50;
@@ -29,6 +28,19 @@
   const CLOUD_SUBMIT_ENDPOINT = '/api/price-submissions';
   const CLOUD_HISTORY_ENDPOINT = '/api/price-history';
   const CLOUD_PRICE_SERIES_ENDPOINT = '/api/price-series';
+  const SITE_CONFIG_ENDPOINT = '/api/site-config';
+  const ADMIN_LOGIN_ENDPOINT = '/api/admin/login';
+  const ADMIN_SESSION_ENDPOINT = '/api/admin/session';
+  const ADMIN_CONFIG_ENDPOINT = '/api/admin/config';
+  const ADMIN_LOGOUT_ENDPOINT = '/api/admin/logout';
+  const ADMIN_CSRF_HEADER = 'X-HYB-Admin-CSRF';
+  const DEFAULT_SITE_CONFIG = Object.freeze({
+    siteEnabled: true,
+    priceCaptureEnabled: false,
+    cloudUploadEnabled: false,
+    maintenanceMessage: '',
+    updatedAt: 0
+  });
   const VISITOR_USAGE_ENDPOINT = '/api/visitor-usage';
   const VISITOR_USAGE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
   const PRICE_TREND_RETRY_MS = 60 * 1000;
@@ -94,6 +106,7 @@
   let dbPromise = null;
   let appReady = false;
   let priceBridgeRequest = null;
+  let priceBridgeListenerInstalled = false;
   let autoRefreshTimer = null;
   let visitorUsageTimer = null;
   let visitorUsageLoading = false;
@@ -197,7 +210,9 @@
       scriptMissing: false,
       syncStatusState: 'idle',
       syncStatusMessage: '等待价格数据',
-      error: ''
+      error: '',
+      siteConfig: { ...DEFAULT_SITE_CONFIG },
+      admin: { authenticated: false, csrfToken: '', expiresAt: 0, loginOpen: false, busy: false, error: '' }
     };
 
     try {
@@ -220,6 +235,8 @@
       merged.priceWindowCache = cleanPriceWindowCache(stored.priceWindowCache || {});
       merged.trendHistoryCache = {};
       merged.priceOrigin = typeof stored.priceOrigin === 'string' ? stored.priceOrigin : '';
+      merged.siteConfig = { ...base.siteConfig };
+      merged.admin = { ...base.admin };
       merged.priceSyncObservedAt = Number(merged.priceSyncObservedAt) > 0 ? Math.floor(Number(merged.priceSyncObservedAt)) : 0;
       merged.priceSyncNextAllowedAt = Number(merged.priceSyncNextAllowedAt) > 0 ? Math.floor(Number(merged.priceSyncNextAllowedAt)) : 0;
       return merged;
@@ -310,6 +327,183 @@
       priceSyncNextAllowedAt: state.priceSyncNextAllowedAt,
       priceOrigin: state.priceOrigin
     }));
+  }
+
+  function normalizeSiteConfig(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    return {
+      siteEnabled: typeof source.siteEnabled === 'boolean' ? source.siteEnabled : DEFAULT_SITE_CONFIG.siteEnabled,
+      priceCaptureEnabled: typeof source.priceCaptureEnabled === 'boolean' ? source.priceCaptureEnabled : DEFAULT_SITE_CONFIG.priceCaptureEnabled,
+      cloudUploadEnabled: typeof source.cloudUploadEnabled === 'boolean' ? source.cloudUploadEnabled : DEFAULT_SITE_CONFIG.cloudUploadEnabled,
+      maintenanceMessage: typeof source.maintenanceMessage === 'string' ? source.maintenanceMessage.slice(0, 240) : DEFAULT_SITE_CONFIG.maintenanceMessage,
+      updatedAt: Number.isFinite(Number(source.updatedAt)) && Number(source.updatedAt) > 0 ? Math.floor(Number(source.updatedAt)) : DEFAULT_SITE_CONFIG.updatedAt
+    };
+  }
+
+  function priceCaptureIsEnabled() {
+    return Boolean(state.siteConfig && state.siteConfig.siteEnabled && state.siteConfig.priceCaptureEnabled);
+  }
+
+  function cloudUploadIsEnabled() {
+    return Boolean(state.siteConfig && state.siteConfig.siteEnabled && state.siteConfig.cloudUploadEnabled);
+  }
+
+  function syncDisabledMessage() {
+    return state.siteConfig && state.siteConfig.maintenanceMessage
+      ? state.siteConfig.maintenanceMessage
+      : PRICE_SYNC_DISABLED_MESSAGE;
+  }
+
+  async function loadSiteConfig(renderAfter = false) {
+    try {
+      const response = await fetch(SITE_CONFIG_ENDPOINT, {
+        headers: { accept: 'application/json' },
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      state.siteConfig = normalizeSiteConfig(data && data.config);
+    } catch (_) {
+      state.siteConfig = { ...DEFAULT_SITE_CONFIG };
+    }
+    if (renderAfter) render();
+    return state.siteConfig;
+  }
+
+  function clearAdminSession(message = '') {
+    state.admin.authenticated = false;
+    state.admin.csrfToken = '';
+    state.admin.expiresAt = 0;
+    state.admin.busy = false;
+    state.admin.error = message;
+  }
+
+  async function restoreAdminSession() {
+    try {
+      const response = await fetch(ADMIN_SESSION_ENDPOINT, { headers: { accept: 'application/json' }, cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        clearAdminSession();
+        return false;
+      }
+      state.admin.authenticated = true;
+      state.admin.csrfToken = String(data.csrfToken || '');
+      state.admin.expiresAt = Number(data.expiresAt) || 0;
+      state.admin.error = '';
+      if (data.config) state.siteConfig = normalizeSiteConfig(data.config);
+      return true;
+    } catch (_) {
+      clearAdminSession();
+      return false;
+    }
+  }
+
+  async function loginAdmin(password) {
+    state.admin.busy = true;
+    state.admin.error = '';
+    render();
+    try {
+      const response = await fetch(ADMIN_LOGIN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ password: String(password || '') })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        const retryAfter = Number(response.headers.get('retry-after'));
+        state.admin.busy = false;
+        state.admin.error = response.status === 429 && retryAfter > 0
+          ? `登录暂时锁定，请约 ${Math.ceil(retryAfter / 60)} 分钟后重试。`
+          : response.status === 503 ? '管理员服务暂时不可用，请稍后重试。' : '管理员密码错误或登录失败。';
+        render();
+        return false;
+      }
+      state.admin.authenticated = true;
+      state.admin.csrfToken = String(data.csrfToken || '');
+      state.admin.expiresAt = Number(data.expiresAt) || 0;
+      state.admin.loginOpen = false;
+      state.admin.busy = false;
+      state.admin.error = '';
+      await loadSiteConfig(false);
+      state.status = '管理员模式已开启。';
+      render();
+      return true;
+    } catch (_) {
+      state.admin.busy = false;
+      state.admin.error = '管理员服务暂时不可用，请稍后重试。';
+      render();
+      return false;
+    }
+  }
+
+  async function saveAdminConfig() {
+    if (!state.admin.authenticated || !state.admin.csrfToken) return false;
+    const payload = {
+      siteEnabled: Boolean(document.getElementById('adminSiteEnabled') && document.getElementById('adminSiteEnabled').checked),
+      priceCaptureEnabled: Boolean(document.getElementById('adminPriceCaptureEnabled') && document.getElementById('adminPriceCaptureEnabled').checked),
+      cloudUploadEnabled: Boolean(document.getElementById('adminCloudUploadEnabled') && document.getElementById('adminCloudUploadEnabled').checked),
+      maintenanceMessage: String((document.getElementById('adminMaintenanceMessage') || {}).value || '').slice(0, 240)
+    };
+    state.admin.busy = true;
+    state.admin.error = '';
+    render();
+    try {
+      const response = await fetch(ADMIN_CONFIG_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          [ADMIN_CSRF_HEADER]: state.admin.csrfToken
+        },
+        cache: 'no-store',
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401 || response.status === 403) {
+        clearAdminSession('管理员会话已失效，请重新登录。');
+        render();
+        return false;
+      }
+      if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      state.siteConfig = normalizeSiteConfig(data.config);
+      state.admin.busy = false;
+      state.status = '管理员配置已保存。';
+      await loadSiteConfig(false);
+      installPriceBridgeListener();
+      if (priceCaptureIsEnabled()) {
+        runAutoRefresh();
+        scheduleAutoRefresh();
+      }
+      render();
+      return true;
+    } catch (error) {
+      state.admin.busy = false;
+      state.admin.error = String(error && error.message || error) === 'site_config_unavailable'
+        ? '配置暂时无法保存，请稍后重试。'
+        : '管理员配置保存失败，请稍后重试。';
+      render();
+      return false;
+    }
+  }
+
+  async function logoutAdmin() {
+    if (!state.admin.csrfToken) {
+      clearAdminSession();
+      render();
+      return;
+    }
+    try {
+      await fetch(ADMIN_LOGOUT_ENDPOINT, {
+        method: 'POST',
+        headers: { accept: 'application/json', [ADMIN_CSRF_HEADER]: state.admin.csrfToken },
+        cache: 'no-store'
+      });
+    } finally {
+      clearAdminSession();
+      state.status = '已退出管理员模式。';
+      render();
+    }
   }
 
   function normalizeLandCounts(value) {
@@ -859,10 +1053,10 @@
 
   async function importSnapshotFromHash() {
     if (!location.hash.startsWith('#snapshot=')) return;
-    if (PRICE_SYNC_DISABLED) {
+    if (!priceCaptureIsEnabled()) {
       history.replaceState(null, '', location.pathname + location.search);
-      state.status = PRICE_SYNC_DISABLED_MESSAGE;
-      setSyncStatus('warning', PRICE_SYNC_DISABLED_MESSAGE);
+      state.status = syncDisabledMessage();
+      setSyncStatus('warning', syncDisabledMessage());
       return;
     }
     try {
@@ -1053,6 +1247,10 @@
   }
 
   function queueCloudSubmission(snapshot) {
+    if (!cloudUploadIsEnabled()) {
+      setCloudUploadStatus('warning', '云端上传暂时停用');
+      return;
+    }
     setCloudUploadStatus('busy', '自动上传中…');
     render();
     submitSnapshotToCloud(snapshot).then((result) => {
@@ -1120,7 +1318,7 @@
   }
 
   function autoRefreshDue(now) {
-    if (PRICE_SYNC_DISABLED) return false;
+    if (!priceCaptureIsEnabled()) return false;
     if (!state.config.autoRefreshPrices) return false;
     const nextAllowedAt = Number(state.priceSyncNextAllowedAt) || 0;
     if (nextAllowedAt > Number(now)) return false;
@@ -1141,7 +1339,7 @@
   }
 
   function shouldAutoRequestPrices(force) {
-    if (PRICE_SYNC_DISABLED) return false;
+    if (!priceCaptureIsEnabled()) return false;
     if (force) return true;
     if (!state.config.autoRefreshPrices) return false;
     if (!hasShopPrices()) return true;
@@ -1149,7 +1347,8 @@
   }
 
   function installPriceBridgeListener() {
-    if (PRICE_SYNC_DISABLED) return;
+    if (!priceCaptureIsEnabled() || priceBridgeListenerInstalled) return;
+    priceBridgeListenerInstalled = true;
     window.addEventListener('message', (event) => {
       const data = event && event.data;
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_READY) return;
@@ -1206,7 +1405,7 @@
   function renderUserscriptLink() {
     const link = document.getElementById('userscriptInstallLink');
     if (!link) return;
-    if (PRICE_SYNC_DISABLED) {
+    if (!priceCaptureIsEnabled()) {
       link.removeAttribute('href');
       link.setAttribute('aria-disabled', 'true');
       link.textContent = USERSCRIPT_DISABLED_MESSAGE;
@@ -1214,6 +1413,8 @@
       return;
     }
     link.href = USERSCRIPT_URL;
+    link.removeAttribute('aria-disabled');
+    link.classList.remove('is-disabled');
     link.textContent = state.scriptUpdateRequired ? '更新用户脚本' : '安装用户脚本';
     link.classList.toggle('is-update-required', state.scriptUpdateRequired || state.scriptMissing);
   }
@@ -1227,9 +1428,9 @@
   }
 
   function requestScriptPrices(force) {
-    if (PRICE_SYNC_DISABLED) {
-      state.status = PRICE_SYNC_DISABLED_MESSAGE;
-      setSyncStatus('warning', PRICE_SYNC_DISABLED_MESSAGE);
+    if (!priceCaptureIsEnabled()) {
+      state.status = syncDisabledMessage();
+      setSyncStatus('warning', syncDisabledMessage());
       render();
       return false;
     }
@@ -1329,7 +1530,7 @@
   }
 
   function runAutoRefresh() {
-    if (PRICE_SYNC_DISABLED) return false;
+    if (!priceCaptureIsEnabled()) return false;
     if (!appReady || !state.config.autoRefreshPrices) return false;
     if (state.scriptMissing || state.scriptUpdateRequired) return false;
     if (priceBridgeRequest || !shouldAutoRequestPrices(false)) return false;
@@ -1337,7 +1538,7 @@
   }
 
   function handleAutoRefreshWake() {
-    if (PRICE_SYNC_DISABLED) return;
+    if (!priceCaptureIsEnabled()) return;
     if (!appReady || !state.config.autoRefreshPrices) return;
     if (document.visibilityState && document.visibilityState !== 'visible') return;
     runAutoRefresh();
@@ -1356,7 +1557,7 @@
   function scheduleAutoRefresh() {
     if (autoRefreshTimer) window.clearTimeout(autoRefreshTimer);
     autoRefreshTimer = null;
-    if (PRICE_SYNC_DISABLED) return;
+    if (!priceCaptureIsEnabled()) return;
     if (!state.config.autoRefreshPrices || state.scriptMissing || state.scriptUpdateRequired) return;
     const delay = autoRefreshDelay(Date.now());
     autoRefreshTimer = window.setTimeout(() => {
@@ -2004,6 +2205,7 @@
           </nav>
         </header>
         <main class="main">
+          ${state.siteConfig && !state.siteConfig.siteEnabled ? `<section class="site-maintenance" role="status"><strong>站点维护中</strong><span>${escapeHtml(state.siteConfig.maintenanceMessage || '当前仅保留已有数据展示，新的同步与上传暂时关闭。')}</span></section>` : ''}
           ${state.view === 'settings' ? renderSettings() : state.view === 'history' ? renderHistoryView() : renderTableView(rows, bestRevenue, bestExpDay, bestExpHour)}
         </main>
       </div>
@@ -3307,8 +3509,8 @@
   }
 
   function syncStatusView() {
-    if (PRICE_SYNC_DISABLED) {
-      return { state: 'warning', text: PRICE_SYNC_DISABLED_MESSAGE };
+    if (!priceCaptureIsEnabled()) {
+      return { state: 'warning', text: syncDisabledMessage() };
     }
     if (priceBridgeRequest) {
       return { state: 'busy', text: '正在同步…' };
@@ -3329,6 +3531,7 @@
   }
 
   function syncUploadStatusView() {
+    if (!cloudUploadIsEnabled()) return { state: 'warning', text: '云端上传暂时停用' };
     if (state.cloudUploadState === 'busy') return { state: 'busy', text: state.cloudUploadMessage || '正在上传本地快照…' };
     if (state.cloudUploadState === 'error') return { state: 'error', text: state.cloudUploadMessage || '上传失败' };
     if (state.cloudUploadState === 'warning') return { state: 'warning', text: state.cloudUploadMessage || '云端未采用' };
@@ -3343,6 +3546,7 @@
 
   function canUploadPendingSnapshot() {
     return Boolean(state.pendingUploadSnapshot)
+      && cloudUploadIsEnabled()
       && !priceBridgeRequest
       && state.cloudUploadState !== 'busy';
   }
@@ -3351,11 +3555,12 @@
     const sync = syncStatusView();
     const upload = syncUploadStatusView();
     const refreshBusy = Boolean(priceBridgeRequest);
-    const refreshDisabled = PRICE_SYNC_DISABLED || refreshBusy;
+    const refreshDisabled = !priceCaptureIsEnabled() || refreshBusy;
+    const refreshTitle = !priceCaptureIsEnabled() ? syncDisabledMessage() : '通过用户脚本立即获取交易所价格';
     return `
       <div class="toolbar-sync-primary">
-        <button class="btn primary" data-action="refresh-prices" title="${PRICE_SYNC_DISABLED ? PRICE_SYNC_DISABLED_MESSAGE : '通过用户脚本立即获取交易所价格'}" ${refreshDisabled ? 'disabled' : ''}>${PRICE_SYNC_DISABLED ? '↻ 刷新暂时停用' : refreshBusy ? '↻ 同步中…' : '↻ 立即刷新'}</button>
-        <button class="btn primary" data-action="upload-cloud" title="上传当前本地快照到云端校验池" ${canUploadPendingSnapshot() ? '' : 'disabled'}>上传云端</button>
+        <button class="btn primary" data-action="refresh-prices" title="${escapeHtml(refreshTitle)}" ${refreshDisabled ? 'disabled' : ''}>${!priceCaptureIsEnabled() ? '↻ 刷新暂时停用' : refreshBusy ? '↻ 同步中…' : '↻ 立即刷新'}</button>
+        <button class="btn primary" data-action="upload-cloud" title="${cloudUploadIsEnabled() ? '上传当前本地快照到云端校验池' : '云端上传暂时停用'}" ${canUploadPendingSnapshot() ? '' : 'disabled'}>上传云端</button>
         <div class="toolbar-sync-status" id="syncStatus" data-state="${sync.state}" aria-live="polite"><span class="toolbar-sync-status-dot" aria-hidden="true"></span><strong>${escapeHtml(sync.text)}</strong></div>
         <span class="toolbar-upload-status" id="syncUploadStatus" data-state="${upload.state}">${escapeHtml(upload.text)}</span>
         <span class="toolbar-source-status">价格来源：交易所售价</span>
@@ -3376,17 +3581,19 @@
   }
 
   function renderToolbarSyncActions() {
+    const captureEnabled = priceCaptureIsEnabled();
+    const uploadEnabled = cloudUploadIsEnabled();
     return `
       <div class="toolbar-sync-secondary" aria-label="同步与自动化">
-        <label class="toolbar-sync-toggle${PRICE_SYNC_DISABLED ? ' is-disabled' : ''}" title="${PRICE_SYNC_DISABLED ? PRICE_SYNC_DISABLED_MESSAGE : '页面打开时自动检查最新价格'}">
-          <span class="toolbar-sync-toggle-copy"><strong>每小时自动刷新${PRICE_SYNC_DISABLED ? '（暂时停用）' : ''}</strong><small>${PRICE_SYNC_DISABLED ? PRICE_SYNC_DISABLED_MESSAGE : '页面打开时自动获取最新价格'}</small></span>
-          <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices && !PRICE_SYNC_DISABLED ? 'checked' : ''} ${PRICE_SYNC_DISABLED ? 'disabled' : ''} /><span class="toggle-track"></span></span>
+        <label class="toolbar-sync-toggle${captureEnabled ? '' : ' is-disabled'}" title="${captureEnabled ? '页面打开时自动检查最新价格' : syncDisabledMessage()}">
+          <span class="toolbar-sync-toggle-copy"><strong>每小时自动刷新${captureEnabled ? '' : '（暂时停用）'}</strong><small>${captureEnabled ? '页面打开时自动获取最新价格' : syncDisabledMessage()}</small></span>
+          <span class="toggle-control"><input id="autoRefreshPrices" type="checkbox" ${state.config.autoRefreshPrices && captureEnabled ? 'checked' : ''} ${captureEnabled ? '' : 'disabled'} /><span class="toggle-track"></span></span>
         </label>
-        <label class="toolbar-sync-toggle" title="抓取完成后提交价格快照">
-          <span class="toolbar-sync-toggle-copy"><strong>导入后自动上传</strong><small>抓取完成后提交价格快照</small></span>
-          <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices ? 'checked' : ''} /><span class="toggle-track"></span></span>
+        <label class="toolbar-sync-toggle${uploadEnabled ? '' : ' is-disabled'}" title="${uploadEnabled ? '抓取完成后提交价格快照' : '云端上传暂时停用'}">
+          <span class="toolbar-sync-toggle-copy"><strong>导入后自动上传${uploadEnabled ? '' : '（暂时停用）'}</strong><small>${uploadEnabled ? '抓取完成后提交价格快照' : '云端上传暂时停用'}</small></span>
+          <span class="toggle-control"><input id="autoUploadPrices" type="checkbox" ${state.config.autoUploadPrices && uploadEnabled ? 'checked' : ''} ${uploadEnabled ? '' : 'disabled'} /><span class="toggle-track"></span></span>
         </label>
-        ${PRICE_SYNC_DISABLED
+        ${!captureEnabled
           ? `<span class="bookmarklet secondary is-disabled" id="userscriptInstallLink" aria-disabled="true">${USERSCRIPT_DISABLED_MESSAGE}</span>`
           : `<a class="bookmarklet secondary${state.scriptUpdateRequired || state.scriptMissing ? ' is-update-required' : ''}" id="userscriptInstallLink" href="${USERSCRIPT_URL}" target="_blank" rel="noopener noreferrer">${state.scriptUpdateRequired ? '更新用户脚本' : '安装用户脚本'}</a>`}
         <a class="bookmarklet secondary" href="https://cdk.hybgzs.com/" target="_blank" rel="noopener noreferrer">打开 CDK</a>
@@ -3525,6 +3732,73 @@
     `;
   }
 
+  function renderAdminPanel() {
+    const config = state.siteConfig || DEFAULT_SITE_CONFIG;
+    const admin = state.admin || {};
+    const loginDialog = admin.loginOpen && !admin.authenticated
+      ? `
+        <div class="admin-login-backdrop" data-admin-login-backdrop>
+          <form class="admin-login-dialog" id="adminLoginForm" autocomplete="off">
+            <div class="settings-head compact">
+              <div><span class="settings-kicker">受保护入口</span><h3>管理员登录</h3><p>登录只在本页面临时保留会话，不保存密码。</p></div>
+              <button class="icon-button" type="button" data-action="admin-cancel-login" aria-label="关闭">×</button>
+            </div>
+            <label class="admin-field">管理员密码<input id="adminPassword" type="password" autocomplete="off" required /></label>
+            ${admin.error ? `<div class="admin-error" role="alert">${escapeHtml(admin.error)}</div>` : ''}
+            <div class="settings-actions admin-dialog-actions">
+              <button class="btn" type="button" data-action="admin-cancel-login">取消</button>
+              <button class="btn primary" type="submit" ${admin.busy ? 'disabled' : ''}>${admin.busy ? '登录中…' : '登录'}</button>
+            </div>
+          </form>
+        </div>
+      `
+      : '';
+    return `
+      <section class="settings-panel settings-group-wide settings-admin-panel" data-settings-group="admin">
+        <div class="settings-head compact">
+          <div>
+            <span class="settings-kicker">受保护入口</span>
+            <h2>管理员控制</h2>
+            <p>${admin.authenticated ? '管理站点访问、价格抓取、云端上传和维护提示。' : '只有管理员登录后才能修改站点功能开关。'}</p>
+          </div>
+          ${admin.authenticated ? '<span class="admin-session-badge">管理员已登录</span>' : ''}
+        </div>
+        ${admin.authenticated
+          ? `
+            <div class="toggle-list admin-control-grid">
+              <label class="toggle-row">
+                <span class="toggle-text"><strong>站点访问</strong><small>关闭后保留已有数据，只显示维护状态。</small></span>
+                <span class="toggle-control"><input id="adminSiteEnabled" type="checkbox" ${config.siteEnabled ? 'checked' : ''} ${admin.busy ? 'disabled' : ''} /><span class="toggle-track"></span></span>
+              </label>
+              <label class="toggle-row">
+                <span class="toggle-text"><strong>当前价格抓取</strong><small>关闭后页面和旧脚本都不能请求 CDK 价格。</small></span>
+                <span class="toggle-control"><input id="adminPriceCaptureEnabled" type="checkbox" ${config.priceCaptureEnabled ? 'checked' : ''} ${admin.busy ? 'disabled' : ''} /><span class="toggle-track"></span></span>
+              </label>
+              <label class="toggle-row">
+                <span class="toggle-text"><strong>云端上传</strong><small>关闭后提交接口不会访问 D1。</small></span>
+                <span class="toggle-control"><input id="adminCloudUploadEnabled" type="checkbox" ${config.cloudUploadEnabled ? 'checked' : ''} ${admin.busy ? 'disabled' : ''} /><span class="toggle-track"></span></span>
+              </label>
+            </div>
+            <label class="admin-field admin-message-field">维护提示<textarea id="adminMaintenanceMessage" maxlength="240" rows="3" placeholder="可选，例如：价格同步维护中">${escapeHtml(config.maintenanceMessage)}</textarea></label>
+            ${admin.error ? `<div class="admin-error" role="alert">${escapeHtml(admin.error)}</div>` : ''}
+            <div class="settings-actions">
+              <button class="btn primary" type="button" data-action="admin-save-config" ${admin.busy ? 'disabled' : ''}>${admin.busy ? '保存中…' : '保存配置'}</button>
+              <button class="btn" type="button" data-action="admin-logout" ${admin.busy ? 'disabled' : ''}>退出管理员模式</button>
+              ${config.updatedAt ? `<span class="admin-updated-at">上次更新：${escapeHtml(formatTime(config.updatedAt))}</span>` : ''}
+            </div>
+          `
+          : `
+            <div class="admin-entry-row">
+              <span class="settings-copy">管理员密码不会写入浏览器存储、导出文件或 URL。</span>
+              <button class="btn primary" type="button" data-action="admin-open-login">管理员入口</button>
+            </div>
+            ${admin.error ? `<div class="admin-error" role="alert">${escapeHtml(admin.error)}</div>` : ''}
+          `}
+      </section>
+      ${loginDialog}
+    `;
+  }
+
   function renderSettings() {
     return `
       <div class="settings settings-page">
@@ -3615,6 +3889,7 @@
             <button class="btn warn" data-action="clear-history">清空历史</button>
           </div>
         </section>
+        ${renderAdminPanel()}
       </div>
     `;
   }
@@ -3798,7 +4073,7 @@
     });
     const autoRefreshPrices = document.getElementById('autoRefreshPrices');
     if (autoRefreshPrices) autoRefreshPrices.addEventListener('change', () => {
-      if (PRICE_SYNC_DISABLED) return;
+      if (!priceCaptureIsEnabled()) return;
       state.config.autoRefreshPrices = autoRefreshPrices.checked;
       state.status = state.config.autoRefreshPrices ? '已开启每小时自动获取实时价格。' : '已关闭每小时自动获取实时价格。';
       saveState();
@@ -3808,6 +4083,7 @@
     });
     const autoUploadPrices = document.getElementById('autoUploadPrices');
     if (autoUploadPrices) autoUploadPrices.addEventListener('change', () => {
+      if (!cloudUploadIsEnabled()) return;
       state.config.autoUploadPrices = autoUploadPrices.checked;
       state.status = state.config.autoUploadPrices ? '已开启导入后自动上传云端。' : '已关闭导入后自动上传云端。';
       saveState();
@@ -3850,6 +4126,19 @@
     });
     const importFile = document.getElementById('importFile');
     if (importFile) importFile.addEventListener('change', importJsonFile);
+
+    const adminLoginForm = document.getElementById('adminLoginForm');
+    if (adminLoginForm) adminLoginForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const password = document.getElementById('adminPassword');
+      void loginAdmin(password ? password.value : '');
+    });
+    const adminCancelLogin = document.querySelector('[data-action="admin-cancel-login"]');
+    if (adminCancelLogin) adminCancelLogin.addEventListener('click', () => {
+      state.admin.loginOpen = false;
+      state.admin.error = '';
+      render();
+    });
   }
 
   async function handleAction(event) {
@@ -3874,10 +4163,24 @@
       render();
       return;
     }
+    if (action === 'admin-open-login') {
+      state.admin.loginOpen = true;
+      state.admin.error = '';
+      render();
+      return;
+    }
+    if (action === 'admin-save-config') {
+      await saveAdminConfig();
+      return;
+    }
+    if (action === 'admin-logout') {
+      await logoutAdmin();
+      return;
+    }
     if (action === 'refresh-prices') {
-      if (PRICE_SYNC_DISABLED) {
-        state.status = PRICE_SYNC_DISABLED_MESSAGE;
-        setSyncStatus('warning', PRICE_SYNC_DISABLED_MESSAGE);
+      if (!priceCaptureIsEnabled()) {
+        state.status = syncDisabledMessage();
+        setSyncStatus('warning', syncDisabledMessage());
         render();
         return;
       }
@@ -3888,6 +4191,12 @@
       return;
     }
     if (action === 'upload-cloud') {
+      if (!cloudUploadIsEnabled()) {
+        state.status = '云端上传暂时停用';
+        setCloudUploadStatus('warning', '云端上传暂时停用');
+        render();
+        return;
+      }
       const snapshot = state.pendingUploadSnapshot;
       if (!snapshot) {
         state.status = '尚无待上传的本地快照';
@@ -4098,6 +4407,8 @@
   }
 
   async function init() {
+    await loadSiteConfig(false);
+    await restoreAdminSession();
     installPriceBridgeListener();
     installAutoRefreshLifecycleListeners();
     window.addEventListener('resize', scheduleTrendChartViewportRefresh, { passive: true });
