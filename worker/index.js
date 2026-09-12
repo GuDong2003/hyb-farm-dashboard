@@ -1045,13 +1045,13 @@ async function queryPriceSeriesRows(env, seedId, windowValue) {
       WHERE accepted = 1
     )
     SELECT id, submitted_at, accepted_at, captured_at, source,
-      json_extract(prices_json, '${pricePath}') AS price
+      json_extract(prices_json, ?) AS price
     FROM price_submissions
     CROSS JOIN latest
     WHERE accepted = 1
       AND (? = 0 OR captured_at >= latest.latest_at - ?)
     ORDER BY captured_at ASC, id ASC
-  `).bind(windowMs, lookbackMs).all();
+  `).bind(pricePath, windowMs, lookbackMs).all();
   return (result && result.results) || [];
 }
 
