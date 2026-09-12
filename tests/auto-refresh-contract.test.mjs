@@ -10,7 +10,7 @@ test('auto refresh delay follows the last successful import and retries overdue 
   assert.match(helperSource, /function autoRefreshDelay\(now\)/);
 
   const createHelpers = new Function(
-    'PRICE_SYNC_DISABLED',
+    'priceCaptureIsEnabled',
     'state',
     'PRICE_REFRESH_MS',
     'PRICE_REFRESH_RETRY_MS',
@@ -18,7 +18,7 @@ test('auto refresh delay follows the last successful import and retries overdue 
     `${helperSource}; return { autoRefreshDue, autoRefreshDelay };`
   );
   const state = { config: { autoRefreshPrices: true }, lastImportedAt: 0 };
-  const helpers = createHelpers(false, state, 60 * 60 * 1000, 5 * 60 * 1000, 1000);
+  const helpers = createHelpers(() => true, state, 60 * 60 * 1000, 5 * 60 * 1000, 1000);
 
   assert.equal(helpers.autoRefreshDue(0), true);
   assert.equal(helpers.autoRefreshDelay(0), 5 * 60 * 1000);
@@ -37,7 +37,7 @@ test('auto refresh delay follows the last successful import and retries overdue 
 test('auto refresh waits for the shared gate deadline instead of polling early', () => {
   const helperSource = app.match(/function autoRefreshDue\(now\)[\s\S]*?(?=\n  function shouldAutoRequestPrices)/)?.[0] || '';
   const createHelpers = new Function(
-    'PRICE_SYNC_DISABLED',
+    'priceCaptureIsEnabled',
     'state',
     'PRICE_REFRESH_MS',
     'PRICE_REFRESH_RETRY_MS',
@@ -49,22 +49,22 @@ test('auto refresh waits for the shared gate deadline instead of polling early',
     lastImportedAt: 10 * 60 * 1000,
     priceSyncNextAllowedAt: 90 * 60 * 1000
   };
-  const helpers = createHelpers(false, state, 60 * 60 * 1000, 5 * 60 * 1000, 1000);
+  const helpers = createHelpers(() => true, state, 60 * 60 * 1000, 5 * 60 * 1000, 1000);
 
   assert.equal(helpers.autoRefreshDue(80 * 60 * 1000), false);
   assert.equal(helpers.autoRefreshDelay(80 * 60 * 1000), 10 * 60 * 1000);
   assert.equal(helpers.autoRefreshDue(90 * 60 * 1000), true);
 });
 
-test('temporary refresh kill switch blocks manual and automatic price refresh', () => {
-  assert.match(app, /const PRICE_SYNC_DISABLED\s*=\s*true;/);
+test('runtime site config blocks manual and automatic price refresh', () => {
+  assert.match(app, /function priceCaptureIsEnabled\(\)/);
   const requestSource = app.match(/function requestScriptPrices\(force\)[\s\S]*?(?=\n  function runAutoRefresh)/)?.[0] || '';
   const autoSource = app.match(/function runAutoRefresh\(\)[\s\S]*?(?=\n  function handleAutoRefreshWake)/)?.[0] || '';
   const scheduleSource = app.match(/function scheduleAutoRefresh\(\)[\s\S]*?(?=\n  function cleanPriceMap)/)?.[0] || '';
-  assert.match(requestSource, /if \(PRICE_SYNC_DISABLED\)/);
-  assert.match(autoSource, /if \(PRICE_SYNC_DISABLED\)/);
-  assert.match(scheduleSource, /if \(PRICE_SYNC_DISABLED\)/);
-  assert.match(app, /function syncStatusView\(\)[\s\S]*?if \(PRICE_SYNC_DISABLED\)/);
+  assert.match(requestSource, /if \(!priceCaptureIsEnabled\(\)\)/);
+  assert.match(autoSource, /if \(!priceCaptureIsEnabled\(\)\)/);
+  assert.match(scheduleSource, /if \(!priceCaptureIsEnabled\(\)\)/);
+  assert.match(app, /function syncStatusView\(\)[\s\S]*?if \(!priceCaptureIsEnabled\(\)\)/);
   assert.match(app, /data-action="refresh-prices"[\s\S]*?disabled/);
   assert.match(app, /id="autoRefreshPrices"[\s\S]*?disabled/);
 });

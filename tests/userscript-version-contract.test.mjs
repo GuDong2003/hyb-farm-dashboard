@@ -18,9 +18,11 @@ test('farm userscript publishes a version and Tampermonkey update URLs', () => {
   assert.match(userscript, /scriptVersion:\s*SCRIPT_VERSION,[\s\S]*?prices:/);
 });
 
-test('farm userscript installation and capture are temporarily disabled', () => {
-  assert.match(userscript, /const SCRIPT_DISABLED\s*=\s*true;/);
-  assert.match(userscript, /if \(SCRIPT_DISABLED\) return;/);
+test('farm userscript starts normally and the server gate controls capture', () => {
+  assert.doesNotMatch(userscript, /SCRIPT_DISABLED/);
+  assert.match(userscript, /PRICE_SYNC_GATE_URL/);
+  assert.match(userscript, /captureSharedShopSnapshot/);
+  assert.match(app, /function priceCaptureIsEnabled\(\)/);
   assert.match(app, /同步脚本安装暂时停用/);
   assert.match(app, /userscriptInstallLink/);
 });

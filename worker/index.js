@@ -169,7 +169,7 @@ export default {
 };
 
 async function loginAdmin(request, env) {
-  if (!isSecureRequest(request)) return adminAuthFailureResponse(400, 'admin_login_failed');
+  if (!isSecureRequest(request) || !hasSameOrigin(request)) return adminAuthFailureResponse(403, 'admin_login_failed');
 
   let body;
   try {
@@ -187,7 +187,7 @@ async function loginAdmin(request, env) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         password,
-        ip: String(request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown')
+        ip: String(request.headers.get('cf-connecting-ip') || 'unknown')
       })
     }));
     const data = await response.json().catch(() => ({}));

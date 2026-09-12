@@ -11,13 +11,14 @@ HYB Farm Dashboard 是一个面向 HYB 农场的作物收益、经验效率与�
 ### 价格采集与同步
 
 - 通过用户脚本获取 31 种普通及 VIP 作物的交易所售价。
-- 页面会校验用户脚本版本；检测到旧版时会把“安装用户脚本”切换为“更新用户脚本”，并要求更新到至少 v0.5.1。
+- 页面会校验用户脚本版本；检测到旧版时会把“安装用户脚本”切换为“更新用户脚本”，并要求更新到至少 v0.6.0。
 - 支持打开页面自动导入、立即刷新和每小时自动刷新。
-- 价格导入时额外读取 CDK 的当前总经验和当前地块等级，自动更新本地计算参数；这些农场数据不会进入云端价格快照。
+- 用户脚本只读取当前交易所价格；农场经验和地块等级由页面本地维护，不会进入云端价格快照。
 - 自动刷新按上次成功导入时间计时；页面从后台恢复、重新获得焦点或网络恢复时会补做检查，桥接失败会在 5 分钟后重试。
 - 支持手动修改当前价格。
 - 自动比较本地快照与云端默认快照的采集时间，优先采用较新的数据。
 - 支持手动上传价格，或在导入后自动上传到云端校验池。
+- 设置页提供受保护的单管理员入口，可控制站点访问、当前价格抓取、云端上传和维护提示；配置读取失败时抓取与上传默认关闭。
 - 支持 `1h`、`6h`、`12h`、`24h`、`7d`、`30d` 涨跌幅区间；主页与单作物曲线统一按可见区间的首末历史价格计算，不足两个时间点时不显示误导性的零涨跌。
 - 按完整 24 小时涨幅提供价格提醒：普通阈值默认 8%、异常阈值默认 20%，两档均可在设置中修改。
 - 顶栏公告汇总全部达标作物；浏览器系统通知与站内弹窗可分别开关，弹窗支持按当前作物设置“今日不再提醒”。
@@ -130,6 +131,11 @@ cdk.hybgzs.com
 | `GET` | `/api/price-history` | 用户主动打开历史页面时获取完整云端快照 |
 | `GET` | `/api/price-series?seedId=carrot&window=7d` | 只获取指定作物与时间窗口的历史曲线（按组合边缘缓存） |
 | `GET` / `POST` | `/api/visitor-usage` | 读取或登记匿名累计访客数（仅 Durable Object，实时读取） |
+| `GET` | `/api/site-config` | 获取公开站点开关（不含认证信息，实时读取） |
+| `POST` | `/api/admin/login` | 使用 Worker Secret 登录管理员会话 |
+| `GET` | `/api/admin/session` | 恢复管理员会话并轮换 CSRF 值 |
+| `POST` | `/api/admin/config` | 在 Origin + CSRF 校验后保存站点开关 |
+| `POST` | `/api/admin/logout` | 清除管理员会话 |
 
 `/api/default-prices` 返回的 `snapshot.historySnapshotCount` 是云端已接受快照总数。它随最新快照一起发布到 KV，主页显示该字段时不需要读取完整历史接口；旧 KV 快照会兼容读取 `history-count-v1` 迁移键。
 
@@ -152,8 +158,11 @@ npm run dev
 ```bash
 npx wrangler login
 npx wrangler d1 migrations apply hyb-farm-dashboard-db --remote
+npx wrangler secret put ADMIN_PASSWORD
 npm run deploy
 ```
+
+`ADMIN_PASSWORD` 必须通过 Wrangler 的交互式输入设置，不要把密码写入命令参数、Shell 历史、仓库、KV、D1 或日志。管理员认证使用 Durable Object migration `v3`，部署前会由 Wrangler 自动应用；首次启用前建议先轮换曾经在聊天或其他渠道共享过的密码。
 
 只验证 Worker 和静态资源、不上传时：
 

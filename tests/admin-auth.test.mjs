@@ -94,6 +94,13 @@ test('logout clears a valid session only after origin and csrf checks', async ()
   const csrf = loginBody.csrfToken;
   const cookie = (login.headers.get('set-cookie') || '').split(';', 1)[0];
 
+  const csrfRejected = await worker.fetch(adminRequest('/api/admin/logout', null, {
+    cookie,
+    origin: 'https://farm.test',
+    csrf: 'wrong-csrf-token'
+  }), env);
+  assert.equal(csrfRejected.status, 403);
+
   const rejected = await worker.fetch(adminRequest('/api/admin/logout', null, {
     cookie,
     origin: 'https://evil.test',
@@ -108,6 +115,18 @@ test('logout clears a valid session only after origin and csrf checks', async ()
   }), env);
   assert.equal(loggedOut.status, 200);
   assert.match(loggedOut.headers.get('set-cookie') || '', /Max-Age=0/);
+});
+
+test('expired sessions are rejected without revealing session state', async () => {
+  const env = createEnv();
+  const login = await worker.fetch(adminRequest('/api/admin/login', { password: 'test-secret' }), env);
+  const cookie = (login.headers.get('set-cookie') || '').split(';', 1)[0];
+  const sessionEntry = [...env.ADMIN_AUTH.storage.values.entries()].find(([key]) => key.startsWith('admin-session:'));
+  sessionEntry[1].expiresAt = Date.now() - 1;
+  const response = await worker.fetch(adminRequest('/api/admin/session', null, { cookie }), env);
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { ok: false, error: 'admin_auth_required' });
 });
 
 test('session storage keeps only hashes and timestamps', async () => {
