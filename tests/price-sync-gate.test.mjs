@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import worker, { PriceSyncGate } from '../worker/index.js';
+import worker, { PriceSyncGate, getPriceSyncSchedule } from '../worker/index.js';
 
 function createStorage(entries = {}) {
   const values = new Map(Object.entries(entries));
@@ -49,12 +49,41 @@ function enabledKv() {
         siteEnabled: true,
         priceCaptureEnabled: true,
         cloudUploadEnabled: true,
+        priceCaptureMinute: 1,
         maintenanceMessage: '',
         updatedAt: 1
       };
     }
   };
 }
+
+test('fixed capture schedule uses the configured Beijing minute', () => {
+  const beforeTarget = getPriceSyncSchedule(Date.parse('2026-09-13T04:00:00.000Z'), 1);
+  assert.equal(beforeTarget.due, false);
+  assert.equal(beforeTarget.nextSlotAt, Date.parse('2026-09-13T04:01:00.000Z'));
+
+  const afterTarget = getPriceSyncSchedule(Date.parse('2026-09-13T04:06:00.000Z'), 5);
+  assert.equal(afterTarget.due, true);
+  assert.equal(afterTarget.nextSlotAt, Date.parse('2026-09-13T05:05:00.000Z'));
+});
+
+test('price sync gate waits for the configured fixed minute before granting', async () => {
+  const gate = createGateNamespace();
+  const originalNow = Date.now;
+  try {
+    Date.now = () => Date.parse('2026-09-13T04:00:00.000Z');
+    const before = await (await internalGateRequest(gate, '/acquire', { captureMinute: 1 })).json();
+    assert.equal(before.granted, false);
+    assert.equal(before.reason, 'scheduled');
+    assert.equal(before.nextAllowedAt, Date.parse('2026-09-13T04:01:00.000Z'));
+
+    Date.now = () => Date.parse('2026-09-13T04:02:00.000Z');
+    const due = await (await internalGateRequest(gate, '/acquire', { captureMinute: 1 })).json();
+    assert.equal(due.granted, true);
+  } finally {
+    Date.now = originalNow;
+  }
+});
 
 async function internalGateRequest(gate, path, body) {
   const stub = gate.get(gate.idFromName('global'));
@@ -122,26 +151,33 @@ test('an abandoned expired lease can be replaced by another user', async () => {
   assert.notEqual(result.leaseId, '00000000-0000-4000-8000-000000000000');
 });
 
-test('a completed upload aligns the next capture to one hour after the upstream timestamp', async () => {
+test('a completed upload aligns the next capture to the next fixed Beijing minute', async () => {
   const gate = createGateNamespace();
-  const acquired = await (await internalGateRequest(gate, '/acquire', {})).json();
-  const sourceUpdatedAt = Date.now() - 5 * 60 * 1000;
-  const capturedAt = Date.now();
-  const completed = await (await internalGateRequest(gate, '/complete', {
-    leaseId: acquired.leaseId,
-    sourceUpdatedAt,
-    capturedAt
-  })).json();
+  const originalNow = Date.now;
+  try {
+    Date.now = () => Date.parse('2026-09-13T04:02:00.000Z');
+    const acquired = await (await internalGateRequest(gate, '/acquire', { captureMinute: 1 })).json();
+    const sourceUpdatedAt = Date.now() - 5 * 60 * 1000;
+    const capturedAt = Date.now();
+    const completed = await (await internalGateRequest(gate, '/complete', {
+      leaseId: acquired.leaseId,
+      sourceUpdatedAt,
+      capturedAt
+    })).json();
 
-  assert.equal(completed.completed, true);
-  assert.equal(completed.latestCapturedAt, capturedAt);
-  assert.equal(completed.sourceUpdatedAt, sourceUpdatedAt);
-  assert.equal(completed.nextAllowedAt, sourceUpdatedAt + 61 * 60 * 1000);
+    assert.equal(completed.completed, true);
+    assert.equal(completed.latestCapturedAt, capturedAt);
+    assert.equal(completed.sourceUpdatedAt, sourceUpdatedAt);
+    assert.equal(completed.nextAllowedAt, Date.parse('2026-09-13T05:01:00.000Z'));
 
-  const denied = await (await internalGateRequest(gate, '/acquire', {})).json();
-  assert.equal(denied.granted, false);
-  assert.equal(denied.reason, 'fresh_snapshot');
-  assert.equal(denied.nextAllowedAt, completed.nextAllowedAt);
+    Date.now = () => Date.parse('2026-09-13T04:03:00.000Z');
+    const denied = await (await internalGateRequest(gate, '/acquire', { captureMinute: 1 })).json();
+    assert.equal(denied.granted, false);
+    assert.equal(denied.reason, 'fresh_snapshot');
+    assert.equal(denied.nextAllowedAt, completed.nextAllowedAt);
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test('old scripts and missing gate bindings fail before any source work can be granted', async () => {

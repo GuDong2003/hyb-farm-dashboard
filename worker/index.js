@@ -33,6 +33,8 @@ const SEED_IDS = [
 ];
 
 const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+const BEIJING_OFFSET_MS = 8 * 60 * MINUTE_MS;
 const REQUIRED_USERSCRIPT_VERSION = '0.6.0';
 const MIN_MATCHED_PRICES = 15;
 const MAX_PRICE_USD = 1000000;
@@ -78,9 +80,9 @@ const MAX_PUBLISHED_SNAPSHOT_VERSIONS = 8;
 const PRICE_SYNC_GATE_NAME = 'global';
 const PRICE_SYNC_LEASE_MS = 3 * 60 * 1000;
 const PRICE_SYNC_RETRY_COOLDOWN_MS = 60 * 1000;
-const PRICE_SYNC_SOURCE_GRACE_MS = 60 * 1000;
 const PRICE_SYNC_ACTIVE_LEASE_KEY = 'activeLease';
-const PRICE_SYNC_NEXT_ALLOWED_KEY = 'nextAllowedAt';
+const PRICE_SYNC_RETRY_ALLOWED_KEY = 'retryAllowedAt';
+const PRICE_SYNC_COMPLETED_SLOT_KEY = 'completedSlotAt';
 const PRICE_SYNC_LATEST_CAPTURED_KEY = 'latestCapturedAt';
 const PRICE_SYNC_SOURCE_UPDATED_KEY = 'sourceUpdatedAt';
 const PRICE_SYNC_COOLDOWN_REASON_KEY = 'cooldownReason';
@@ -100,6 +102,7 @@ export const DEFAULT_SITE_CONFIG = Object.freeze({
   siteEnabled: true,
   priceCaptureEnabled: false,
   cloudUploadEnabled: false,
+  priceCaptureMinute: 1,
   maintenanceMessage: '',
   updatedAt: 0
 });
@@ -252,6 +255,9 @@ async function updateAdminConfig(request, env) {
       return jsonResponse({ ok: false, error: 'invalid_site_config' }, 400, { 'cache-control': 'no-store' });
     }
   }
+  if (Object.prototype.hasOwnProperty.call(input, 'priceCaptureMinute') && !isValidPriceCaptureMinute(input.priceCaptureMinute)) {
+    return jsonResponse({ ok: false, error: 'invalid_site_config' }, 400, { 'cache-control': 'no-store' });
+  }
   if (Object.prototype.hasOwnProperty.call(input, 'maintenanceMessage') && typeof input.maintenanceMessage !== 'string') {
     return jsonResponse({ ok: false, error: 'invalid_site_config' }, 400, { 'cache-control': 'no-store' });
   }
@@ -261,6 +267,7 @@ async function updateAdminConfig(request, env) {
     siteEnabled: Object.prototype.hasOwnProperty.call(input, 'siteEnabled') ? input.siteEnabled : current.siteEnabled,
     priceCaptureEnabled: Object.prototype.hasOwnProperty.call(input, 'priceCaptureEnabled') ? input.priceCaptureEnabled : current.priceCaptureEnabled,
     cloudUploadEnabled: Object.prototype.hasOwnProperty.call(input, 'cloudUploadEnabled') ? input.cloudUploadEnabled : current.cloudUploadEnabled,
+    priceCaptureMinute: Object.prototype.hasOwnProperty.call(input, 'priceCaptureMinute') ? input.priceCaptureMinute : current.priceCaptureMinute,
     maintenanceMessage: Object.prototype.hasOwnProperty.call(input, 'maintenanceMessage') ? input.maintenanceMessage : current.maintenanceMessage,
     updatedAt: Date.now()
   });
@@ -334,9 +341,32 @@ export function normalizeSiteConfig(value) {
     siteEnabled: typeof source.siteEnabled === 'boolean' ? source.siteEnabled : DEFAULT_SITE_CONFIG.siteEnabled,
     priceCaptureEnabled: typeof source.priceCaptureEnabled === 'boolean' ? source.priceCaptureEnabled : DEFAULT_SITE_CONFIG.priceCaptureEnabled,
     cloudUploadEnabled: typeof source.cloudUploadEnabled === 'boolean' ? source.cloudUploadEnabled : DEFAULT_SITE_CONFIG.cloudUploadEnabled,
+    priceCaptureMinute: normalizePriceCaptureMinute(source.priceCaptureMinute),
     maintenanceMessage: typeof source.maintenanceMessage === 'string' ? source.maintenanceMessage.slice(0, 240) : DEFAULT_SITE_CONFIG.maintenanceMessage,
     updatedAt: Number.isFinite(Number(source.updatedAt)) && Number(source.updatedAt) > 0 ? Math.floor(Number(source.updatedAt)) : DEFAULT_SITE_CONFIG.updatedAt
   };
+}
+
+export function isValidPriceCaptureMinute(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 59;
+}
+
+export function normalizePriceCaptureMinute(value) {
+  const minute = Number(value);
+  return isValidPriceCaptureMinute(minute) ? minute : DEFAULT_SITE_CONFIG.priceCaptureMinute;
+}
+
+export function getPriceSyncSchedule(now = Date.now(), captureMinute = DEFAULT_SITE_CONFIG.priceCaptureMinute) {
+  const timestamp = Math.floor(Number(now));
+  const safeNow = Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now();
+  const minute = normalizePriceCaptureMinute(captureMinute);
+  const beijingNow = safeNow + BEIJING_OFFSET_MS;
+  const beijingHourStart = Math.floor(beijingNow / REFRESH_INTERVAL_MS) * REFRESH_INTERVAL_MS;
+  const currentTarget = beijingHourStart + minute * MINUTE_MS - BEIJING_OFFSET_MS;
+  const due = safeNow >= currentTarget;
+  const slotAt = due ? currentTarget : currentTarget - REFRESH_INTERVAL_MS;
+  const nextSlotAt = due ? currentTarget + REFRESH_INTERVAL_MS : currentTarget;
+  return { due, slotAt, nextSlotAt, captureMinute: minute };
 }
 
 async function logoutAdmin(request, env) {
@@ -840,7 +870,10 @@ async function postPriceSyncGate(request, env) {
 
   const path = action === 'acquire' ? '/acquire' : '/release';
   const payload = action === 'acquire'
-    ? { observedCapturedAt: Number(body && body.observedCapturedAt) || 0 }
+    ? {
+      observedCapturedAt: Number(body && body.observedCapturedAt) || 0,
+      captureMinute: siteConfig.priceCaptureMinute
+    }
     : { leaseId: String(body && body.leaseId || '') };
   try {
     return await stub.fetch(new Request(`https://price-sync-gate${path}`, {
@@ -960,33 +993,31 @@ export class PriceSyncGate {
     }
     if (activeLease) await this.state.storage.delete(PRICE_SYNC_ACTIVE_LEASE_KEY);
 
-    const observedCapturedAt = normalizePriceSyncTimestamp(body && body.observedCapturedAt, now);
+    const captureMinute = normalizePriceCaptureMinute(body && body.captureMinute);
+    const schedule = getPriceSyncSchedule(now, captureMinute);
     const storedLatestCapturedAt = normalizePriceSyncTimestamp(
       await this.state.storage.get(PRICE_SYNC_LATEST_CAPTURED_KEY),
       now
     );
+    const observedCapturedAt = normalizePriceSyncTimestamp(body && body.observedCapturedAt, now);
     const latestCapturedAt = Math.max(observedCapturedAt, storedLatestCapturedAt);
-    let nextAllowedAt = normalizePriceSyncTimestamp(
-      await this.state.storage.get(PRICE_SYNC_NEXT_ALLOWED_KEY),
-      Number.MAX_SAFE_INTEGER
+    const retryAllowedAt = normalizePriceSyncTimestamp(
+      await this.state.storage.get(PRICE_SYNC_RETRY_ALLOWED_KEY),
+      now
     );
-    if (observedCapturedAt > storedLatestCapturedAt) {
-      nextAllowedAt = Math.max(
-        nextAllowedAt,
-        observedCapturedAt + REFRESH_INTERVAL_MS + PRICE_SYNC_SOURCE_GRACE_MS
-      );
-      await this.state.storage.put({
-        [PRICE_SYNC_LATEST_CAPTURED_KEY]: observedCapturedAt,
-        [PRICE_SYNC_NEXT_ALLOWED_KEY]: nextAllowedAt,
-        [PRICE_SYNC_COOLDOWN_REASON_KEY]: 'fresh_snapshot'
-      });
-    }
-    if (nextAllowedAt > now) {
-      const storedReason = String(await this.state.storage.get(PRICE_SYNC_COOLDOWN_REASON_KEY) || 'fresh_snapshot');
+    const completedSlotAt = normalizePriceSyncTimestamp(
+      await this.state.storage.get(PRICE_SYNC_COMPLETED_SLOT_KEY),
+      now
+    );
+    if (!schedule.due || completedSlotAt === schedule.slotAt || retryAllowedAt > now) {
+      const retrying = retryAllowedAt > now;
+      const completed = completedSlotAt === schedule.slotAt;
+      const nextAllowedAt = retrying ? retryAllowedAt : schedule.nextSlotAt;
+      const reason = retrying ? 'retry_cooldown' : (completed ? 'fresh_snapshot' : 'scheduled');
       return jsonResponse({
         ok: true,
         granted: false,
-        reason: storedReason === 'retry_cooldown' ? storedReason : 'fresh_snapshot',
+        reason,
         nextAllowedAt,
         capturedAt: latestCapturedAt || 0
       }, 200, { 'cache-control': 'no-store' });
@@ -994,14 +1025,20 @@ export class PriceSyncGate {
 
     const leaseId = crypto.randomUUID();
     const leaseExpiresAt = now + PRICE_SYNC_LEASE_MS;
-    await this.state.storage.put(PRICE_SYNC_ACTIVE_LEASE_KEY, { leaseId, expiresAt: leaseExpiresAt });
+    await this.state.storage.put(PRICE_SYNC_ACTIVE_LEASE_KEY, {
+      leaseId,
+      expiresAt: leaseExpiresAt,
+      slotAt: schedule.slotAt,
+      captureMinute
+    });
     return jsonResponse({
       ok: true,
       granted: true,
       leaseId,
       leaseExpiresAt,
       nextAllowedAt: leaseExpiresAt,
-      capturedAt: latestCapturedAt || 0
+      capturedAt: latestCapturedAt || 0,
+      slotAt: schedule.slotAt
     }, 200, { 'cache-control': 'no-store' });
   }
 
@@ -1015,7 +1052,7 @@ export class PriceSyncGate {
     const nextAllowedAt = Date.now() + PRICE_SYNC_RETRY_COOLDOWN_MS;
     await this.state.storage.delete(PRICE_SYNC_ACTIVE_LEASE_KEY);
     await this.state.storage.put({
-      [PRICE_SYNC_NEXT_ALLOWED_KEY]: nextAllowedAt,
+      [PRICE_SYNC_RETRY_ALLOWED_KEY]: nextAllowedAt,
       [PRICE_SYNC_COOLDOWN_REASON_KEY]: 'retry_cooldown'
     });
     return jsonResponse({ ok: true, released: true, nextAllowedAt }, 200, { 'cache-control': 'no-store' });
@@ -1047,13 +1084,12 @@ export class PriceSyncGate {
     const now = Date.now();
     const capturedAt = normalizePriceSyncTimestamp(body && body.capturedAt, now) || now;
     const sourceUpdatedAt = normalizePriceSyncTimestamp(body && body.sourceUpdatedAt, now) || capturedAt;
-    const nextAllowedAt = Math.max(
-      sourceUpdatedAt + REFRESH_INTERVAL_MS + PRICE_SYNC_SOURCE_GRACE_MS,
-      now + PRICE_SYNC_RETRY_COOLDOWN_MS
-    );
+    const slotAt = normalizePriceSyncTimestamp(activeLease.slotAt, now) || getPriceSyncSchedule(now, activeLease.captureMinute).slotAt;
+    const nextAllowedAt = slotAt + REFRESH_INTERVAL_MS;
     await this.state.storage.delete(PRICE_SYNC_ACTIVE_LEASE_KEY);
     await this.state.storage.put({
-      [PRICE_SYNC_NEXT_ALLOWED_KEY]: nextAllowedAt,
+      [PRICE_SYNC_COMPLETED_SLOT_KEY]: slotAt,
+      [PRICE_SYNC_RETRY_ALLOWED_KEY]: 0,
       [PRICE_SYNC_LATEST_CAPTURED_KEY]: capturedAt,
       [PRICE_SYNC_SOURCE_UPDATED_KEY]: sourceUpdatedAt,
       [PRICE_SYNC_COOLDOWN_REASON_KEY]: 'fresh_snapshot'

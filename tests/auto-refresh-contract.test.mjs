@@ -56,6 +56,27 @@ test('auto refresh waits for the shared gate deadline instead of polling early',
   assert.equal(helpers.autoRefreshDue(90 * 60 * 1000), true);
 });
 
+test('local refresh deadline follows the configured fixed Beijing minute', () => {
+  const helperSource = app.match(/function nextFixedPriceCaptureAt\(now, minute\)[\s\S]*?(?=\n  function autoRefreshDue)/)?.[0] || '';
+  assert.match(helperSource, /function nextFixedPriceCaptureAt\(now, minute\)/);
+  const createHelper = new Function(
+    'BEIJING_OFFSET_MS',
+    'PRICE_REFRESH_MS',
+    'MINUTE_MS',
+    `${helperSource}; return nextFixedPriceCaptureAt;`
+  );
+  const nextFixedPriceCaptureAt = createHelper(8 * 60 * 60 * 1000, 60 * 60 * 1000, 60 * 1000);
+
+  assert.equal(
+    nextFixedPriceCaptureAt(Date.parse('2026-09-13T04:01:20.000Z'), 1),
+    Date.parse('2026-09-13T05:01:00.000Z')
+  );
+  assert.equal(
+    nextFixedPriceCaptureAt(Date.parse('2026-09-13T04:01:20.000Z'), 5),
+    Date.parse('2026-09-13T04:05:00.000Z')
+  );
+});
+
 test('runtime site config blocks manual and automatic price refresh', () => {
   assert.match(app, /function priceCaptureIsEnabled\(\)/);
   const requestSource = app.match(/function requestScriptPrices\(force\)[\s\S]*?(?=\n  function runAutoRefresh)/)?.[0] || '';

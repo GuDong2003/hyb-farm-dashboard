@@ -7,11 +7,13 @@ import { dirname, join } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const app = readFileSync(join(root, 'web/app.js'), 'utf8');
 
-test('settings markup contains the administrator entry and four controls', () => {
+test('settings markup contains the administrator entry and capture schedule control', () => {
   assert.match(app, /管理员入口/);
   assert.match(app, /siteEnabled/);
   assert.match(app, /priceCaptureEnabled/);
   assert.match(app, /cloudUploadEnabled/);
+  assert.match(app, /priceCaptureMinute/);
+  assert.match(app, /adminPriceCaptureMinute/);
   assert.match(app, /maintenanceMessage/);
 });
 

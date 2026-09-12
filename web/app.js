@@ -12,9 +12,10 @@
   const DB_VERSION = 1;
   const SNAPSHOT_STORE = 'snapshots';
   const PRICE_REFRESH_MS = 60 * 60 * 1000;
+  const MINUTE_MS = 60 * 1000;
+  const BEIJING_OFFSET_MS = 8 * 60 * MINUTE_MS;
   const PRICE_REFRESH_RETRY_MS = 5 * 60 * 1000;
   const PRICE_REFRESH_MIN_TIMER_MS = 1000;
-  const PRICE_SYNC_SOURCE_GRACE_MS = 60 * 1000;
   const PRICE_SYNC_DISABLED_MESSAGE = '实时刷新功能暂时停用';
   const USERSCRIPT_DISABLED_MESSAGE = '同步脚本安装暂时停用';
   const HISTORY_PAGE_SIZE = 50;
@@ -38,6 +39,7 @@
     siteEnabled: true,
     priceCaptureEnabled: false,
     cloudUploadEnabled: false,
+    priceCaptureMinute: 1,
     maintenanceMessage: '',
     updatedAt: 0
   });
@@ -335,6 +337,9 @@
       siteEnabled: typeof source.siteEnabled === 'boolean' ? source.siteEnabled : DEFAULT_SITE_CONFIG.siteEnabled,
       priceCaptureEnabled: typeof source.priceCaptureEnabled === 'boolean' ? source.priceCaptureEnabled : DEFAULT_SITE_CONFIG.priceCaptureEnabled,
       cloudUploadEnabled: typeof source.cloudUploadEnabled === 'boolean' ? source.cloudUploadEnabled : DEFAULT_SITE_CONFIG.cloudUploadEnabled,
+      priceCaptureMinute: Number.isInteger(Number(source.priceCaptureMinute)) && Number(source.priceCaptureMinute) >= 0 && Number(source.priceCaptureMinute) <= 59
+        ? Number(source.priceCaptureMinute)
+        : DEFAULT_SITE_CONFIG.priceCaptureMinute,
       maintenanceMessage: typeof source.maintenanceMessage === 'string' ? source.maintenanceMessage.slice(0, 240) : DEFAULT_SITE_CONFIG.maintenanceMessage,
       updatedAt: Number.isFinite(Number(source.updatedAt)) && Number(source.updatedAt) > 0 ? Math.floor(Number(source.updatedAt)) : DEFAULT_SITE_CONFIG.updatedAt
     };
@@ -443,6 +448,7 @@
       siteEnabled: Boolean(document.getElementById('adminSiteEnabled') && document.getElementById('adminSiteEnabled').checked),
       priceCaptureEnabled: Boolean(document.getElementById('adminPriceCaptureEnabled') && document.getElementById('adminPriceCaptureEnabled').checked),
       cloudUploadEnabled: Boolean(document.getElementById('adminCloudUploadEnabled') && document.getElementById('adminCloudUploadEnabled').checked),
+      priceCaptureMinute: Number((document.getElementById('adminPriceCaptureMinute') || {}).value),
       maintenanceMessage: String((document.getElementById('adminMaintenanceMessage') || {}).value || '').slice(0, 240)
     };
     state.admin.busy = true;
@@ -470,6 +476,7 @@
       state.admin.busy = false;
       state.status = '管理员配置已保存。';
       await loadSiteConfig(false);
+      state.priceSyncNextAllowedAt = nextFixedPriceCaptureAt(Date.now(), state.siteConfig.priceCaptureMinute);
       installPriceBridgeListener();
       if (priceCaptureIsEnabled()) {
         runAutoRefresh();
@@ -1098,10 +1105,7 @@
     state.lastImportedAt = capturedAt;
     const sourceUpdatedAt = Number(snapshot.sourceUpdatedAt) || capturedAt;
     state.priceSyncObservedAt = Math.max(Number(state.priceSyncObservedAt) || 0, sourceUpdatedAt);
-    state.priceSyncNextAllowedAt = Math.max(
-      Number(state.priceSyncNextAllowedAt) || 0,
-      sourceUpdatedAt + PRICE_REFRESH_MS + PRICE_SYNC_SOURCE_GRACE_MS
-    );
+    state.priceSyncNextAllowedAt = nextFixedPriceCaptureAt(capturedAt, state.siteConfig && state.siteConfig.priceCaptureMinute);
     state.priceOrigin = 'local';
     state.config.source = 'shop';
     state.pendingUploadSnapshot = snapshot;
@@ -1136,9 +1140,9 @@
         const previousObservedAt = Number(state.priceSyncObservedAt) || 0;
         const previousNextAllowedAt = Number(state.priceSyncNextAllowedAt) || 0;
         state.priceSyncObservedAt = Math.max(Number(state.priceSyncObservedAt) || 0, cloudSourceUpdatedAt);
-        state.priceSyncNextAllowedAt = Math.max(
-          Number(state.priceSyncNextAllowedAt) || 0,
-          cloudSourceUpdatedAt + PRICE_REFRESH_MS + PRICE_SYNC_SOURCE_GRACE_MS
+        state.priceSyncNextAllowedAt = nextFixedPriceCaptureAt(
+          cloudCapturedAt || cloudSourceUpdatedAt,
+          state.siteConfig && state.siteConfig.priceCaptureMinute
         );
         changed = changed
           || state.priceSyncObservedAt !== previousObservedAt
@@ -1315,6 +1319,18 @@
     if (reason === 'price_out_of_range') return '存在异常价格';
     if (reason === 'future_captured_at') return '时间异常';
     return reason || '校验未通过';
+  }
+
+  function nextFixedPriceCaptureAt(now, minute) {
+    const timestamp = Math.floor(Number(now));
+    const safeNow = Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now();
+    const numericMinute = Number(minute);
+    const captureMinute = Number.isInteger(numericMinute) && numericMinute >= 0 && numericMinute <= 59 ? numericMinute : DEFAULT_SITE_CONFIG.priceCaptureMinute;
+    const beijingNow = safeNow + BEIJING_OFFSET_MS;
+    const beijingHourStart = Math.floor(beijingNow / PRICE_REFRESH_MS) * PRICE_REFRESH_MS;
+    let target = beijingHourStart + captureMinute * MINUTE_MS - BEIJING_OFFSET_MS;
+    if (target <= safeNow) target += PRICE_REFRESH_MS;
+    return target;
   }
 
   function autoRefreshDue(now) {
@@ -3779,6 +3795,10 @@
                 <span class="toggle-control"><input id="adminCloudUploadEnabled" type="checkbox" ${config.cloudUploadEnabled ? 'checked' : ''} ${admin.busy ? 'disabled' : ''} /><span class="toggle-track"></span></span>
               </label>
             </div>
+            <label class="admin-field admin-schedule-field">整点后第几分钟抓取
+              <input id="adminPriceCaptureMinute" type="number" min="0" max="59" step="1" inputmode="numeric" value="${escapeHtml(config.priceCaptureMinute)}" ${admin.busy ? 'disabled' : ''} />
+              <small>例如设置为 1，表示每小时在 HH:01 由全站共享抓取一次。</small>
+            </label>
             <label class="admin-field admin-message-field">维护提示<textarea id="adminMaintenanceMessage" maxlength="240" rows="3" placeholder="可选，例如：价格同步维护中">${escapeHtml(config.maintenanceMessage)}</textarea></label>
             ${admin.error ? `<div class="admin-error" role="alert">${escapeHtml(admin.error)}</div>` : ''}
             <div class="settings-actions">

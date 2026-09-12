@@ -81,6 +81,7 @@ test('missing or malformed KV config uses safe capture and upload defaults', asy
       siteEnabled: true,
       priceCaptureEnabled: false,
       cloudUploadEnabled: false,
+      priceCaptureMinute: 1,
       maintenanceMessage: '',
       updatedAt: 0
     }
@@ -88,7 +89,7 @@ test('missing or malformed KV config uses safe capture and upload defaults', asy
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
 
-test('admin config accepts only the four public fields after authenticated csrf validation', async () => {
+test('admin config accepts the five public fields after authenticated csrf validation', async () => {
   const adminAuth = createAdminNamespace();
   const kv = createKv();
   const env = { ADMIN_AUTH: adminAuth, ADMIN_PASSWORD: 'test-secret', LATEST_KV: kv };
@@ -97,6 +98,7 @@ test('admin config accepts only the four public fields after authenticated csrf 
     siteEnabled: false,
     priceCaptureEnabled: true,
     cloudUploadEnabled: true,
+    priceCaptureMinute: 5,
     maintenanceMessage: '维护中',
     unexpected: 'ignored'
   }, { cookie, csrf }), env);
@@ -107,11 +109,24 @@ test('admin config accepts only the four public fields after authenticated csrf 
     siteEnabled: false,
     priceCaptureEnabled: true,
     cloudUploadEnabled: true,
+    priceCaptureMinute: 5,
     maintenanceMessage: '维护中',
     updatedAt: body.config.updatedAt
   });
   assert.ok(Number.isFinite(body.config.updatedAt));
   assert.deepEqual(JSON.parse(kv.values.get(CONFIG_KEY)), body.config);
+});
+
+test('admin config rejects an out-of-range fixed capture minute', async () => {
+  const adminAuth = createAdminNamespace();
+  const env = { ADMIN_AUTH: adminAuth, ADMIN_PASSWORD: 'test-secret', LATEST_KV: createKv() };
+  const { cookie, csrf } = await loginFixture(env);
+  const response = await worker.fetch(request('/api/admin/config', {
+    priceCaptureMinute: 60
+  }, { cookie, csrf }), env);
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { ok: false, error: 'invalid_site_config' });
 });
 
 test('disabled capture gate rejects before requesting the Durable Object', async () => {
