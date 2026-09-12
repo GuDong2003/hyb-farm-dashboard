@@ -95,6 +95,14 @@ const ADMIN_LOCK_DURATIONS_MS = [60 * 1000, 5 * 60 * 1000, 30 * 60 * 1000];
 const ADMIN_MAX_LOCK_MS = 24 * 60 * 60 * 1000;
 const ADMIN_SESSION_TTL_MS = 30 * 60 * 1000;
 const ADMIN_SESSION_MAX_MS = 2 * 60 * 60 * 1000;
+export const ADMIN_SITE_CONFIG_KEY = 'admin:site-config:v1';
+export const DEFAULT_SITE_CONFIG = Object.freeze({
+  siteEnabled: true,
+  priceCaptureEnabled: false,
+  cloudUploadEnabled: false,
+  maintenanceMessage: '',
+  updatedAt: 0
+});
 
 export default {
   async fetch(request, env) {
@@ -122,6 +130,14 @@ export default {
 
     if (url.pathname === '/api/visitor-usage' && request.method === 'POST') {
       return postVisitorUsage(request, env);
+    }
+
+    if (url.pathname === '/api/site-config' && request.method === 'GET') {
+      return getSiteConfig(env);
+    }
+
+    if (url.pathname === '/api/admin/config' && request.method === 'POST') {
+      return updateAdminConfig(request, env);
     }
 
     if (url.pathname === '/api/admin/login' && request.method === 'POST') {
@@ -203,7 +219,9 @@ async function getAdminSession(request, env) {
     }));
     const data = await response.json().catch(() => ({}));
     return jsonResponse(
-      data.ok ? { ok: true, csrfToken: data.csrfToken, expiresAt: data.expiresAt } : { ok: false, error: 'admin_auth_required' },
+      data.ok
+        ? { ok: true, csrfToken: data.csrfToken, expiresAt: data.expiresAt, config: await loadSiteConfig(env) }
+        : { ok: false, error: 'admin_auth_required' },
       data.ok ? 200 : 401,
       { 'cache-control': 'no-store' }
     );
@@ -211,6 +229,114 @@ async function getAdminSession(request, env) {
     console.error('admin_session_failed', { message: String(error && error.message || error).slice(0, 160) });
     return jsonResponse({ ok: false, error: 'admin_auth_unavailable' }, 503, { 'cache-control': 'no-store' });
   }
+}
+
+async function getSiteConfig(env) {
+  return jsonResponse({ ok: true, config: await loadSiteConfig(env) }, 200, { 'cache-control': 'no-store' });
+}
+
+async function updateAdminConfig(request, env) {
+  const authorization = await verifyAdminMutation(request, env);
+  if (authorization.response) return authorization.response;
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (_) {
+    return jsonResponse({ ok: false, error: 'invalid_json' }, 400, { 'cache-control': 'no-store' });
+  }
+  const current = await loadSiteConfig(env);
+  const input = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  for (const field of ['siteEnabled', 'priceCaptureEnabled', 'cloudUploadEnabled']) {
+    if (Object.prototype.hasOwnProperty.call(input, field) && typeof input[field] !== 'boolean') {
+      return jsonResponse({ ok: false, error: 'invalid_site_config' }, 400, { 'cache-control': 'no-store' });
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(input, 'maintenanceMessage') && typeof input.maintenanceMessage !== 'string') {
+    return jsonResponse({ ok: false, error: 'invalid_site_config' }, 400, { 'cache-control': 'no-store' });
+  }
+
+  const config = normalizeSiteConfig({
+    ...current,
+    siteEnabled: Object.prototype.hasOwnProperty.call(input, 'siteEnabled') ? input.siteEnabled : current.siteEnabled,
+    priceCaptureEnabled: Object.prototype.hasOwnProperty.call(input, 'priceCaptureEnabled') ? input.priceCaptureEnabled : current.priceCaptureEnabled,
+    cloudUploadEnabled: Object.prototype.hasOwnProperty.call(input, 'cloudUploadEnabled') ? input.cloudUploadEnabled : current.cloudUploadEnabled,
+    maintenanceMessage: Object.prototype.hasOwnProperty.call(input, 'maintenanceMessage') ? input.maintenanceMessage : current.maintenanceMessage,
+    updatedAt: Date.now()
+  });
+  try {
+    if (!env || !env.LATEST_KV || typeof env.LATEST_KV.put !== 'function') throw new Error('LATEST_KV binding is not configured');
+    await env.LATEST_KV.put(ADMIN_SITE_CONFIG_KEY, JSON.stringify(config));
+  } catch (error) {
+    console.error('admin_site_config_write_failed', { message: String(error && error.message || error).slice(0, 160) });
+    return jsonResponse({ ok: false, error: 'site_config_unavailable' }, 503, { 'cache-control': 'no-store' });
+  }
+  return jsonResponse({ ok: true, config }, 200, { 'cache-control': 'no-store' });
+}
+
+async function verifyAdminMutation(request, env) {
+  if (!isSecureRequest(request) || !hasSameOrigin(request)) {
+    return { response: jsonResponse({ ok: false, error: 'admin_origin_invalid' }, 403, { 'cache-control': 'no-store' }) };
+  }
+  const token = readAdminCookie(request);
+  const csrfToken = String(request.headers.get(ADMIN_CSRF_HEADER) || '');
+  if (!token || !csrfToken) {
+    return { response: jsonResponse({ ok: false, error: 'admin_auth_required' }, 401, { 'cache-control': 'no-store' }) };
+  }
+  const stub = adminAuthStub(env);
+  if (!stub) {
+    return { response: jsonResponse({ ok: false, error: 'admin_auth_unavailable' }, 503, { 'cache-control': 'no-store' }) };
+  }
+  try {
+    const response = await stub.fetch(new Request('https://admin-auth/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, csrfToken })
+    }));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      return {
+        response: jsonResponse(
+          { ok: false, error: data.error === 'admin_csrf_invalid' ? 'admin_csrf_invalid' : 'admin_auth_required' },
+          response.status === 403 ? 403 : 401,
+          { 'cache-control': 'no-store' }
+        )
+      };
+    }
+    return { ok: true, expiresAt: data.expiresAt };
+  } catch (error) {
+    console.error('admin_session_verify_failed', { message: String(error && error.message || error).slice(0, 160) });
+    return { response: jsonResponse({ ok: false, error: 'admin_auth_unavailable' }, 503, { 'cache-control': 'no-store' }) };
+  }
+}
+
+export async function loadSiteConfig(env) {
+  if (!env || !env.LATEST_KV || typeof env.LATEST_KV.get !== 'function') return { ...DEFAULT_SITE_CONFIG };
+  try {
+    const raw = await env.LATEST_KV.get(ADMIN_SITE_CONFIG_KEY);
+    return normalizeSiteConfig(raw);
+  } catch (_) {
+    return { ...DEFAULT_SITE_CONFIG };
+  }
+}
+
+export function normalizeSiteConfig(value) {
+  let source = value;
+  if (typeof source === 'string') {
+    try {
+      source = JSON.parse(source);
+    } catch (_) {
+      source = null;
+    }
+  }
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return { ...DEFAULT_SITE_CONFIG };
+  return {
+    siteEnabled: typeof source.siteEnabled === 'boolean' ? source.siteEnabled : DEFAULT_SITE_CONFIG.siteEnabled,
+    priceCaptureEnabled: typeof source.priceCaptureEnabled === 'boolean' ? source.priceCaptureEnabled : DEFAULT_SITE_CONFIG.priceCaptureEnabled,
+    cloudUploadEnabled: typeof source.cloudUploadEnabled === 'boolean' ? source.cloudUploadEnabled : DEFAULT_SITE_CONFIG.cloudUploadEnabled,
+    maintenanceMessage: typeof source.maintenanceMessage === 'string' ? source.maintenanceMessage.slice(0, 240) : DEFAULT_SITE_CONFIG.maintenanceMessage,
+    updatedAt: Number.isFinite(Number(source.updatedAt)) && Number(source.updatedAt) > 0 ? Math.floor(Number(source.updatedAt)) : DEFAULT_SITE_CONFIG.updatedAt
+  };
 }
 
 async function logoutAdmin(request, env) {
@@ -685,6 +811,11 @@ function timingSafeStringEqual(left, right) {
 }
 
 async function postPriceSyncGate(request, env) {
+  const siteConfig = await loadSiteConfig(env);
+  if (!siteConfig.siteEnabled || !siteConfig.priceCaptureEnabled) {
+    return jsonResponse({ ok: false, error: 'sync_disabled' }, 403, { 'cache-control': 'no-store' });
+  }
+
   let body;
   try {
     body = await request.json();
@@ -1005,6 +1136,10 @@ async function getPriceSeries(request, env) {
 }
 
 async function submitPrices(request, env) {
+  const siteConfig = await loadSiteConfig(env);
+  if (!siteConfig.siteEnabled || !siteConfig.cloudUploadEnabled) {
+    return jsonResponse({ ok: false, status: 'rejected', reason: 'cloud_upload_disabled' }, 403, { 'cache-control': 'no-store' });
+  }
   assertDatabase(env);
 
   let body;

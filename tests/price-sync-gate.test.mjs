@@ -41,6 +41,21 @@ function gateRequest(body, version = '0.6.0') {
   });
 }
 
+function enabledKv() {
+  return {
+    async get(key) {
+      if (key !== 'admin:site-config:v1') return undefined;
+      return {
+        siteEnabled: true,
+        priceCaptureEnabled: true,
+        cloudUploadEnabled: true,
+        maintenanceMessage: '',
+        updatedAt: 1
+      };
+    }
+  };
+}
+
 async function internalGateRequest(gate, path, body) {
   const stub = gate.get(gate.idFromName('global'));
   return stub.fetch(new Request(`https://price-sync-gate${path}`, {
@@ -53,6 +68,7 @@ async function internalGateRequest(gate, path, body) {
 test('concurrent users share one active three-minute capture lease without D1', async () => {
   const gate = createGateNamespace();
   const env = {
+    LATEST_KV: enabledKv(),
     PRICE_SYNC_GATE: gate,
     PRICE_DB: { prepare() { throw new Error('gate acquisition must not read D1'); } }
   };
@@ -76,7 +92,7 @@ test('concurrent users share one active three-minute capture lease without D1', 
 
 test('a failed owner releases its lease and applies a shared sixty-second retry cooldown', async () => {
   const gate = createGateNamespace();
-  const env = { PRICE_SYNC_GATE: gate };
+  const env = { LATEST_KV: enabledKv(), PRICE_SYNC_GATE: gate };
   const acquired = await (await worker.fetch(gateRequest({ action: 'acquire' }), env)).json();
 
   const releasedResponse = await worker.fetch(gateRequest({
@@ -98,6 +114,7 @@ test('an abandoned expired lease can be replaced by another user', async () => {
     activeLease: { leaseId: '00000000-0000-4000-8000-000000000000', expiresAt: Date.now() - 1 }
   });
   const result = await (await worker.fetch(gateRequest({ action: 'acquire' }), {
+    LATEST_KV: enabledKv(),
     PRICE_SYNC_GATE: gate
   })).json();
 
@@ -130,6 +147,7 @@ test('a completed upload aligns the next capture to one hour after the upstream 
 test('old scripts and missing gate bindings fail before any source work can be granted', async () => {
   let namespaceCalls = 0;
   const oldResponse = await worker.fetch(gateRequest({ action: 'acquire' }, '0.5.1'), {
+    LATEST_KV: enabledKv(),
     PRICE_SYNC_GATE: {
       idFromName() { namespaceCalls += 1; return 'unused'; },
       get() { namespaceCalls += 1; return null; }
@@ -143,7 +161,7 @@ test('old scripts and missing gate bindings fail before any source work can be g
   });
   assert.equal(namespaceCalls, 0);
 
-  const unavailable = await worker.fetch(gateRequest({ action: 'acquire' }), {});
+  const unavailable = await worker.fetch(gateRequest({ action: 'acquire' }), { LATEST_KV: enabledKv() });
   assert.equal(unavailable.status, 503);
   assert.equal((await unavailable.json()).error, 'price_sync_gate_unavailable');
 });

@@ -23,8 +23,24 @@ function snapshot(scriptVersion) {
   };
 }
 
+function enabledKv() {
+  return {
+    async get(key) {
+      if (key !== 'admin:site-config:v1') return undefined;
+      return {
+        siteEnabled: true,
+        priceCaptureEnabled: true,
+        cloudUploadEnabled: true,
+        maintenanceMessage: '',
+        updatedAt: 1
+      };
+    }
+  };
+}
+
 function createAcceptedSubmissionEnv(gate) {
   return {
+    LATEST_KV: enabledKv(),
     PRICE_SYNC_GATE: gate,
     PRICE_DB: {
       prepare(sql) {
@@ -66,7 +82,8 @@ test('old or missing userscript versions are rejected before D1 access', async (
           d1Reads += 1;
           throw new Error('outdated script must not reach D1');
         }
-      }
+      },
+      LATEST_KV: enabledKv()
     });
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), {
@@ -117,7 +134,8 @@ test('a D1 failure releases the active lease into the shared retry cooldown', as
       prepare() {
         return { async first() { throw new Error('d1 unavailable'); } };
       }
-    }
+    },
+    LATEST_KV: enabledKv()
   }), /d1 unavailable/);
   assert.deepEqual(gateCalls.map(({ path }) => path), ['/validate', '/release']);
 });
