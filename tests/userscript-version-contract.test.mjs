@@ -9,12 +9,13 @@ const [app, userscript, style] = await Promise.all([
 ]);
 
 test('farm userscript publishes a version and Tampermonkey update URLs', () => {
-  assert.match(userscript, /@version\s+0\.5\.1/);
+  assert.match(userscript, /@version\s+0\.6\.0/);
   assert.match(userscript, /@updateURL\s+https:\/\/hyb\.gudong226\.com\/userscripts\/hyb-farm-dashboard-capture\.user\.js/);
   assert.match(userscript, /@downloadURL\s+https:\/\/hyb\.gudong226\.com\/userscripts\/hyb-farm-dashboard-capture\.user\.js/);
-  assert.match(userscript, /const SCRIPT_VERSION\s*=\s*'0\.5\.1'/);
+  assert.match(userscript, /const SCRIPT_VERSION\s*=\s*'0\.6\.0'/);
   assert.match(userscript, /scriptVersion:\s*SCRIPT_VERSION/);
   assert.match(userscript, /type:\s*BRIDGE_READY,\s*scriptVersion:\s*SCRIPT_VERSION/);
+  assert.match(userscript, /scriptVersion:\s*SCRIPT_VERSION,[\s\S]*?prices:/);
 });
 
 test('farm userscript installation and capture are temporarily disabled', () => {
@@ -34,20 +35,27 @@ test('farm dashboard compares bridge versions and marks the update link', () => 
     'REQUIRED_USERSCRIPT_VERSION',
     `${helperSource}; return { compareVersions, userscriptVersionSupported };`
   );
-  const helpers = createHelpers('0.5.1');
-  assert.equal(helpers.compareVersions('0.5.1', '0.5.1'), 0);
-  assert.equal(helpers.compareVersions('0.5.0', '0.5.1'), -1);
-  assert.equal(helpers.compareVersions('0.5.2', '0.5.1'), 1);
-  assert.equal(helpers.userscriptVersionSupported('0.5.1'), true);
-  assert.equal(helpers.userscriptVersionSupported('0.5.0'), false);
+  const helpers = createHelpers('0.6.0');
+  assert.equal(helpers.compareVersions('0.6.0', '0.6.0'), 0);
+  assert.equal(helpers.compareVersions('0.5.1', '0.6.0'), -1);
+  assert.equal(helpers.compareVersions('0.6.1', '0.6.0'), 1);
+  assert.equal(helpers.userscriptVersionSupported('0.5.1'), false);
+  assert.equal(helpers.userscriptVersionSupported('0.6.0'), true);
+  assert.equal(helpers.userscriptVersionSupported('0.6.1'), true);
   assert.equal(helpers.userscriptVersionSupported('0.4.0'), false);
   assert.equal(helpers.userscriptVersionSupported(''), false);
 
-  assert.match(app, /const REQUIRED_USERSCRIPT_VERSION\s*=\s*'0\.5\.1'/);
+  assert.match(app, /const REQUIRED_USERSCRIPT_VERSION\s*=\s*'0\.6\.0'/);
   assert.match(app, /markUserscriptVersion\(data\.scriptVersion\)/);
   assert.match(app, /link\.textContent\s*=\s*state\.scriptUpdateRequired \? '更新用户脚本' : '安装用户脚本'/);
   assert.match(app, /link\.classList\.toggle\('is-update-required', state\.scriptUpdateRequired \|\| state\.scriptMissing\)/);
   assert.match(style, /\.bookmarklet\.is-update-required/);
+});
+
+test('URL snapshots require a supported userscript version before applying data', () => {
+  const importSource = app.match(/async function importSnapshotFromHash\(\)[\s\S]*?(?=\n  async function applySnapshot)/)?.[0] || '';
+  assert.match(importSource, /userscriptVersionSupported\(snapshot\.scriptVersion\)/);
+  assert.ok(importSource.indexOf('userscriptVersionSupported(snapshot.scriptVersion)') < importSource.indexOf('applySnapshot(snapshot)'));
 });
 
 test('farm bridge refuses an outdated response before applying its snapshot', () => {

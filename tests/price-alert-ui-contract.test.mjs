@@ -163,7 +163,8 @@ test('hidden toggle inputs retain a visible keyboard focus indicator', () => {
   assert.match(style, /\.toggle-control input:focus-visible \+ \.toggle-track\s*\{[^}]*outline:\s*2px solid var\(--blue\);[^}]*outline-offset:\s*2px;/);
 });
 
-test('capture userscript supplies twenty-five hourly buckets for rolling 24-hour alerts', () => {
-  assert.match(userscript, /@version\s+0\.5\.1/);
-  assert.match(userscript, /granularity=hour&trendRange=25/);
+test('capture userscript fetches current prices only and leaves trend calculation to the dashboard', () => {
+  assert.match(userscript, /@version\s+0\.6\.0/);
+  assert.doesNotMatch(userscript, /includeTrend|granularity|trendRange/);
+  assert.match(userscript, /\/api\/farm\/recycle\/prices/);
 });

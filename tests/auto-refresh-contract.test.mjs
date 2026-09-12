@@ -34,6 +34,28 @@ test('auto refresh delay follows the last successful import and retries overdue 
   assert.equal(helpers.autoRefreshDue(80 * 60 * 1000), false);
 });
 
+test('auto refresh waits for the shared gate deadline instead of polling early', () => {
+  const helperSource = app.match(/function autoRefreshDue\(now\)[\s\S]*?(?=\n  function shouldAutoRequestPrices)/)?.[0] || '';
+  const createHelpers = new Function(
+    'PRICE_SYNC_DISABLED',
+    'state',
+    'PRICE_REFRESH_MS',
+    'PRICE_REFRESH_RETRY_MS',
+    'PRICE_REFRESH_MIN_TIMER_MS',
+    `${helperSource}; return { autoRefreshDue, autoRefreshDelay };`
+  );
+  const state = {
+    config: { autoRefreshPrices: true },
+    lastImportedAt: 10 * 60 * 1000,
+    priceSyncNextAllowedAt: 90 * 60 * 1000
+  };
+  const helpers = createHelpers(false, state, 60 * 60 * 1000, 5 * 60 * 1000, 1000);
+
+  assert.equal(helpers.autoRefreshDue(80 * 60 * 1000), false);
+  assert.equal(helpers.autoRefreshDelay(80 * 60 * 1000), 10 * 60 * 1000);
+  assert.equal(helpers.autoRefreshDue(90 * 60 * 1000), true);
+});
+
 test('temporary refresh kill switch blocks manual and automatic price refresh', () => {
   assert.match(app, /const PRICE_SYNC_DISABLED\s*=\s*true;/);
   const requestSource = app.match(/function requestScriptPrices\(force\)[\s\S]*?(?=\n  function runAutoRefresh)/)?.[0] || '';
@@ -55,4 +77,18 @@ test('auto refresh catches up after page lifecycle and network wake events', () 
   assert.match(app, /const delay = autoRefreshDelay\(Date\.now\(\)\);/);
   assert.match(app, /autoRefreshTimer = window\.setTimeout\(\(\) => \{[\s\S]*?runAutoRefresh\(\);[\s\S]*?scheduleAutoRefresh\(\);[\s\S]*?\}, delay\);/);
   assert.match(app, /state\.status = `已自动导入 \$\{formatTime\(state\.lastImportedAt\)\} 的实时价格\$\{farmProfileStatusSuffix\(data\.snapshot\.farmProfile\)\}。`;[\s\S]*?scheduleAutoRefresh\(\);/);
+});
+
+test('skipped bridge refreshes keep the existing snapshot and schedule the shared deadline', () => {
+  const requestSource = app.match(/function requestScriptPrices\(force\)[\s\S]*?(?=\n  function runAutoRefresh)/)?.[0] || '';
+  assert.match(requestSource, /data\.skipped/);
+  assert.match(requestSource, /state\.priceSyncNextAllowedAt\s*=\s*nextAllowedAt/);
+  assert.match(requestSource, /scheduleAutoRefresh\(\);/);
+  const skippedBlock = requestSource.match(/if \(data\.ok && data\.skipped\) \{[\s\S]*?return;\n      \}/)?.[0] || '';
+  assert.notEqual(skippedBlock, '');
+  assert.doesNotMatch(skippedBlock, /applySnapshot\(data\.snapshot\)/);
+});
+
+test('bridge requests carry the latest shared capture timestamp', () => {
+  assert.match(app, /type: BRIDGE_REQUEST,[\s\S]*?observedCapturedAt:\s*Number\(state\.priceSyncObservedAt/);
 });

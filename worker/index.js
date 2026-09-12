@@ -33,6 +33,7 @@ const SEED_IDS = [
 ];
 
 const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const REQUIRED_USERSCRIPT_VERSION = '0.6.0';
 const MIN_MATCHED_PRICES = 15;
 const MAX_PRICE_USD = 1000000;
 const MAX_TREND_POINTS_PER_SERIES = 200;
@@ -74,6 +75,15 @@ const VISITOR_COUNTER_COUNT_KEY = 'count';
 const VISITOR_COUNTER_VISITOR_PREFIX = 'visitor:';
 const VISITOR_HASH_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_PUBLISHED_SNAPSHOT_VERSIONS = 8;
+const PRICE_SYNC_GATE_NAME = 'global';
+const PRICE_SYNC_LEASE_MS = 3 * 60 * 1000;
+const PRICE_SYNC_RETRY_COOLDOWN_MS = 60 * 1000;
+const PRICE_SYNC_SOURCE_GRACE_MS = 60 * 1000;
+const PRICE_SYNC_ACTIVE_LEASE_KEY = 'activeLease';
+const PRICE_SYNC_NEXT_ALLOWED_KEY = 'nextAllowedAt';
+const PRICE_SYNC_LATEST_CAPTURED_KEY = 'latestCapturedAt';
+const PRICE_SYNC_SOURCE_UPDATED_KEY = 'sourceUpdatedAt';
+const PRICE_SYNC_COOLDOWN_REASON_KEY = 'cooldownReason';
 
 export default {
   async fetch(request, env) {
@@ -101,6 +111,10 @@ export default {
 
     if (url.pathname === '/api/visitor-usage' && request.method === 'POST') {
       return postVisitorUsage(request, env);
+    }
+
+    if (url.pathname === '/api/price-sync-gate' && request.method === 'POST') {
+      return postPriceSyncGate(request, env);
     }
 
     if (url.pathname === '/api/price-submissions' && request.method === 'POST') {
@@ -371,6 +385,274 @@ export class VisitorCounter {
   }
 }
 
+async function postPriceSyncGate(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (_) {
+    return jsonResponse({ ok: false, error: 'invalid_json' }, 400, { 'cache-control': 'no-store' });
+  }
+
+  if (!userscriptVersionSupported(body && body.scriptVersion)) {
+    return jsonResponse({
+      ok: false,
+      error: 'script_update_required',
+      requiredScriptVersion: REQUIRED_USERSCRIPT_VERSION
+    }, 400, { 'cache-control': 'no-store' });
+  }
+
+  const action = String(body && body.action || '').trim();
+  if (action !== 'acquire' && action !== 'release') {
+    return jsonResponse({ ok: false, error: 'invalid_action' }, 400, { 'cache-control': 'no-store' });
+  }
+  const stub = priceSyncGateStub(env);
+  if (!stub) return priceSyncGateUnavailableResponse();
+
+  const path = action === 'acquire' ? '/acquire' : '/release';
+  const payload = action === 'acquire'
+    ? { observedCapturedAt: Number(body && body.observedCapturedAt) || 0 }
+    : { leaseId: String(body && body.leaseId || '') };
+  try {
+    return await stub.fetch(new Request(`https://price-sync-gate${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    }));
+  } catch (error) {
+    console.error('price_sync_gate_failed', {
+      action,
+      message: String(error && error.message || error).slice(0, 240)
+    });
+    return priceSyncGateUnavailableResponse();
+  }
+}
+
+function priceSyncGateStub(env) {
+  const namespace = env && env.PRICE_SYNC_GATE;
+  if (!namespace || typeof namespace.idFromName !== 'function' || typeof namespace.get !== 'function') return null;
+  try {
+    return namespace.get(namespace.idFromName(PRICE_SYNC_GATE_NAME));
+  } catch (_) {
+    return null;
+  }
+}
+
+function priceSyncGateUnavailableResponse() {
+  return jsonResponse({ ok: false, error: 'price_sync_gate_unavailable' }, 503, {
+    'cache-control': 'no-store',
+    'retry-after': '60'
+  });
+}
+
+async function callPriceSyncGate(env, path, body) {
+  const stub = priceSyncGateStub(env);
+  if (!stub) return null;
+  try {
+    const response = await stub.fetch(new Request(`https://price-sync-gate${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }));
+    if (!response || !response.ok) return null;
+    return response.json();
+  } catch (_) {
+    return null;
+  }
+}
+
+async function validatePriceSyncLease(env, leaseId) {
+  const normalized = String(leaseId || '');
+  if (!/^[a-f0-9-]{36}$/i.test(normalized)) return false;
+  const result = await callPriceSyncGate(env, '/validate', { leaseId: normalized });
+  return Boolean(result && result.valid);
+}
+
+async function releasePriceSyncLease(env, leaseId) {
+  const normalized = String(leaseId || '');
+  if (!/^[a-f0-9-]{36}$/i.test(normalized)) return false;
+  const result = await callPriceSyncGate(env, '/release', { leaseId: normalized });
+  return Boolean(result && result.released);
+}
+
+async function completePriceSyncLease(env, normalized, capturedAt) {
+  const result = await callPriceSyncGate(env, '/complete', {
+    leaseId: normalized && normalized.syncLeaseId,
+    capturedAt: Number(capturedAt) || 0,
+    sourceUpdatedAt: Number(normalized && normalized.sourceUpdatedAt) || 0
+  });
+  return Boolean(result && result.completed);
+}
+
+export class PriceSyncGate {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env || {};
+    this.operation = Promise.resolve();
+  }
+
+  fetch(request) {
+    const operation = this.operation.then(
+      () => this.handle(request),
+      () => this.handle(request)
+    );
+    this.operation = operation.catch(() => {});
+    return operation;
+  }
+
+  async handle(request) {
+    const url = new URL(request.url);
+    if (request.method !== 'POST' || !['/acquire', '/release', '/validate', '/complete'].includes(url.pathname)) {
+      return jsonResponse({ ok: false, error: 'not_found' }, 404, { 'cache-control': 'no-store' });
+    }
+
+    let body;
+    try {
+      body = await request.json();
+    } catch (_) {
+      return jsonResponse({ ok: false, error: 'invalid_json' }, 400, { 'cache-control': 'no-store' });
+    }
+    if (url.pathname === '/acquire') return this.acquire(body);
+    if (url.pathname === '/release') return this.release(body);
+    if (url.pathname === '/validate') return this.validate(body);
+    return this.complete(body);
+  }
+
+  async acquire(body) {
+    const now = Date.now();
+    const activeLease = await this.state.storage.get(PRICE_SYNC_ACTIVE_LEASE_KEY);
+    if (validActivePriceSyncLease(activeLease, now)) {
+      return jsonResponse({
+        ok: true,
+        granted: false,
+        reason: 'lease_active',
+        nextAllowedAt: Number(activeLease.expiresAt)
+      }, 200, { 'cache-control': 'no-store' });
+    }
+    if (activeLease) await this.state.storage.delete(PRICE_SYNC_ACTIVE_LEASE_KEY);
+
+    const observedCapturedAt = normalizePriceSyncTimestamp(body && body.observedCapturedAt, now);
+    const storedLatestCapturedAt = normalizePriceSyncTimestamp(
+      await this.state.storage.get(PRICE_SYNC_LATEST_CAPTURED_KEY),
+      now
+    );
+    const latestCapturedAt = Math.max(observedCapturedAt, storedLatestCapturedAt);
+    let nextAllowedAt = normalizePriceSyncTimestamp(
+      await this.state.storage.get(PRICE_SYNC_NEXT_ALLOWED_KEY),
+      Number.MAX_SAFE_INTEGER
+    );
+    if (observedCapturedAt > storedLatestCapturedAt) {
+      nextAllowedAt = Math.max(
+        nextAllowedAt,
+        observedCapturedAt + REFRESH_INTERVAL_MS + PRICE_SYNC_SOURCE_GRACE_MS
+      );
+      await this.state.storage.put({
+        [PRICE_SYNC_LATEST_CAPTURED_KEY]: observedCapturedAt,
+        [PRICE_SYNC_NEXT_ALLOWED_KEY]: nextAllowedAt,
+        [PRICE_SYNC_COOLDOWN_REASON_KEY]: 'fresh_snapshot'
+      });
+    }
+    if (nextAllowedAt > now) {
+      const storedReason = String(await this.state.storage.get(PRICE_SYNC_COOLDOWN_REASON_KEY) || 'fresh_snapshot');
+      return jsonResponse({
+        ok: true,
+        granted: false,
+        reason: storedReason === 'retry_cooldown' ? storedReason : 'fresh_snapshot',
+        nextAllowedAt,
+        capturedAt: latestCapturedAt || 0
+      }, 200, { 'cache-control': 'no-store' });
+    }
+
+    const leaseId = crypto.randomUUID();
+    const leaseExpiresAt = now + PRICE_SYNC_LEASE_MS;
+    await this.state.storage.put(PRICE_SYNC_ACTIVE_LEASE_KEY, { leaseId, expiresAt: leaseExpiresAt });
+    return jsonResponse({
+      ok: true,
+      granted: true,
+      leaseId,
+      leaseExpiresAt,
+      nextAllowedAt: leaseExpiresAt,
+      capturedAt: latestCapturedAt || 0
+    }, 200, { 'cache-control': 'no-store' });
+  }
+
+  async release(body) {
+    const activeLease = await this.state.storage.get(PRICE_SYNC_ACTIVE_LEASE_KEY);
+    const leaseId = String(body && body.leaseId || '');
+    if (!activeLease || !leaseId || activeLease.leaseId !== leaseId) {
+      return jsonResponse({ ok: true, released: false }, 200, { 'cache-control': 'no-store' });
+    }
+
+    const nextAllowedAt = Date.now() + PRICE_SYNC_RETRY_COOLDOWN_MS;
+    await this.state.storage.delete(PRICE_SYNC_ACTIVE_LEASE_KEY);
+    await this.state.storage.put({
+      [PRICE_SYNC_NEXT_ALLOWED_KEY]: nextAllowedAt,
+      [PRICE_SYNC_COOLDOWN_REASON_KEY]: 'retry_cooldown'
+    });
+    return jsonResponse({ ok: true, released: true, nextAllowedAt }, 200, { 'cache-control': 'no-store' });
+  }
+
+  async validate(body) {
+    const now = Date.now();
+    const activeLease = await this.state.storage.get(PRICE_SYNC_ACTIVE_LEASE_KEY);
+    const leaseId = String(body && body.leaseId || '');
+    const valid = Boolean(
+      validActivePriceSyncLease(activeLease, now)
+      && leaseId
+      && activeLease.leaseId === leaseId
+    );
+    return jsonResponse({
+      ok: true,
+      valid,
+      leaseExpiresAt: valid ? Number(activeLease.expiresAt) : 0
+    }, 200, { 'cache-control': 'no-store' });
+  }
+
+  async complete(body) {
+    const activeLease = await this.state.storage.get(PRICE_SYNC_ACTIVE_LEASE_KEY);
+    const leaseId = String(body && body.leaseId || '');
+    if (!activeLease || !leaseId || activeLease.leaseId !== leaseId) {
+      return jsonResponse({ ok: true, completed: false }, 200, { 'cache-control': 'no-store' });
+    }
+
+    const now = Date.now();
+    const capturedAt = normalizePriceSyncTimestamp(body && body.capturedAt, now) || now;
+    const sourceUpdatedAt = normalizePriceSyncTimestamp(body && body.sourceUpdatedAt, now) || capturedAt;
+    const nextAllowedAt = Math.max(
+      sourceUpdatedAt + REFRESH_INTERVAL_MS + PRICE_SYNC_SOURCE_GRACE_MS,
+      now + PRICE_SYNC_RETRY_COOLDOWN_MS
+    );
+    await this.state.storage.delete(PRICE_SYNC_ACTIVE_LEASE_KEY);
+    await this.state.storage.put({
+      [PRICE_SYNC_NEXT_ALLOWED_KEY]: nextAllowedAt,
+      [PRICE_SYNC_LATEST_CAPTURED_KEY]: capturedAt,
+      [PRICE_SYNC_SOURCE_UPDATED_KEY]: sourceUpdatedAt,
+      [PRICE_SYNC_COOLDOWN_REASON_KEY]: 'fresh_snapshot'
+    });
+    return jsonResponse({
+      ok: true,
+      completed: true,
+      latestCapturedAt: capturedAt,
+      sourceUpdatedAt,
+      nextAllowedAt
+    }, 200, { 'cache-control': 'no-store' });
+  }
+}
+
+function validActivePriceSyncLease(value, now) {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && /^[a-f0-9-]{36}$/i.test(String(value.leaseId || ''))
+    && Number(value.expiresAt) > now
+  );
+}
+
+function normalizePriceSyncTimestamp(value, futureLimit) {
+  const timestamp = Math.floor(Number(value));
+  if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp > futureLimit + FUTURE_TOLERANCE_MS) return 0;
+  return timestamp;
+}
+
 async function getPriceHistory(request, env) {
   return withPublicCache(request, async () => {
     assertDatabase(env);
@@ -436,75 +718,97 @@ async function submitPrices(request, env) {
   const now = Date.now();
   const normalized = normalizeSubmission(body, now);
   if (!normalized.ok) {
-    return jsonResponse({ ok: false, status: 'rejected', reason: normalized.reason }, 400);
+    if (normalized.reason !== 'script_update_required') {
+      await releasePriceSyncLease(env, body && body.snapshot && body.snapshot.syncLeaseId);
+    }
+    const responseBody = { ok: false, status: 'rejected', reason: normalized.reason };
+    if (normalized.reason === 'script_update_required') responseBody.requiredScriptVersion = REQUIRED_USERSCRIPT_VERSION;
+    return jsonResponse(responseBody, 400);
   }
 
-  const current = await env.PRICE_DB.prepare('SELECT * FROM default_prices WHERE id = 1').first();
-  const currentCapturedAt = current ? Number(current.captured_at) : 0;
-  const currentSignature = current ? String(current.price_signature || '') : '';
-  const samePrices = currentSignature && currentSignature === normalized.priceSignature;
-  const rejectionReason = current && normalized.capturedAt <= currentCapturedAt
-    ? 'stale_or_existing_data'
-    : current && samePrices && normalized.capturedAt < currentCapturedAt + REFRESH_INTERVAL_MS
-      ? 'same_refresh_interval'
-      : '';
-  const submitterHash = await hashSubmitter(request);
-
-  const insertResult = await env.PRICE_DB.prepare(`
-    INSERT INTO price_submissions (
-      submitted_at,
-      captured_at,
-      captured_bucket,
-      source,
-      matched_count,
-      total_count,
-      price_signature,
-      prices_json,
-      price_change_rates_json,
-      price_trends_json,
-      submitter_hash,
-      accepted,
-      accepted_at,
-      rejection_reason
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
-  `).bind(
-    now,
-    normalized.capturedAt,
-    normalized.capturedBucket,
-    normalized.source,
-    normalized.matchedCount,
-    normalized.totalCount,
-    normalized.priceSignature,
-    normalized.pricesJson,
-    normalized.priceChangeRatesJson,
-    normalized.priceTrendsJson,
-    submitterHash,
-    rejectionReason || null
-  ).run();
-
-  const submissionId = Number(insertResult.meta && insertResult.meta.last_row_id) || 0;
-
-  if (rejectionReason) {
-    return jsonResponse({ ok: true, status: 'rejected', reason: rejectionReason, submissionId });
+  if (!await validatePriceSyncLease(env, normalized.syncLeaseId)) {
+    return jsonResponse({ ok: false, status: 'rejected', reason: 'invalid_sync_lease' }, 400);
   }
 
-  await acceptSubmission(env, normalized, submissionId, now);
-  await publishAcceptedSnapshot(env, normalized, submissionId, now);
-  await purgePriceResponseCaches(request);
+  let leaseSettled = false;
+  try {
+    const current = await env.PRICE_DB.prepare('SELECT * FROM default_prices WHERE id = 1').first();
+    const currentCapturedAt = current ? Number(current.captured_at) : 0;
+    const currentSignature = current ? String(current.price_signature || '') : '';
+    const samePrices = currentSignature && currentSignature === normalized.priceSignature;
+    const rejectionReason = current && normalized.capturedAt <= currentCapturedAt
+      ? 'stale_or_existing_data'
+      : current && samePrices && normalized.capturedAt < currentCapturedAt + REFRESH_INTERVAL_MS
+        ? 'same_refresh_interval'
+        : '';
+    const submitterHash = await hashSubmitter(request);
 
-  return jsonResponse({
-    ok: true,
-    status: 'accepted',
-    mode: current ? 'new_refresh_interval' : 'bootstrap',
-    submissionId,
-    refreshIntervalMs: REFRESH_INTERVAL_MS,
-    snapshot: snapshotFromNormalized(normalized, now)
-  });
+    const insertResult = await env.PRICE_DB.prepare(`
+      INSERT INTO price_submissions (
+        submitted_at,
+        captured_at,
+        captured_bucket,
+        source,
+        matched_count,
+        total_count,
+        price_signature,
+        prices_json,
+        price_change_rates_json,
+        price_trends_json,
+        submitter_hash,
+        accepted,
+        accepted_at,
+        rejection_reason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+    `).bind(
+      now,
+      normalized.capturedAt,
+      normalized.capturedBucket,
+      normalized.source,
+      normalized.matchedCount,
+      normalized.totalCount,
+      normalized.priceSignature,
+      normalized.pricesJson,
+      normalized.priceChangeRatesJson,
+      normalized.priceTrendsJson,
+      submitterHash,
+      rejectionReason || null
+    ).run();
+
+    const submissionId = Number(insertResult.meta && insertResult.meta.last_row_id) || 0;
+
+    if (rejectionReason) {
+      leaseSettled = await completePriceSyncLease(env, normalized, currentCapturedAt || normalized.capturedAt);
+      return jsonResponse({ ok: true, status: 'rejected', reason: rejectionReason, submissionId });
+    }
+
+    await acceptSubmission(env, normalized, submissionId, now);
+    await publishAcceptedSnapshot(env, normalized, submissionId, now);
+    await purgePriceResponseCaches(request);
+    leaseSettled = await completePriceSyncLease(env, normalized, normalized.capturedAt);
+
+    return jsonResponse({
+      ok: true,
+      status: 'accepted',
+      mode: current ? 'new_refresh_interval' : 'bootstrap',
+      submissionId,
+      refreshIntervalMs: REFRESH_INTERVAL_MS,
+      snapshot: snapshotFromNormalized(normalized, now)
+    });
+  } catch (error) {
+    if (!leaseSettled) await releasePriceSyncLease(env, normalized.syncLeaseId);
+    throw error;
+  }
 }
 
-function normalizeSubmission(body, now) {
+export function normalizeSubmission(body, now) {
   const snapshot = body && body.snapshot ? body.snapshot : body;
   if (!snapshot || typeof snapshot !== 'object') return { ok: false, reason: 'missing_snapshot' };
+
+  const scriptVersion = String(snapshot.scriptVersion == null ? '' : snapshot.scriptVersion).trim();
+  if (!userscriptVersionSupported(scriptVersion)) return { ok: false, reason: 'script_update_required' };
+  const syncLeaseId = String(snapshot.syncLeaseId == null ? '' : snapshot.syncLeaseId).trim();
+  if (!/^[a-f0-9-]{36}$/i.test(syncLeaseId)) return { ok: false, reason: 'invalid_sync_lease' };
 
   const capturedAt = Math.floor(Number(snapshot.capturedAt));
   if (!Number.isFinite(capturedAt) || capturedAt <= 0) return { ok: false, reason: 'invalid_captured_at' };
@@ -534,6 +838,9 @@ function normalizeSubmission(body, now) {
 
   return {
     ok: true,
+    scriptVersion,
+    syncLeaseId,
+    sourceUpdatedAt: normalizePriceSyncTimestamp(snapshot.sourceUpdatedAt, now) || capturedAt,
     capturedAt,
     capturedBucket: Math.floor(capturedAt / REFRESH_INTERVAL_MS),
     source: String(snapshot.source || 'dashboard-upload').slice(0, 64),
@@ -1145,7 +1452,9 @@ function snapshotFromNormalized(normalized, updatedAt) {
   const snapshot = {
     version: 1,
     source: 'cloud-default',
+    scriptVersion: normalized.scriptVersion,
     capturedAt: normalized.capturedAt,
+    sourceUpdatedAt: normalized.sourceUpdatedAt,
     defaultUpdatedAt: updatedAt,
     prices: { shop: normalized.prices },
     matched: normalized.matchedCount,
@@ -1154,6 +1463,27 @@ function snapshotFromNormalized(normalized, updatedAt) {
   if (Object.keys(normalized.priceChangeRates || {}).length) snapshot.priceChangeRates = { shop: normalized.priceChangeRates };
   if (Object.keys(normalized.priceTrends || {}).length) snapshot.priceTrends = { shop: normalized.priceTrends };
   return snapshot;
+}
+
+export function userscriptVersionSupported(value) {
+  return compareUserscriptVersions(value, REQUIRED_USERSCRIPT_VERSION) >= 0;
+}
+
+function compareUserscriptVersions(left, right) {
+  const parse = (value) => {
+    const parts = String(value == null ? '' : value).trim().split('.');
+    if (!parts.length || parts.some((part) => !/^\d+$/.test(part))) return null;
+    return parts.map((part) => Number(part));
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return -1;
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (a[index] || 0) - (b[index] || 0);
+    if (difference) return difference > 0 ? 1 : -1;
+  }
+  return 0;
 }
 
 export async function hydrateSnapshotTrends(env, snapshot, providedRows) {

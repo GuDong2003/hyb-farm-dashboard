@@ -21,6 +21,14 @@ id = "f1195c48ecaa41bc980aa728bc9c4982"
 name = "VISITOR_COUNTER"
 class_name = "VisitorCounter"
 
+[[durable_objects.bindings]]
+name = "PRICE_SYNC_GATE"
+class_name = "PriceSyncGate"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["VisitorCounter"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["PriceSyncGate"]

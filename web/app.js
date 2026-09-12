@@ -14,6 +14,7 @@
   const PRICE_REFRESH_MS = 60 * 60 * 1000;
   const PRICE_REFRESH_RETRY_MS = 5 * 60 * 1000;
   const PRICE_REFRESH_MIN_TIMER_MS = 1000;
+  const PRICE_SYNC_SOURCE_GRACE_MS = 60 * 1000;
   const PRICE_SYNC_DISABLED = true;
   const PRICE_SYNC_DISABLED_MESSAGE = '实时刷新功能暂时停用';
   const USERSCRIPT_DISABLED_MESSAGE = '同步脚本安装暂时停用';
@@ -21,7 +22,7 @@
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
-  const REQUIRED_USERSCRIPT_VERSION = '0.5.1';
+  const REQUIRED_USERSCRIPT_VERSION = '0.6.0';
   const USERSCRIPT_URL = '/userscripts/hyb-farm-dashboard-capture.user.js';
   const CLOUD_DEFAULT_ENDPOINT = '/api/default-prices';
   const PRICE_TREND_ENDPOINT = '/api/price-trends?window=';
@@ -163,6 +164,8 @@
       priceTrends: { shop: {} },
       priceWindowCache: {},
       lastImportedAt: 0,
+      priceSyncObservedAt: 0,
+      priceSyncNextAllowedAt: 0,
       cloudDefaultAt: 0,
       cloudHistoryCount: null,
       visitorCount: null,
@@ -217,6 +220,8 @@
       merged.priceWindowCache = cleanPriceWindowCache(stored.priceWindowCache || {});
       merged.trendHistoryCache = {};
       merged.priceOrigin = typeof stored.priceOrigin === 'string' ? stored.priceOrigin : '';
+      merged.priceSyncObservedAt = Number(merged.priceSyncObservedAt) > 0 ? Math.floor(Number(merged.priceSyncObservedAt)) : 0;
+      merged.priceSyncNextAllowedAt = Number(merged.priceSyncNextAllowedAt) > 0 ? Math.floor(Number(merged.priceSyncNextAllowedAt)) : 0;
       return merged;
     } catch (_) {
       return base;
@@ -301,6 +306,8 @@
       priceTrends: state.priceTrends,
       priceWindowCache: state.priceWindowCache,
       lastImportedAt: state.lastImportedAt,
+      priceSyncObservedAt: state.priceSyncObservedAt,
+      priceSyncNextAllowedAt: state.priceSyncNextAllowedAt,
       priceOrigin: state.priceOrigin
     }));
   }
@@ -861,6 +868,17 @@
     try {
       const encoded = location.hash.slice('#snapshot='.length);
       const snapshot = JSON.parse(decodeBase64Url(encoded));
+      if (!userscriptVersionSupported(snapshot.scriptVersion)) {
+        const error = userscriptUpdateError(snapshot.scriptVersion);
+        markUserscriptVersion(snapshot.scriptVersion);
+        const message = `${error.message}；请点击“更新脚本”安装新版本。`;
+        setSyncStatus('error', message);
+        state.status = message;
+        history.replaceState(null, '', location.pathname + location.search);
+        renderUserscriptLink();
+        render();
+        return;
+      }
       await applySnapshot(snapshot);
       history.replaceState(null, '', location.pathname + location.search);
       state.status = `已导入 ${formatTime(state.lastImportedAt)} 的抓取快照${farmProfileStatusSuffix(snapshot.farmProfile)}。`;
@@ -884,6 +902,12 @@
       state.priceWindowCache = mergePriceWindowCache(state.priceWindowCache, priceChangeWindows);
     }
     state.lastImportedAt = capturedAt;
+    const sourceUpdatedAt = Number(snapshot.sourceUpdatedAt) || capturedAt;
+    state.priceSyncObservedAt = Math.max(Number(state.priceSyncObservedAt) || 0, sourceUpdatedAt);
+    state.priceSyncNextAllowedAt = Math.max(
+      Number(state.priceSyncNextAllowedAt) || 0,
+      sourceUpdatedAt + PRICE_REFRESH_MS + PRICE_SYNC_SOURCE_GRACE_MS
+    );
     state.priceOrigin = 'local';
     state.config.source = 'shop';
     state.pendingUploadSnapshot = snapshot;
@@ -913,6 +937,19 @@
       const cleanCloudTrends = cleanTrendMap((priceTrends && priceTrends.shop) || {});
       const cleanCloudWindows = cleanPriceWindowCache(priceChangeWindows || {});
       const cloudCapturedAt = Number(snapshot && snapshot.capturedAt) || 0;
+      const cloudSourceUpdatedAt = Number(snapshot && snapshot.sourceUpdatedAt) || cloudCapturedAt;
+      if (cloudSourceUpdatedAt) {
+        const previousObservedAt = Number(state.priceSyncObservedAt) || 0;
+        const previousNextAllowedAt = Number(state.priceSyncNextAllowedAt) || 0;
+        state.priceSyncObservedAt = Math.max(Number(state.priceSyncObservedAt) || 0, cloudSourceUpdatedAt);
+        state.priceSyncNextAllowedAt = Math.max(
+          Number(state.priceSyncNextAllowedAt) || 0,
+          cloudSourceUpdatedAt + PRICE_REFRESH_MS + PRICE_SYNC_SOURCE_GRACE_MS
+        );
+        changed = changed
+          || state.priceSyncObservedAt !== previousObservedAt
+          || state.priceSyncNextAllowedAt !== previousNextAllowedAt;
+      }
       if (Number.isFinite(cloudHistoryCount) && cloudHistoryCount >= 0) {
         const normalizedCloudHistoryCount = Math.floor(cloudHistoryCount);
         if (state.cloudHistoryCount !== normalizedCloudHistoryCount) {
@@ -1085,11 +1122,17 @@
   function autoRefreshDue(now) {
     if (PRICE_SYNC_DISABLED) return false;
     if (!state.config.autoRefreshPrices) return false;
+    const nextAllowedAt = Number(state.priceSyncNextAllowedAt) || 0;
+    if (nextAllowedAt > Number(now)) return false;
     const importedAt = Number(state.lastImportedAt) || 0;
     return !importedAt || Number(now) - importedAt >= PRICE_REFRESH_MS;
   }
 
   function autoRefreshDelay(now) {
+    const nextAllowedAt = Number(state.priceSyncNextAllowedAt) || 0;
+    if (nextAllowedAt > Number(now)) {
+      return Math.max(PRICE_REFRESH_MIN_TIMER_MS, nextAllowedAt - Number(now));
+    }
     const importedAt = Number(state.lastImportedAt) || 0;
     if (!importedAt) return PRICE_REFRESH_RETRY_MS;
     const elapsed = Math.max(0, Number(now) - importedAt);
@@ -1220,6 +1263,20 @@
         render();
         return;
       }
+      if (data.ok && data.skipped) {
+        const nextAllowedAt = Number(data.nextAllowedAt) || 0;
+        const capturedAt = Number(data.capturedAt) || 0;
+        if (capturedAt) state.priceSyncObservedAt = Math.max(Number(state.priceSyncObservedAt) || 0, capturedAt);
+        if (nextAllowedAt) state.priceSyncNextAllowedAt = nextAllowedAt;
+        const nextText = nextAllowedAt ? `，下次可刷新：${formatTime(nextAllowedAt)}` : '';
+        const message = `共享价格仍在有效期内${nextText}`;
+        setSyncStatus('idle', message);
+        state.status = manual ? `本次刷新已跳过：${message}。` : `自动刷新已跳过：${message}。`;
+        saveState();
+        scheduleAutoRefresh();
+        render();
+        return;
+      }
       if (!data.ok || !data.snapshot) {
         const detail = String(data.error || '脚本未返回价格');
         const message = manual ? `刷新失败：${detail}` : `自动获取失败：${detail}`;
@@ -1262,7 +1319,12 @@
     priceBridgeRequest = { id: requestId, timer, onMessage };
     window.addEventListener('message', onMessage);
     render();
-    window.postMessage({ type: BRIDGE_REQUEST, requestId, force: Boolean(force) }, location.origin);
+    window.postMessage({
+      type: BRIDGE_REQUEST,
+      requestId,
+      force: Boolean(force),
+      observedCapturedAt: Number(state.priceSyncObservedAt) || Number(state.cloudDefaultAt) || Number(state.lastImportedAt) || 0
+    }, location.origin);
     return true;
   }
 

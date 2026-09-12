@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HYB Farm Dashboard 价格同步
 // @namespace    https://hyb.gudong226.com/
-// @version      0.5.1
-// @description  为 HYB Farm Dashboard 自动导入实时价格，并同步本地农场经验与地块等级。
+// @version      0.6.0
+// @description  为 HYB Farm Dashboard 协作同步当前交易所价格。
 // @updateURL    https://hyb.gudong226.com/userscripts/hyb-farm-dashboard-capture.user.js
 // @downloadURL  https://hyb.gudong226.com/userscripts/hyb-farm-dashboard-capture.user.js
 // @match        https://hyb.gudong.ccwu.cc/*
@@ -11,12 +11,13 @@
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
 // @connect      cdk.hybgzs.com
+// @connect      hyb.gudong226.com
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.5.1';
+  const SCRIPT_VERSION = '0.6.0';
   const SCRIPT_DISABLED = true;
   const DASHBOARD_URL = 'https://hyb.gudong226.com/';
   const DASHBOARD_ORIGINS = new Set([
@@ -25,10 +26,8 @@
   ]);
   const CDK_ORIGIN = 'https://cdk.hybgzs.com';
   const UNIT_PER_USD = 500000;
-  const TREND_HOUR_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=hour&trendRange=25';
-  const TREND_DAY_URL = '/api/farm/recycle/prices?includeTrend=1&granularity=day&trendRange=7';
-  const FARM_LEVEL_URL = '/api/farm/level';
-  const FARM_CROPS_URL = '/api/farm/crops';
+  const CURRENT_PRICE_URL = '/api/farm/recycle/prices';
+  const PRICE_SYNC_GATE_URL = new URL('/api/price-sync-gate', DASHBOARD_URL).href;
   const BRIDGE_READY = 'HYB_FARM_DASHBOARD_PRICE_BRIDGE_READY';
   const BRIDGE_REQUEST = 'HYB_FARM_DASHBOARD_PRICE_REQUEST';
   const BRIDGE_RESPONSE = 'HYB_FARM_DASHBOARD_PRICE_RESPONSE';
@@ -98,19 +97,37 @@
 
   async function fetchJson(path, timeoutMs) {
     const url = new URL(path, CDK_ORIGIN).href;
-    const sameOrigin = new URL(url).origin === location.origin;
-    if (sameOrigin || !gmRequest()) return fetchJsonWithFetch(url, timeoutMs);
-    return fetchJsonWithGm(url, timeoutMs);
+    return requestJson(url, { timeoutMs });
   }
 
-  async function fetchJsonWithFetch(url, timeoutMs) {
+  async function postGateJson(payload, timeoutMs) {
+    return requestJson(PRICE_SYNC_GATE_URL, {
+      method: 'POST',
+      body: JSON.stringify({ scriptVersion: SCRIPT_VERSION, ...payload }),
+      timeoutMs
+    });
+  }
+
+  async function requestJson(url, options = {}) {
+    const sameOrigin = new URL(url).origin === location.origin;
+    if (sameOrigin || !gmRequest()) return fetchJsonWithFetch(url, options);
+    return fetchJsonWithGm(url, options);
+  }
+
+  async function fetchJsonWithFetch(url, options = {}) {
+    const timeoutMs = Number(options.timeoutMs) || 15000;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), timeoutMs || 15000);
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(url, {
+        method: options.method || 'GET',
         credentials: new URL(url).origin === location.origin ? 'same-origin' : 'include',
         cache: 'no-store',
-        headers: { accept: 'application/json' },
+        headers: {
+          accept: 'application/json',
+          ...(options.body ? { 'content-type': 'application/json' } : {})
+        },
+        body: options.body,
         signal: controller.signal
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -120,9 +137,10 @@
     }
   }
 
-  function fetchJsonWithGm(url, timeoutMs) {
+  function fetchJsonWithGm(url, options = {}) {
     const request = gmRequest();
-    if (!request) return fetchJsonWithFetch(url, timeoutMs);
+    if (!request) return fetchJsonWithFetch(url, options);
+    const timeoutMs = Number(options.timeoutMs) || 15000;
     return new Promise((resolve, reject) => {
       let settled = false;
       let handle = null;
@@ -141,15 +159,19 @@
         const error = new Error('请求超时');
         error.name = 'AbortError';
         fail(error);
-      }, timeoutMs || 15000);
+      }, timeoutMs);
       handle = request({
-        method: 'GET',
+        method: options.method || 'GET',
         url,
-        headers: { accept: 'application/json' },
+        headers: {
+          accept: 'application/json',
+          ...(options.body ? { 'content-type': 'application/json' } : {})
+        },
+        data: options.body,
         responseType: 'json',
         anonymous: false,
         withCredentials: true,
-        timeout: timeoutMs || 15000,
+        timeout: timeoutMs,
         onload: (response) => {
           window.clearTimeout(timer);
           if (response.status < 200 || response.status >= 300) {
@@ -183,166 +205,22 @@
       .replace(/=+$/, '');
   }
 
-  function parsePercentLike(value, key) {
-    if (value == null || value === '') return null;
-    const text = String(value).trim();
-    const match = text.match(/[+-]?\d+(?:\.\d+)?/);
-    if (!match) return null;
-    let number = Number(match[0]);
-    if (!Number.isFinite(number)) return null;
-    if (!/^[+-]/.test(match[0]) && /(跌|down|decrease|drop)/i.test(text)) number = -Math.abs(number);
-    if (/ratio/i.test(key) && Math.abs(number) <= 1) return number * 100;
-    return number;
-  }
-
-  function extractChangeRate(item) {
-    const keys = [
-      'priceChangeRate',
-      'priceChangePercent',
-      'recyclePriceChangeRate',
-      'recyclePriceChangePercent',
-      'changeRate',
-      'changePercent',
-      'fluctuationRate',
-      'fluctuationPercent',
-      'riseFallRate',
-      'riseFallPercent',
-      '涨跌幅',
-      '涨跌幅度',
-      '涨跌率'
-    ];
-    for (const key of keys) {
-      if (!Object.prototype.hasOwnProperty.call(item, key)) continue;
-      const value = parsePercentLike(item[key], key);
-      if (Number.isFinite(value)) return value;
-    }
-    for (const key of Object.keys(item || {})) {
-      if (!/(涨跌|涨幅|跌幅|change|fluctuation|riseFall)/i.test(key)) continue;
-      if (!/(rate|percent|ratio|幅|率)/i.test(key)) continue;
-      const value = parsePercentLike(item[key], key);
-      if (Number.isFinite(value)) return value;
-    }
-    return null;
-  }
-
-  function normalizeTrendSeries(series) {
-    if (!Array.isArray(series)) return [];
-    return series.map((point) => {
-      const bucketStartedAt = typeof (point && point.bucketStartedAt) === 'string' ? point.bucketStartedAt : '';
-      const avgUnitPrice = Number(point && point.avgUnitPrice);
-      if (!bucketStartedAt || !Number.isFinite(avgUnitPrice)) return null;
-      return { bucketStartedAt, avgUnitPrice };
-    }).filter(Boolean).sort((a, b) => Date.parse(a.bucketStartedAt) - Date.parse(b.bucketStartedAt));
-  }
-
-  function rememberTrendItem(item, seriesKey, shop, shopChangeRates, shopTrends) {
-    if (!item || !SEED_IDS.has(item.seedId)) return;
-    const raw = Number(item.unitPrice || item.recyclePrice);
-    if (Number.isFinite(raw) && (seriesKey === 'hourly' || shop[item.seedId] == null)) shop[item.seedId] = raw / UNIT_PER_USD;
-
-    const changeRate = extractChangeRate(item);
-    if (Number.isFinite(changeRate)) shopChangeRates[item.seedId] = changeRate;
-
-    const series = normalizeTrendSeries(item.trend);
-    const lastRefreshedAt = typeof item.lastRefreshedAt === 'string' ? item.lastRefreshedAt : '';
-    if (Number.isFinite(raw) || series.length || lastRefreshedAt) {
-      const trend = shopTrends[item.seedId] || (shopTrends[item.seedId] = {});
-      if (Number.isFinite(raw) && (seriesKey === 'hourly' || !Number.isFinite(Number(trend.unitPrice)))) trend.unitPrice = raw;
-      if (lastRefreshedAt && (!trend.lastRefreshedAt || Date.parse(lastRefreshedAt) > Date.parse(trend.lastRefreshedAt))) trend.lastRefreshedAt = lastRefreshedAt;
-      if (series.length) trend[seriesKey] = series;
-    }
-  }
-
-  function mergeTrendResponse(json, seriesKey, shop, shopChangeRates, shopTrends) {
+  function mergeCurrentPriceResponse(json, shop) {
     if (json && json.success === false) throw new Error('价格接口返回失败');
-
     const list = Array.isArray(json && json.data) ? json.data : [];
-    list.forEach((item) => rememberTrendItem(item, seriesKey, shop, shopChangeRates, shopTrends));
-
     const items = Array.isArray(json && json.market && json.market.items) ? json.market.items : [];
-    items.forEach((item) => rememberTrendItem(item, seriesKey, shop, shopChangeRates, shopTrends));
+    [...list, ...items].forEach((item) => {
+      if (!item || !SEED_IDS.has(item.seedId)) return;
+      const raw = Number(item.unitPrice ?? item.recyclePrice);
+      if (Number.isFinite(raw) && raw >= 0) shop[item.seedId] = raw / UNIT_PER_USD;
+    });
   }
 
-  function normalizeCurrentPlotLevels(cropsJson) {
-    const candidates = [
-      cropsJson && cropsJson.plotLevels,
-      cropsJson && cropsJson.data && cropsJson.data.plotLevels
-    ];
-    for (const candidate of candidates) {
-      if (Array.isArray(candidate)) {
-        const entries = candidate.map((item) => ({
-          plotIndex: Number(item && (item.plotIndex ?? item.index)),
-          level: Number(item && (item.level ?? item.plotLevel))
-        })).filter((item) => (
-          Number.isInteger(item.plotIndex)
-          && item.plotIndex >= 0
-          && Number.isInteger(item.level)
-          && item.level >= 1
-          && item.level <= 7
-        ));
-        if (entries.length) return entries;
-      } else if (candidate && typeof candidate === 'object') {
-        const entries = Object.entries(candidate).map(([plotIndex, level]) => ({
-          plotIndex: Number(plotIndex),
-          level: Number(level && typeof level === 'object' ? (level.level ?? level.plotLevel) : level)
-        })).filter((item) => (
-          Number.isInteger(item.plotIndex)
-          && item.plotIndex >= 0
-          && Number.isInteger(item.level)
-          && item.level >= 1
-          && item.level <= 7
-        ));
-        if (entries.length) return entries;
-      }
-    }
-    return [];
-  }
-
-  function normalizeFarmProfile(levelJson, cropsJson) {
-    const profile = {};
-    const levelData = levelJson && levelJson.data && typeof levelJson.data === 'object' ? levelJson.data : null;
-    const totalExp = Number(levelData && levelData.totalExp);
-    if (Number.isFinite(totalExp) && totalExp >= 0) profile.currentTotalExp = Math.floor(totalExp);
-
-    const currentPlotLevels = normalizeCurrentPlotLevels(cropsJson);
-    if (currentPlotLevels.length) {
-      const landCounts = Array.from({ length: 7 }, () => 0);
-      const seen = new Set();
-      currentPlotLevels.forEach(({ plotIndex, level }) => {
-        if (seen.has(plotIndex)) return;
-        seen.add(plotIndex);
-        landCounts[level - 1] += 1;
-      });
-      profile.landCounts = landCounts;
-      return Object.keys(profile).length ? profile : null;
-    }
-
-    return Object.keys(profile).length ? profile : null;
-  }
-
-  async function captureFarmProfile() {
-    const [levelResult, cropsResult] = await Promise.allSettled([
-      fetchJson(FARM_LEVEL_URL, 15000),
-      fetchJson(FARM_CROPS_URL, 15000)
-    ]);
-    return normalizeFarmProfile(
-      levelResult.status === 'fulfilled' ? levelResult.value : null,
-      cropsResult.status === 'fulfilled' ? cropsResult.value : null
-    );
-  }
-
-  async function captureShopSnapshot() {
-    const [hourJson, dayJson, farmProfile] = await Promise.all([
-      fetchJson(TREND_HOUR_URL, 15000),
-      fetchJson(TREND_DAY_URL, 15000),
-      captureFarmProfile()
-    ]);
-
+  async function captureShopSnapshot(syncLeaseId) {
+    const json = await fetchJson(CURRENT_PRICE_URL, 15000);
+    const capturedAt = Date.now();
     const shop = {};
-    const shopChangeRates = {};
-    const shopTrends = {};
-    mergeTrendResponse(hourJson, 'hourly', shop, shopChangeRates, shopTrends);
-    mergeTrendResponse(dayJson, 'daily', shop, shopChangeRates, shopTrends);
+    mergeCurrentPriceResponse(json, shop);
 
     const matched = Object.keys(shop).length;
     if (!matched) throw new Error('没有匹配到作物价格');
@@ -350,24 +228,61 @@
     const payload = {
       version: 1,
       source: 'userscript',
-      capturedAt: Date.now(),
+      scriptVersion: SCRIPT_VERSION,
+      syncLeaseId,
+      sourceUpdatedAt: Number(json && json.exchangeRecomputedAt) || capturedAt,
+      capturedAt,
       prices: { shop },
       matched,
       totalSeeds: SEED_IDS.size
     };
-    if (Object.keys(shopChangeRates).length) payload.priceChangeRates = { shop: shopChangeRates };
-    if (Object.keys(shopTrends).length) payload.priceTrends = { shop: shopTrends };
-    if (farmProfile) payload.farmProfile = farmProfile;
     return payload;
+  }
+
+  async function acquirePriceSyncLease(observedCapturedAt) {
+    return postGateJson({
+      action: 'acquire',
+      observedCapturedAt: Number(observedCapturedAt) || 0
+    }, 10000);
+  }
+
+  async function releasePriceSyncLease(leaseId) {
+    if (!leaseId) return;
+    try {
+      await postGateJson({ action: 'release', leaseId }, 10000);
+    } catch (_) {
+      // The three-minute lease expires automatically if this best-effort release fails.
+    }
+  }
+
+  async function captureSharedShopSnapshot(observedCapturedAt) {
+    const lease = await acquirePriceSyncLease(observedCapturedAt);
+    if (!lease || !lease.granted) {
+      return {
+        skipped: true,
+        reason: String(lease && lease.reason || 'fresh_snapshot'),
+        nextAllowedAt: Number(lease && lease.nextAllowedAt) || 0,
+        capturedAt: Number(lease && lease.capturedAt) || 0
+      };
+    }
+    try {
+      return { snapshot: await captureShopSnapshot(lease.leaseId) };
+    } catch (error) {
+      await releasePriceSyncLease(lease.leaseId);
+      throw error;
+    }
   }
 
   async function syncShopPrices() {
     try {
       showToast('正在获取实时价格...');
-      const payload = await captureShopSnapshot();
-      const trendCount = payload.priceTrends && payload.priceTrends.shop ? Object.keys(payload.priceTrends.shop).length : 0;
-      const trendText = trendCount ? `，趋势 ${trendCount} 个` : '';
-      showToast(`已抓取 ${payload.matched}/${payload.totalSeeds} 个作物${trendText}，正在打开 Dashboard...`);
+      const result = await captureSharedShopSnapshot(0);
+      if (result.skipped) {
+        showToast(`共享价格仍在有效期内，下次可刷新：${new Date(result.nextAllowedAt).toLocaleString('zh-CN', { hour12: false })}`);
+        return;
+      }
+      const payload = result.snapshot;
+      showToast(`已抓取 ${payload.matched}/${payload.totalSeeds} 个作物，正在打开 Dashboard...`);
       window.setTimeout(() => {
         location.href = `${DASHBOARD_URL}#snapshot=${encodeSnapshot(payload)}`;
       }, 500);
@@ -416,8 +331,21 @@
       const data = event && event.data;
       if (event.origin !== location.origin || !data || data.type !== BRIDGE_REQUEST || !data.requestId) return;
       try {
-        const snapshot = await captureShopSnapshot();
-        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: true, scriptVersion: SCRIPT_VERSION, snapshot }, location.origin);
+        const result = await captureSharedShopSnapshot(data.observedCapturedAt);
+        if (result.skipped) {
+          window.postMessage({
+            type: BRIDGE_RESPONSE,
+            requestId: data.requestId,
+            ok: true,
+            skipped: true,
+            scriptVersion: SCRIPT_VERSION,
+            reason: result.reason,
+            nextAllowedAt: result.nextAllowedAt,
+            capturedAt: result.capturedAt
+          }, location.origin);
+          return;
+        }
+        window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: true, scriptVersion: SCRIPT_VERSION, snapshot: result.snapshot }, location.origin);
       } catch (error) {
         window.postMessage({ type: BRIDGE_RESPONSE, requestId: data.requestId, ok: false, scriptVersion: SCRIPT_VERSION, error: friendlyError(error) }, location.origin);
       }
