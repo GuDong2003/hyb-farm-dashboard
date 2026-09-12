@@ -84,6 +84,17 @@ const PRICE_SYNC_NEXT_ALLOWED_KEY = 'nextAllowedAt';
 const PRICE_SYNC_LATEST_CAPTURED_KEY = 'latestCapturedAt';
 const PRICE_SYNC_SOURCE_UPDATED_KEY = 'sourceUpdatedAt';
 const PRICE_SYNC_COOLDOWN_REASON_KEY = 'cooldownReason';
+const ADMIN_AUTH_NAME = 'global';
+const ADMIN_COOKIE_NAME = '__Host-hyb-admin';
+const ADMIN_CSRF_HEADER = 'x-hyb-admin-csrf';
+const ADMIN_FAILURE_PREFIX = 'admin-failure:';
+const ADMIN_SESSION_PREFIX = 'admin-session:';
+const ADMIN_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+const ADMIN_FAILURE_THRESHOLD = 5;
+const ADMIN_LOCK_DURATIONS_MS = [60 * 1000, 5 * 60 * 1000, 30 * 60 * 1000];
+const ADMIN_MAX_LOCK_MS = 24 * 60 * 60 * 1000;
+const ADMIN_SESSION_TTL_MS = 30 * 60 * 1000;
+const ADMIN_SESSION_MAX_MS = 2 * 60 * 60 * 1000;
 
 export default {
   async fetch(request, env) {
@@ -113,6 +124,18 @@ export default {
       return postVisitorUsage(request, env);
     }
 
+    if (url.pathname === '/api/admin/login' && request.method === 'POST') {
+      return loginAdmin(request, env);
+    }
+
+    if (url.pathname === '/api/admin/session' && request.method === 'GET') {
+      return getAdminSession(request, env);
+    }
+
+    if (url.pathname === '/api/admin/logout' && request.method === 'POST') {
+      return logoutAdmin(request, env);
+    }
+
     if (url.pathname === '/api/price-sync-gate' && request.method === 'POST') {
       return postPriceSyncGate(request, env);
     }
@@ -128,6 +151,131 @@ export default {
     return env.ASSETS.fetch(request);
   }
 };
+
+async function loginAdmin(request, env) {
+  if (!isSecureRequest(request)) return adminAuthFailureResponse(400, 'admin_login_failed');
+
+  let body;
+  try {
+    body = await request.json();
+  } catch (_) {
+    return adminAuthFailureResponse(401, 'admin_login_failed');
+  }
+  const password = String(body && body.password != null ? body.password : '').trim();
+  const stub = adminAuthStub(env);
+  if (!stub) return jsonResponse({ ok: false, error: 'admin_auth_unavailable' }, 503, { 'cache-control': 'no-store' });
+
+  try {
+    const response = await stub.fetch(new Request('https://admin-auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        password,
+        ip: String(request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown')
+      })
+    }));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      const headers = { 'cache-control': 'no-store' };
+      if (response.status === 429 && Number(data.retryAfter) > 0) headers['retry-after'] = String(Math.ceil(Number(data.retryAfter)));
+      return jsonResponse({ ok: false, error: 'admin_login_failed' }, response.status === 429 ? 429 : 401, headers);
+    }
+    return jsonResponse({ ok: true, csrfToken: data.csrfToken, expiresAt: data.expiresAt }, 200, {
+      'cache-control': 'no-store',
+      'set-cookie': adminSessionCookie(data.token)
+    });
+  } catch (error) {
+    console.error('admin_login_failed', { message: String(error && error.message || error).slice(0, 160) });
+    return jsonResponse({ ok: false, error: 'admin_auth_unavailable' }, 503, { 'cache-control': 'no-store' });
+  }
+}
+
+async function getAdminSession(request, env) {
+  const token = readAdminCookie(request);
+  if (!token) return jsonResponse({ ok: false, error: 'admin_auth_required' }, 401, { 'cache-control': 'no-store' });
+  const stub = adminAuthStub(env);
+  if (!stub) return jsonResponse({ ok: false, error: 'admin_auth_unavailable' }, 503, { 'cache-control': 'no-store' });
+  try {
+    const response = await stub.fetch(new Request('https://admin-auth/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token })
+    }));
+    const data = await response.json().catch(() => ({}));
+    return jsonResponse(
+      data.ok ? { ok: true, csrfToken: data.csrfToken, expiresAt: data.expiresAt } : { ok: false, error: 'admin_auth_required' },
+      data.ok ? 200 : 401,
+      { 'cache-control': 'no-store' }
+    );
+  } catch (error) {
+    console.error('admin_session_failed', { message: String(error && error.message || error).slice(0, 160) });
+    return jsonResponse({ ok: false, error: 'admin_auth_unavailable' }, 503, { 'cache-control': 'no-store' });
+  }
+}
+
+async function logoutAdmin(request, env) {
+  if (!isSecureRequest(request) || !hasSameOrigin(request)) return jsonResponse({ ok: false, error: 'admin_origin_invalid' }, 403, { 'cache-control': 'no-store' });
+  const token = readAdminCookie(request);
+  const csrfToken = String(request.headers.get(ADMIN_CSRF_HEADER) || '');
+  if (!token || !csrfToken) return jsonResponse({ ok: false, error: 'admin_auth_required' }, 401, { 'cache-control': 'no-store' });
+  const stub = adminAuthStub(env);
+  if (!stub) return jsonResponse({ ok: false, error: 'admin_auth_unavailable' }, 503, { 'cache-control': 'no-store' });
+  try {
+    const response = await stub.fetch(new Request('https://admin-auth/logout', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, csrfToken })
+    }));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      return jsonResponse({ ok: false, error: data.error === 'admin_csrf_invalid' ? 'admin_csrf_invalid' : 'admin_auth_required' }, response.status === 403 ? 403 : 401, { 'cache-control': 'no-store' });
+    }
+    return jsonResponse({ ok: true }, 200, {
+      'cache-control': 'no-store',
+      'set-cookie': expiredAdminSessionCookie()
+    });
+  } catch (error) {
+    console.error('admin_logout_failed', { message: String(error && error.message || error).slice(0, 160) });
+    return jsonResponse({ ok: false, error: 'admin_auth_unavailable' }, 503, { 'cache-control': 'no-store' });
+  }
+}
+
+function adminAuthStub(env) {
+  const namespace = env && env.ADMIN_AUTH;
+  if (!namespace || typeof namespace.idFromName !== 'function' || typeof namespace.get !== 'function') return null;
+  try {
+    return namespace.get(namespace.idFromName(ADMIN_AUTH_NAME));
+  } catch (_) {
+    return null;
+  }
+}
+
+function isSecureRequest(request) {
+  return new URL(request.url).protocol === 'https:';
+}
+
+function hasSameOrigin(request) {
+  const url = new URL(request.url);
+  return String(request.headers.get('origin') || '') === url.origin;
+}
+
+function readAdminCookie(request) {
+  const cookie = String(request.headers.get('cookie') || '');
+  const item = cookie.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${ADMIN_COOKIE_NAME}=`));
+  return item ? item.slice(ADMIN_COOKIE_NAME.length + 1) : '';
+}
+
+function adminSessionCookie(token) {
+  return `${ADMIN_COOKIE_NAME}=${token}; Max-Age=${Math.floor(ADMIN_SESSION_MAX_MS / 1000)}; Path=/; HttpOnly; Secure; SameSite=Strict`;
+}
+
+function expiredAdminSessionCookie() {
+  return `${ADMIN_COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict`;
+}
+
+function adminAuthFailureResponse(status, error) {
+  return jsonResponse({ ok: false, error }, status, { 'cache-control': 'no-store' });
+}
 
 async function getDefaultPrices(request, env) {
   return withPublicCache(request, async () => {
@@ -383,6 +531,157 @@ export class VisitorCounter {
   async readCount() {
     return normalizeVisitorCount(await this.state.storage.get(VISITOR_COUNTER_COUNT_KEY)) ?? 0;
   }
+}
+
+export class AdminAuth {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env || {};
+    this.operation = Promise.resolve();
+  }
+
+  fetch(request) {
+    const operation = this.operation.then(
+      () => this.handle(request),
+      () => this.handle(request)
+    );
+    this.operation = operation.catch(() => {});
+    return operation;
+  }
+
+  async handle(request) {
+    const url = new URL(request.url);
+    if (request.method !== 'POST' || !['/login', '/session', '/verify', '/logout'].includes(url.pathname)) {
+      return jsonResponse({ ok: false, error: 'not_found' }, 404, { 'cache-control': 'no-store' });
+    }
+
+    let body;
+    try {
+      body = await request.json();
+    } catch (_) {
+      return jsonResponse({ ok: false, error: 'invalid_json' }, 400, { 'cache-control': 'no-store' });
+    }
+    if (url.pathname === '/login') return this.login(body);
+    if (url.pathname === '/session') return this.session(body);
+    if (url.pathname === '/verify') return this.verify(body);
+    return this.logout(body);
+  }
+
+  async login(body) {
+    const now = Date.now();
+    const ipHash = await hashAdminValue(String(body && body.ip || 'unknown'));
+    const failureKey = `${ADMIN_FAILURE_PREFIX}${ipHash}`;
+    let failure = await this.state.storage.get(failureKey);
+    if (failure && Number(failure.lockUntil) > now) {
+      return jsonResponse({ ok: false, retryAfter: Math.ceil((Number(failure.lockUntil) - now) / 1000) }, 429, { 'cache-control': 'no-store' });
+    }
+    if (!failure || now - Number(failure.windowStartedAt) >= ADMIN_FAILURE_WINDOW_MS) {
+      failure = {
+        count: 0,
+        windowStartedAt: now,
+        lockLevel: failure && Number.isFinite(Number(failure.lockLevel)) ? Number(failure.lockLevel) : 0,
+        lockUntil: 0
+      };
+    }
+
+    const expected = String(this.env.ADMIN_PASSWORD == null ? '' : this.env.ADMIN_PASSWORD);
+    const supplied = String(body && body.password != null ? body.password : '');
+    if (!timingSafeStringEqual(supplied, expected) || !expected) {
+      failure.count += 1;
+      if (failure.count >= ADMIN_FAILURE_THRESHOLD) {
+        const level = Math.max(0, Number(failure.lockLevel) || 0);
+        const duration = level < ADMIN_LOCK_DURATIONS_MS.length
+          ? ADMIN_LOCK_DURATIONS_MS[level]
+          : ADMIN_MAX_LOCK_MS;
+        failure.lockUntil = now + Math.min(duration, ADMIN_MAX_LOCK_MS);
+        failure.lockLevel = Math.min(level + 1, ADMIN_LOCK_DURATIONS_MS.length);
+        failure.count = 0;
+        failure.windowStartedAt = now;
+      }
+      await this.state.storage.put(failureKey, failure);
+      return jsonResponse({ ok: false, retryAfter: failure.lockUntil > now ? Math.ceil((failure.lockUntil - now) / 1000) : 0 }, 401, { 'cache-control': 'no-store' });
+    }
+
+    await this.state.storage.delete(failureKey);
+    const token = crypto.randomUUID();
+    const csrfToken = crypto.randomUUID();
+    const tokenHash = await hashAdminValue(token);
+    const csrfHash = await hashAdminValue(csrfToken);
+    const createdAt = now;
+    const expiresAt = now + ADMIN_SESSION_TTL_MS;
+    const absoluteExpiresAt = now + ADMIN_SESSION_MAX_MS;
+    await this.state.storage.put(`${ADMIN_SESSION_PREFIX}${tokenHash}`, {
+      tokenHash,
+      csrfHash,
+      createdAt,
+      expiresAt,
+      absoluteExpiresAt
+    });
+    return jsonResponse({ ok: true, token, csrfToken, expiresAt }, 200, { 'cache-control': 'no-store' });
+  }
+
+  async session(body) {
+    const session = await this.readSession(body && body.token);
+    if (!session) return jsonResponse({ ok: false, error: 'admin_auth_required' }, 401, { 'cache-control': 'no-store' });
+    const csrfToken = crypto.randomUUID();
+    const now = Date.now();
+    const expiresAt = Math.min(now + ADMIN_SESSION_TTL_MS, Number(session.absoluteExpiresAt));
+    session.csrfHash = await hashAdminValue(csrfToken);
+    session.expiresAt = expiresAt;
+    await this.state.storage.put(`${ADMIN_SESSION_PREFIX}${session.tokenHash}`, session);
+    return jsonResponse({ ok: true, csrfToken, expiresAt }, 200, { 'cache-control': 'no-store' });
+  }
+
+  async verify(body) {
+    const session = await this.readSession(body && body.token);
+    if (!session) return jsonResponse({ ok: false, error: 'admin_auth_required' }, 401, { 'cache-control': 'no-store' });
+    const csrfHash = await hashAdminValue(String(body && body.csrfToken || ''));
+    if (!timingSafeStringEqual(csrfHash, String(session.csrfHash || ''))) {
+      return jsonResponse({ ok: false, error: 'admin_csrf_invalid' }, 403, { 'cache-control': 'no-store' });
+    }
+    const now = Date.now();
+    session.expiresAt = Math.min(now + ADMIN_SESSION_TTL_MS, Number(session.absoluteExpiresAt));
+    await this.state.storage.put(`${ADMIN_SESSION_PREFIX}${session.tokenHash}`, session);
+    return jsonResponse({ ok: true, expiresAt: session.expiresAt }, 200, { 'cache-control': 'no-store' });
+  }
+
+  async logout(body) {
+    const session = await this.readSession(body && body.token);
+    if (!session) return jsonResponse({ ok: false, error: 'admin_auth_required' }, 401, { 'cache-control': 'no-store' });
+    const csrfHash = await hashAdminValue(String(body && body.csrfToken || ''));
+    if (!timingSafeStringEqual(csrfHash, String(session.csrfHash || ''))) {
+      return jsonResponse({ ok: false, error: 'admin_csrf_invalid' }, 403, { 'cache-control': 'no-store' });
+    }
+    await this.state.storage.delete(`${ADMIN_SESSION_PREFIX}${session.tokenHash}`);
+    return jsonResponse({ ok: true }, 200, { 'cache-control': 'no-store' });
+  }
+
+  async readSession(token) {
+    const normalized = String(token || '');
+    if (!normalized) return null;
+    const tokenHash = await hashAdminValue(normalized);
+    const key = `${ADMIN_SESSION_PREFIX}${tokenHash}`;
+    const session = await this.state.storage.get(key);
+    if (!session || Number(session.expiresAt) <= Date.now() || Number(session.absoluteExpiresAt) <= Date.now()) {
+      if (session) await this.state.storage.delete(key);
+      return null;
+    }
+    return session;
+  }
+}
+
+async function hashAdminValue(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value)));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function timingSafeStringEqual(left, right) {
+  const leftBytes = new TextEncoder().encode(String(left));
+  const rightBytes = new TextEncoder().encode(String(right));
+  let difference = leftBytes.length ^ rightBytes.length;
+  const length = Math.max(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) difference |= (leftBytes[index] || 0) ^ (rightBytes[index] || 0);
+  return difference === 0;
 }
 
 async function postPriceSyncGate(request, env) {

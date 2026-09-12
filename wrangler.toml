@@ -25,6 +25,10 @@ class_name = "VisitorCounter"
 name = "PRICE_SYNC_GATE"
 class_name = "PriceSyncGate"
 
+[[durable_objects.bindings]]
+name = "ADMIN_AUTH"
+class_name = "AdminAuth"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["VisitorCounter"]
@@ -32,3 +36,7 @@ new_sqlite_classes = ["VisitorCounter"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["PriceSyncGate"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["AdminAuth"]
