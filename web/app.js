@@ -1749,9 +1749,10 @@
   }
 
   function dailyCycleCount(growthHours) {
-    if (state.config.cycleMode === 'full24') return 24 / growthHours;
-    if (growthHours <= 24) return Math.max(1, Math.ceil(state.config.activeHours / growthHours));
-    return 24 / growthHours;
+    const windowHours = state.config.cycleMode === 'full24'
+      ? 24
+      : Math.max(1, Number(state.config.activeHours) || DEFAULT_ACTIVE_HOURS);
+    return windowHours / growthHours;
   }
 
   function computeRows() {
@@ -3669,6 +3670,7 @@
       <section class="formula-bar">
         <span class="formula-title">公式</span>
         <span>全地指标：按左侧 Lv1～Lv7 地块数分别计算后求和；「单地指标等级」只切换表格中的单地指标</span>
+        <span>每天次数：${dailyCycleLabel()} ÷ 当前等级生长时间（保留小数，不向上取整）</span>
         <span>收益：Σ(地块数 × (毛产量 - 1) × 售价 × 每天次数（${dailyCycleLabel()}）)</span>
         <span>单块收获经验：单作物经验 × 当前等级毛产量</span>
         <span>每天经验：Σ(地块数 × 单作物经验 × 当前等级毛产量 × 每天次数（${dailyCycleLabel()}）)</span>
